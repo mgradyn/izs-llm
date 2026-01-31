@@ -1,6 +1,6 @@
 from pydantic import BaseModel, Field, field_validator, model_validator
 import re
-from typing import Any, Literal, List, Optional, Union
+from typing import Any, Dict, Literal, List, Optional, Union
 
 def repair_lazy_calls(statements: List[Any]) -> List[Any]:
     if not isinstance(statements, list):
