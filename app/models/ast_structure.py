@@ -644,6 +644,47 @@ class NextflowPipelineAST(BaseModel):
         return self
     
     @model_validator(mode='after')
+    def auto_fix_emits(self):
+        for stmt in self.body:
+            if isinstance(stmt, ProcessCall):
+                if stmt.output_attribute and not stmt.assign_to:
+                    internal = f"{stmt.process_name}.out.{stmt.output_attribute}"
+                    export = "out" if stmt.output_attribute == '*' else stmt.output_attribute
+                    
+                    if not any(e.export_name == export for e in self.emit_channels):
+                        self.emit_channels.append(EmitItem(export_name=export, internal_variable=internal))
+
+                    stmt.output_attribute = None
+        return self
+
+    @model_validator(mode='after')
+    def validate_and_prune_scope(self):
+        defined = set(self.take_channels)
+        
+        for stmt in self.body:
+            if isinstance(stmt, Assignment):
+                defined.add(stmt.variable)
+            elif isinstance(stmt, ProcessCall):
+                if stmt.assign_to: defined.add(stmt.assign_to)
+                defined.add(stmt.process_name) #
+            elif isinstance(stmt, ChannelChain) and stmt.set_variable:
+                defined.add(stmt.set_variable)
+
+        valid_emits = []
+        for emit in self.emit_channels:
+            target = emit.internal_variable or emit.export_name
+            root = target.split('.')[0]
+            
+            if root in defined:
+                valid_emits.append(emit)
+            else:
+                # print(f"WARNING: Dropping hallucinated emit '{emit.export_name}' in workflow '{self.name}'. Source '{root}' not found.")
+                pass
+        
+        self.emit_channels = valid_emits
+        return self
+
+    @model_validator(mode='after')
     def validate_full_scope(self):
         """Linear Scan of the Main Workflow to check variable usage."""
         scope = {g.name for g in self.globals}
