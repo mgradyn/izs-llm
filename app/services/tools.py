@@ -35,12 +35,10 @@ def _inject_template(template_id, found_ids, context_blocks, embed_code=True):
     if template_id not in TMPL_DB: return
 
     found_ids.add(template_id)
-    comp_data = TMPL_DB[template_id]
 
     block = ""
 
     if embed_code:
-        print("embed the code")
         code_snippet = CODE_DB.get(template_id, "// Code not found in repository")
         block += f"\n**SOURCE CODE ({template_id}.nf):**\n```groovy\n{code_snippet}\n```\n"
 
@@ -73,7 +71,7 @@ def retrieve_rag_context(user_query, embed_code=False):
             # Mark template as found
         
             context_blocks.append(f"### PIPELINE BLUEPRINT: {item_id}\n{doc.page_content}")
-            print("This should injec tthe template details into the context")
+            # print("This should injec tthe template details into the context")
             _inject_template(tmpl['id'], found_ids, context_blocks, embed_code=True)
 
             found_ids.add(item_id)
