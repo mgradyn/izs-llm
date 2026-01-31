@@ -541,11 +541,6 @@ class NextflowPipelineAST(BaseModel):
 
     @model_validator(mode='before')
     def deduplicate_logic(cls, values: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        1. Removes 'heavy logic' (cross/multiMap) from main_workflow.
-        2. Removes CALLS to sub_workflows from main_workflow.
-        3. REPAIRS SCOPE: Renames variables to match 'take_channels'.
-        """
         main_wf = values.get('main_workflow')
         sub_wfs = values.get('sub_workflows', [])
         
@@ -554,11 +549,11 @@ class NextflowPipelineAST(BaseModel):
         body = main_wf.get('body', [])
         if not isinstance(body, list): return values
         
-        # Get Valid Inputs (to map against)
+        # Get Valid Inputs
         inputs = main_wf.get('take_channels', [])
         if not isinstance(inputs, list): inputs = []
         
-        # Get Sub-workflow names (to prune calls)
+        # Get Sub-workflow names
         sub_wf_names = {s.get('name') for s in sub_wfs if isinstance(s, dict) and 'name' in s}
 
         clean_body = []
@@ -566,30 +561,27 @@ class NextflowPipelineAST(BaseModel):
         for stmt in body:
             if not isinstance(stmt, dict): continue
             
-            # --- HELPER: Detect Types Robustly (LLM might omit "type" key) ---
-            # THIS IS THE CRITICAL FIX YOU ARE MISSING
+            # --- HELPER: Detect Types ---
             is_chain = stmt.get('type') == 'channel_chain' or 'start_variable' in stmt
             is_call  = stmt.get('type') == 'process_call' or 'process_name' in stmt
 
-            # --- RULE A: Drop Logic Chains ---
-            # If it looks like a chain, it's hallucinated logic. Delete it.
+            # --- RULE A: Drop Logic Chains (Always Redundant in Main) ---
             if is_chain:
                 continue 
 
             # --- RULE B: Drop Recursive Sub-Workflow Calls ---
-            # If main tries to call 'prepare_inputs', delete it. Entrypoint handles that.
-            if is_call:
+            # CRITICAL FIX: Only drop calls if this workflow EXPECTS inputs (acts as a module).
+            # If inputs is empty, this workflow is acting as an Orchestrator, so calls are valid.
+            if is_call and inputs:
                 if stmt.get('process_name') in sub_wf_names:
                     continue
 
             # --- RULE C: Scope Repair & Input Mapping ---
-            # If a tool uses a variable we deleted (e.g. 'ch_prepared'), wire it to inputs.
             if is_call:
                 args = stmt.get('args', [])
                 new_args = []
                 
                 for i, arg in enumerate(args):
-                    # Get string representation for matching
                     arg_val = ""
                     if isinstance(arg, dict):
                         arg_val = arg.get('name') or arg.get('value') or ""
@@ -599,26 +591,25 @@ class NextflowPipelineAST(BaseModel):
                     # 1. Check if variable is ALREADY valid
                     clean_name = arg_val.split('.')[0]
                     if clean_name in inputs:
-                        new_args.append(arg) # It's fine, keep it
+                        new_args.append(arg)
                         continue
 
-                    # 2. Fuzzy Match (e.g. "ch_prepared.reads" -> "reads")
-                    match = next((inp for inp in inputs if inp in arg_val), None)
-                    
-                    # 3. Positional Fallback (Arg 0 -> Input 0)
-                    if not match and i < len(inputs):
-                        match = inputs[i]
+                    # 2. Fuzzy Match / Positional Fallback
+                    # Only map to inputs if inputs exist
+                    match = None
+                    if inputs:
+                        match = next((inp for inp in inputs if inp in arg_val), None)
+                        if not match and i < len(inputs):
+                            match = inputs[i]
                     
                     if match:
-                        # Fix: Force it to be a valid Variable object
                         new_args.append({"type": "variable", "name": match})
                     else:
-                        # Give up and keep original (prevents breaking constants)
                         new_args.append(arg)
                         
                 stmt['args'] = new_args
                 
-                # Ensure 'type' key exists for downstream validators
+                # Ensure type key exists
                 if 'type' not in stmt: stmt['type'] = 'process_call'
                 
             clean_body.append(stmt)
