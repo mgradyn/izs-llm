@@ -628,6 +628,22 @@ class NextflowPipelineAST(BaseModel):
         return self
     
     @model_validator(mode='after')
+    def ensure_entrypoint_connectivity(self):
+        if not self.entrypoint.body:
+
+            if not self.main_workflow.take_channels:
+                
+                call = ProcessCall(
+                    type="process_call",
+                    process_name=self.main_workflow.name,
+                    args=[],
+                    assign_to=None
+                )
+                self.entrypoint.body.append(call)
+        
+        return self
+    
+    @model_validator(mode='after')
     def validate_full_scope(self):
         """Linear Scan of the Main Workflow to check variable usage."""
         scope = {g.name for g in self.globals}
