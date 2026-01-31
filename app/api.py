@@ -14,6 +14,7 @@ class PipelineQuery(BaseModel):
 class PipelineResponse(BaseModel):
     status: str
     plan: Optional[Dict[str, Any]] = None
+    ast_json: Optional[Dict[str, Any]] = None
     nextflow_code: Optional[str] = None
     mermaid_code: Optional[str] = None
     error: Optional[str] = None
