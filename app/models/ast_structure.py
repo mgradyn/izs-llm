@@ -3,41 +3,45 @@ import re
 from typing import Any, Dict, Literal, List, Optional, Union
 
 def repair_lazy_calls(statements: List[Any]) -> List[Any]:
-    if not isinstance(statements, list):
-        return statements
+    """
+    Recursively scans for assignments that look like process calls 
+    and converts them to ProcessCall nodes. Handles nested conditionals.
+    """
+    if not isinstance(statements, list): return statements
 
     cleaned = []
     for stmt in statements:
-        # Check if it's a lazy assignment: {type: assignment, value: "func(...)"}
-        if isinstance(stmt, dict) and stmt.get('type') == 'assignment':
-            val = stmt.get('value', '').strip()
-            var = stmt.get('variable')
-            
-            # Regex to detect "funcName( args )" or "funcName(args).out.attr"
-            match = re.match(r'^([a-zA-Z0-9_]+)\s*\((.*)\)(\.[a-zA-Z0-9_]+)?$', val)
-            
-            # If it matches syntax AND looks like a tool (step_, prepare_, module_)
-            if match and ("step_" in val or "prepare_" in val or "module_" in val):
-                proc_name = match.group(1)
-                raw_args = match.group(2)
-                suffix = match.group(3) # e.g. .out.bam
-                
-                # Simple arg splitter (handles basic commas)
-                args_list = [a.strip() for a in raw_args.split(',')] if raw_args.strip() else []
-                
-                # REWRITE AS PROCESS CALL
-                new_stmt = {
-                    "type": "process_call",
-                    "process_name": proc_name,
-                    "args": args_list, # ArgumentParser will handle typing later
-                    "assign_to": var,
-                    "output_attribute": suffix[1:] if suffix else None
-                }
-                cleaned.append(new_stmt)
-            else:
+        if isinstance(stmt, dict):
+            if stmt.get('type') == 'conditional':
+                stmt['body'] = repair_lazy_calls(stmt.get('body', []))
                 cleaned.append(stmt)
-        else:
-            cleaned.append(stmt)
+                continue
+
+            if stmt.get('type') == 'assignment':
+                val = stmt.get('value', '').strip()
+                var = stmt.get('variable')
+                
+                match = re.match(r'^([a-zA-Z0-9_]+)\s*\((.*)\)(\.[a-zA-Z0-9_]+)?$', val)
+                
+                # Check known tool prefixes
+                if match and any(x in val for x in ["step_", "prepare_", "module_", "get"]):
+                    proc_name = match.group(1)
+                    raw_args = match.group(2)
+                    suffix = match.group(3)
+                    
+                    args_list = [a.strip() for a in raw_args.split(',')] if raw_args.strip() else []
+                    
+                    new_stmt = {
+                        "type": "process_call",
+                        "process_name": proc_name,
+                        "args": args_list, # Pydantic will parse these strings into Objects later
+                        "assign_to": var,
+                        "output_attribute": suffix[1:] if suffix else None
+                    }
+                    cleaned.append(new_stmt)
+                    continue # Skip appending the original stmt
+        
+        cleaned.append(stmt)
     
     return cleaned
 
@@ -541,82 +545,66 @@ class NextflowPipelineAST(BaseModel):
 
     @model_validator(mode='before')
     def deduplicate_logic(cls, values: Dict[str, Any]) -> Dict[str, Any]:
+
         main_wf = values.get('main_workflow')
         sub_wfs = values.get('sub_workflows', [])
         
-        # Basic Type Safety
         if not sub_wfs or not isinstance(main_wf, dict): return values
-        body = main_wf.get('body', [])
-        if not isinstance(body, list): return values
         
-        # Get Valid Inputs
         inputs = main_wf.get('take_channels', [])
         if not isinstance(inputs, list): inputs = []
-        
-        # Get Sub-workflow names
         sub_wf_names = {s.get('name') for s in sub_wfs if isinstance(s, dict) and 'name' in s}
 
-        clean_body = []
-        
-        for stmt in body:
-            if not isinstance(stmt, dict): continue
+        def clean_block(statements):
+            if not isinstance(statements, list): return statements
+            cleaned = []
             
-            # --- HELPER: Detect Types ---
-            is_chain = stmt.get('type') == 'channel_chain' or 'start_variable' in stmt
-            is_call  = stmt.get('type') == 'process_call' or 'process_name' in stmt
-
-            # --- RULE A: Drop Logic Chains (Always Redundant in Main) ---
-            if is_chain:
-                continue 
-
-            # --- RULE B: Drop Recursive Sub-Workflow Calls ---
-            # CRITICAL FIX: Only drop calls if this workflow EXPECTS inputs (acts as a module).
-            # If inputs is empty, this workflow is acting as an Orchestrator, so calls are valid.
-            if is_call and inputs:
-                if stmt.get('process_name') in sub_wf_names:
+            for stmt in statements:
+                if not isinstance(stmt, dict): continue
+                
+                if stmt.get('type') == 'conditional':
+                    stmt['body'] = clean_block(stmt.get('body', []))
+                    if stmt['body']: 
+                        cleaned.append(stmt)
                     continue
 
-            # --- RULE C: Scope Repair & Input Mapping ---
-            if is_call:
-                args = stmt.get('args', [])
-                new_args = []
-                
-                for i, arg in enumerate(args):
-                    arg_val = ""
-                    if isinstance(arg, dict):
-                        arg_val = arg.get('name') or arg.get('value') or ""
-                    else:
-                        arg_val = str(arg)
-                    
-                    # 1. Check if variable is ALREADY valid
-                    clean_name = arg_val.split('.')[0]
-                    if clean_name in inputs:
-                        new_args.append(arg)
+                is_chain = stmt.get('type') == 'channel_chain' or 'start_variable' in stmt
+                is_call  = stmt.get('type') == 'process_call' or 'process_name' in stmt
+
+                if is_chain: 
+                    continue 
+
+                if is_call and inputs:
+                    if stmt.get('process_name') in sub_wf_names: 
                         continue
 
-                    # 2. Fuzzy Match / Positional Fallback
-                    # Only map to inputs if inputs exist
-                    match = None
-                    if inputs:
-                        match = next((inp for inp in inputs if inp in arg_val), None)
-                        if not match and i < len(inputs):
-                            match = inputs[i]
-                    
-                    if match:
-                        new_args.append({"type": "variable", "name": match})
-                    else:
-                        new_args.append(arg)
+                if is_call:
+                    args = stmt.get('args', [])
+                    new_args = []
+                    for i, arg in enumerate(args):
+                        arg_val = str(arg.get('name') or arg.get('value') or "") if isinstance(arg, dict) else str(arg)
                         
-                stmt['args'] = new_args
-                
-                # Ensure type key exists
-                if 'type' not in stmt: stmt['type'] = 'process_call'
-                
-            clean_body.append(stmt)
-        
-        main_wf['body'] = clean_body
+                        clean_name = arg_val.split('.')[0]
+                        if clean_name in inputs:
+                            new_args.append(arg)
+                            continue
+
+                        match = next((inp for inp in inputs if inp in arg_val), None)
+                        if not match and i < len(inputs): match = inputs[i]
+                        
+                        if match:
+                            new_args.append({"type": "variable", "name": match})
+                        else:
+                            new_args.append(arg)
+                            
+                    stmt['args'] = new_args
+                    if 'type' not in stmt: stmt['type'] = 'process_call'
+                    
+                cleaned.append(stmt)
+            return cleaned
+
+        main_wf['body'] = clean_block(main_wf.get('body', []))
         values['main_workflow'] = main_wf
-        
         return values
 
     @model_validator(mode='after')
