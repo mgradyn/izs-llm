@@ -48,7 +48,6 @@ def render_mermaid(ast: Union[Any, Dict[str, Any]]) -> str:
     def resolve_variable_link(text_fragment, target_node_id, variable_registry, lines, seen_edges, style="-->"):
         if not isinstance(text_fragment, str): return 
 
-        # Strategy A: Exact or Dot-Notation Match
         root_candidate = text_fragment.split('.')[0] if "." in text_fragment else text_fragment
         is_func_call = "(" in text_fragment and ")" in text_fragment
 
@@ -64,7 +63,6 @@ def render_mermaid(ast: Union[Any, Dict[str, Any]]) -> str:
                 seen_edges.add(edge_key)
             return
 
-        # Strategy B: Deep Scan for Embedded Variables
         potential_vars = re.findall(r'\b([a-zA-Z_][\w\.]*)\b', text_fragment)
         ignore_keywords = {
             'mix', 'join', 'groupTuple', 'collect', 'map', 'flatten', 'cross', 'multiMap',
@@ -109,6 +107,7 @@ def render_mermaid(ast: Union[Any, Dict[str, Any]]) -> str:
     if not mw: return "flowchart TD\n    Empty[Empty Pipeline]"
 
     sub_workflows = get_val(ast, 'sub_workflows', [])
+    # Register sub-workflow 
     sub_workflow_names = {get_val(s, 'name') for s in sub_workflows}
 
     # --- 3. REGISTER GLOBALS ---
@@ -130,20 +129,18 @@ def render_mermaid(ast: Union[Any, Dict[str, Any]]) -> str:
         for stmt in statements:
             stype = get_val(stmt, 'type')
 
-            # ==============================
-            # CASE A: PROCESS or SUB-WORKFLOW CALL
-            # ==============================
+            # CASE A: PROCESS CALL
             if stype == 'process_call':
                 proc_name = get_val(stmt, 'process_name')
                 assign_to = get_val(stmt, 'assign_to')
-                proc_node_id = make_id(proc_name)
+                # Use simple ID to ensure matching across subgraphs
+                proc_node_id = make_id(f"{subgraph_prefix}_{proc_name}" if subgraph_prefix else proc_name)
                 
                 if proc_name in sub_workflow_names:
                     lines.append(f'    {proc_node_id}[[{proc_name}]]:::subworkflow')
                 else:
                     lines.append(f'    {proc_node_id}[{proc_name}]:::process')
                 
-                # Unpack Typed Arguments
                 args = get_val(stmt, 'args', [])
                 for arg in args:
                     atype = get_val(arg, 'type')
@@ -156,20 +153,19 @@ def render_mermaid(ast: Union[Any, Dict[str, Any]]) -> str:
                             lines.append(f'    {const_id}({val}):::global')
                             lines.append(f'    {const_id} -.-> {proc_node_id}')
                             seen_edges.add(const_id)
-                    elif isinstance(arg, str): # Fallback
+                    elif isinstance(arg, str): 
                         resolve_variable_link(arg, proc_node_id, variable_registry, lines, seen_edges)
 
                 if assign_to:
-                    var_node_id = f"Var_{make_id(assign_to)}"
+                    var_node_id = f"Var_{make_id(assign_to)}_{proc_node_id}" # Unique output per call instance
                     lines.append(f'    {var_node_id}(({assign_to})):::data')
                     lines.append(f'    {proc_node_id} --> {var_node_id}')
                     variable_registry[assign_to] = var_node_id
                 
+                # If no assignment, register the process itself as a source
                 variable_registry[proc_name] = proc_node_id
 
-            # ==============================
             # CASE B: CHANNEL CHAIN
-            # ==============================
             elif stype == 'channel_chain':
                 start_var = get_val(stmt, 'start_variable')
                 set_var = get_val(stmt, 'set_variable')
@@ -193,14 +189,12 @@ def render_mermaid(ast: Union[Any, Dict[str, Any]]) -> str:
                         resolve_variable_link(" ".join(closure_lines), op_node_id, variable_registry, lines, seen_edges, style="-.->")
 
                 if set_var:
-                    var_node_id = f"Var_{make_id(set_var)}"
+                    var_node_id = f"Var_{make_id(set_var)}_{op_node_id}"
                     lines.append(f'    {var_node_id}(({set_var})):::data')
                     lines.append(f'    {op_node_id} --> {var_node_id}')
                     variable_registry[set_var] = var_node_id
 
-            # ==============================
             # CASE C: CONDITIONAL
-            # ==============================
             elif stype == 'conditional':
                 cond_str = clean_label(get_val(stmt, 'condition'))
                 sub_id = f"sub_{hashlib.md5(cond_str.encode()).hexdigest()[:4]}"
@@ -210,44 +204,55 @@ def render_mermaid(ast: Union[Any, Dict[str, Any]]) -> str:
                 lines.append("    end")
                 lines.append(f'    style {sub_id} fill:#ffebee,stroke:#c62828,stroke-dasharray: 5 5')
 
-            # ==============================
             # CASE D: ASSIGNMENT
-            # ==============================
             elif stype == 'assignment':
                 var_name = get_val(stmt, 'variable')
                 value = str(get_val(stmt, 'value'))
-                
-                # Create a node for the assignment action
                 assign_id = make_id(f"assign_{var_name}")
                 
-                # Visual style: Function call vs Literal
                 if "(" in value and ")" in value:
                     lines.append(f'    {assign_id}[[{value}]]:::process')
                 else:
                     lines.append(f'    {assign_id}[{value}]:::operator')
                 
-                # Register the output variable node
                 if var_name:
                     var_node_id = f"Var_{make_id(var_name)}"
                     lines.append(f'    {var_node_id}(({var_name})):::data')
                     lines.append(f'    {assign_id} --> {var_node_id}')
                     variable_registry[var_name] = var_node_id
                 
-                # Try to link inputs found in the value string
                 resolve_variable_link(value, assign_id, variable_registry, lines, seen_edges)
 
+    # --- 6. RENDER SUB-WORKFLOWS
+    for sub in sub_workflows:
+        sub_name = get_val(sub, 'name')
+        lines.append(f'    subgraph {make_id(sub_name)}_scope ["Workflow: {sub_name}"]')
+        lines.append('    direction TB')
+        
+        # Register inputs for this sub-scope
+        sub_inputs = get_val(sub, 'take_channels', [])
+        for inp in sub_inputs:
+            inp_id = f"Var_{make_id(inp)}_{make_id(sub_name)}"
+            lines.append(f'    {inp_id}([{inp}]):::data')
+            variable_registry[inp] = inp_id
+            
+        process_statements(get_val(sub, 'body', []), subgraph_prefix=sub_name)
+        lines.append('    end')
+
+    # --- 7. RENDER MAIN WORKFLOW ---
+    lines.append('    subgraph main_scope ["Main Workflow"]')
+    lines.append('    direction TB')
     process_statements(get_val(mw, 'body', []))
+    lines.append('    end')
     
-    # --- 6. RENDER FINAL EMITS ---
-    emits = get_val(mw, 'emit_channels', [])
-    if emits:
-        lines.append("    %% --- Outputs ---")
-        for em in emits:
-            export_name = get_val(em, 'export_name')
-            internal_var = get_val(em, 'internal_variable') or export_name
-            final_id = f"Out_{make_id(export_name)}"
-            lines.append(f'    {final_id}([{export_name}]):::data')
-            resolve_variable_link(internal_var, final_id, variable_registry, lines, seen_edges)
+    # --- 8. RENDER ENTRYPOINT (OPTIONAL) ---
+    ep = get_val(ast, 'entrypoint')
+    if ep:
+        ep_body = get_val(ep, 'body', [])
+        if ep_body:
+            lines.append('    subgraph entrypoint_scope ["Entrypoint"]')
+            process_statements(ep_body)
+            lines.append('    end')
 
     return "\n".join(lines)
 
