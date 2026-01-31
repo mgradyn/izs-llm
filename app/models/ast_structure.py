@@ -684,50 +684,6 @@ class NextflowPipelineAST(BaseModel):
         self.emit_channels = valid_emits
         return self
 
-    @model_validator(mode='after')
-    def validate_full_scope(self):
-        """Linear Scan of the Main Workflow to check variable usage."""
-        scope = {g.name for g in self.globals}
-        scope.update({"params", "workflow", "Channel"})
-        
-        # Add Imports
-        for imp in self.imports:
-            for f in imp.functions:
-                name = f.split(' as ')[-1].strip()
-                scope.add(name)
-
-        # Add Sub-workflows to scope (so they can be called)
-        for sub in self.sub_workflows:
-            scope.add(sub.name)
-
-        # Add Main Inputs
-        scope.update(self.main_workflow.take_channels)
-
-        # Scan Body
-        for i, stmt in enumerate(self.main_workflow.body):
-            if isinstance(stmt, ProcessCall):
-
-                for arg in stmt.args:
-
-                    if arg.type == 'variable':
-                        root = arg.name.split('.')[0].split('(')[0]
-                        
-                        if root and root[0].isalpha() and root not in scope:
-                             raise ValueError(f"SCOPE ERROR: Step {i} uses undefined variable '{root}'.")
-                if stmt.assign_to: scope.add(stmt.assign_to)
-                scope.add(stmt.process_name)
-
-            elif isinstance(stmt, ChannelChain):
-                start = stmt.start_variable.split('.')[0].split('(')[0]
-                if not start.startswith("Channel") and start not in scope:
-                     raise ValueError(f"SCOPE ERROR: Chain starts with undefined variable '{start}'.")
-                if stmt.set_variable: scope.add(stmt.set_variable)
-
-            elif isinstance(stmt, Assignment):
-                scope.add(stmt.variable)
-
-        return self
-
 # --- REBUILD MODELS FOR RECURSION ---
 ConditionalBlock.model_rebuild()
 NextflowProcess.model_rebuild()
