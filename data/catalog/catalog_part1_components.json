@@ -1,0 +1,1097 @@
+{
+  "metadata": {
+    "version": "0.2"
+  },
+  "components": [
+    {
+      "id": "step_0SQ_rawreads__fastq",
+      "domain": "Quality Control",
+      "tool": "FastQC / Nanoplot",
+      "description": "Unified QC step that routes data based on sequencing type: Illumina/Ion reads are processed with FastQC, while Nanopore reads are processed with NanoPlot and a custom reads check.",
+      "container": "biocontainers/fastqc:v0.11.5_cv4",
+      "secondary_containers": [
+        {
+          "purpose": "nanopore_qc",
+          "url": "quay.io/biocontainers/nanoplot:1.41.3--pyhdfd78af_0"
+        },
+        {
+          "purpose": "nanopore_check",
+          "url": "quay.io/biocontainers/biopython:1.78"
+        }
+      ],
+      "input_types": ["fastq_raw_short", "fastq_raw_long"],
+      "output_types": ["qc_report_html", "qc_report_zip", "nanoplot_stats", "nanoplot_log"],
+      "compatible_seq_types": ["illumina_paired", "ion", "nanopore"],
+      "helper_scripts": ["scripts/step_0SQ_rawreads__fastq/SampleReadsCheck_nanopore.py"]
+    },
+    {
+      "id": "step_1PP_trimming__fastp",
+      "domain": "Preprocessing",
+      "tool": "fastp (Workflow)",
+      "description": "Comprehensive preprocessing workflow that performs: 1) Quality trimming with fastp, 2) Post-trimming QC with FastQC, and 3) Consistency checks using custom Python scripts.",
+      "container": "ghcr.io/genpat-it/fastp:0.23.1--e4ac3df4c5",
+      "secondary_containers": [
+        {
+          "purpose": "post_trim_qc",
+          "url": "biocontainers/fastqc:v0.11.5_cv4"
+        },
+        {
+          "purpose": "reads_check_script",
+          "url": "quay.io/biocontainers/biopython:1.78"
+        }
+      ],
+      "input_types": ["fastq_raw_short"],
+      "output_types": [
+        "fastq_trimmed", 
+        "fastp_report_json", 
+        "fastp_report_html", 
+        "fastqc_report_zip", 
+        "reads_check_csv"
+      ],
+      "compatible_seq_types": ["illumina_paired", "ion"],
+      "helper_scripts": [
+        "scripts/step_1PP_trimming__fastp/SampleReadsCheck.py",
+        "scripts/step_1PP_trimming__fastp/SampleReadsCheck_ionTorrent.py"
+      ]
+    },
+    {
+      "id": "step_1PP_trimming__trimmomatic",
+      "domain": "Preprocessing",
+      "tool": "Trimmomatic (Workflow)",
+      "description": "Legacy trimming workflow optimized for Illumina and Ion Torrent data. Performs: 1) Trimming with Trimmomatic, 2) Post-trim QC with FastQC, 3) Reads consistency check.",
+      "container": "quay.io/biocontainers/trimmomatic:0.36--6",
+      "secondary_containers": [
+        {
+          "purpose": "post_trim_qc",
+          "url": "biocontainers/fastqc:v0.11.5_cv4"
+        },
+        {
+          "purpose": "reads_check",
+          "url": "quay.io/biocontainers/biopython:1.78"
+        }
+      ],
+      "input_types": ["fastq_raw_short"],
+      "output_types": [
+        "fastq_trimmed", 
+        "trimmomatic_log", 
+        "fastqc_report_zip", 
+        "reads_check_csv"
+      ],
+      "compatible_seq_types": ["illumina_paired", "ion"],
+      "helper_scripts": [
+        "scripts/step_1PP_trimming__trimmomatic/SampleReadsCheck.py",
+        "scripts/step_1PP_trimming__trimmomatic/SampleReadsCheck_ionTorrent.py"
+      ]
+    },
+    {
+      "id": "step_1PP_trimming__chopper",
+      "domain": "Preprocessing",
+      "tool": "chopper (Workflow)",
+      "description": "Long-read preprocessing workflow. Performs: 1) Filtering/Trimming with Chopper (Rust implementation of NanoFilt), 2) Post-trimming QC with NanoPlot.",
+      "container": "quay.io/biocontainers/chopper:0.7.0--hdcf5f25_0",
+      "secondary_containers": [
+        {
+          "purpose": "post_trim_qc",
+          "url": "quay.io/biocontainers/nanoplot:1.41.3--pyhdfd78af_0"
+        }
+      ],
+      "input_types": ["fastq_raw_long"],
+      "output_types": [
+        "fastq_trimmed", 
+        "nanoplot_report_html", 
+        "nanoplot_stats_txt"
+      ],
+      "params": [
+        "--quality", 
+        "--minlength", 
+        "--maxlength", 
+        "--headcrop", 
+        "--tailcrop"
+      ],
+      "compatible_seq_types": ["nanopore"]
+    },
+    {
+      "id": "step_1PP_hostdepl__bowtie",
+      "domain": "Preprocessing",
+      "tool": "Bowtie2 + Samtools (Workflow)",
+      "description": "Host depletion workflow. 1) Maps reads against a host reference using Bowtie2. 2) Uses Samtools to filter and retain ONLY the unmapped (non-host) reads, converting them back to FastQ format.",
+      "container": "ghcr.io/genpat-it/bowtie2:2.1.0--37ad014737",
+      "secondary_containers": [
+        {
+          "purpose": "filtering_and_fastq_conversion",
+          "url": "quay.io/biocontainers/samtools:0.1.19--hf89b575_7"
+        }
+      ],
+      "input_types": ["fastq_trimmed", "fastq_downsampled"],
+      "output_types": [
+        "fastq_host_depleted", 
+        "bowtie2_log", 
+        "samtools_log"
+      ],
+      "params": ["--host_reference", "--hosts_dir"],
+      "compatible_seq_types": ["illumina_paired", "ion"]
+    },
+    {
+      "id": "step_1PP_hostdepl__minimap2",
+      "domain": "Preprocessing",
+      "tool": "Minimap2 + Samtools (Workflow)",
+      "description": "Host depletion workflow specifically for Nanopore long reads. 1) Maps reads against a host reference using Minimap2 (preset: map-ont). 2) Uses Samtools to filter and retain ONLY the unmapped reads, converting them back to FastQ.",
+      "container": "quay.io/biocontainers/minimap2:2.26--he4a0461_1",
+      "secondary_containers": [
+        {
+          "purpose": "filtering_and_fastq_conversion",
+          "url": "quay.io/biocontainers/samtools:1.10--h9402c20_1"
+        }
+      ],
+      "input_types": ["fastq_trimmed", "fastq_downsampled"],
+      "output_types": [
+        "fastq_host_depleted", 
+        "minimap2_log", 
+        "samtools_log"
+      ],
+      "params": ["--host_reference"],
+      "compatible_seq_types": ["nanopore"]
+    },
+    {
+      "id": "step_1PP_filtering__bowtie",
+      "domain": "Preprocessing",
+      "tool": "Bowtie2 + Samtools (Workflow)",
+      "description": "Positive Selection workflow. 1) Maps reads against a specific reference genome using Bowtie2. 2) Uses Samtools to RETAIN only the reads that mapped successfully (discarding unmapped reads), converting them back to FastQ format.",
+      "container": "ghcr.io/genpat-it/bowtie2:2.1.0--37ad014737",
+      "secondary_containers": [
+        {
+          "purpose": "filtering_and_fastq_conversion",
+          "url": "quay.io/biocontainers/samtools:0.1.19--hf89b575_7"
+        }
+      ],
+      "input_types": ["fastq_trimmed", "reference_genome_fasta"],
+      "output_types": [
+        "fastq_filtered", 
+        "bowtie2_log", 
+        "samtools_log",
+        "bam_sorted"
+      ],
+      "params": ["--reference_path"],
+      "compatible_seq_types": ["illumina_paired", "ion"]
+    },
+    {
+      "id": "step_1PP_filtering__krakentools",
+      "domain": "Preprocessing",
+      "tool": "KrakenTools",
+      "description": "Taxonomic filtering utility. Uses the output from a PREVIOUS Kraken classification (Report + Output) to filter the original trimmed reads, retaining only those belonging to a specific NCBI Taxonomy ID (and optionally its parents/children).",
+      "container": "quay.io/biocontainers/krakentools:1.2--pyh5e36f6f_0",
+      "input_types": [
+        "fastq_trimmed", 
+        "kraken_report", 
+        "kraken_output"
+      ],
+      "output_types": [
+        "fastq_filtered", 
+        "krakentools_log"
+      ],
+      "params": [
+        "--taxaid", 
+        "--include-parents", 
+        "--include-children"
+      ],
+      "compatible_seq_types": ["illumina_paired"]
+    },
+    {
+      "id": "step_1PP_filtering__minimap2",
+      "domain": "Preprocessing",
+      "tool": "Minimap2 + Samtools (Workflow)",
+      "description": "Positive Selection workflow for Nanopore long reads. 1) Maps reads against a specific reference genome using Minimap2 (preset: map-ont). 2) Uses Samtools to RETAIN only the reads that mapped successfully, converting them back to FastQ format.",
+      "container": "quay.io/biocontainers/minimap2:2.26--he4a0461_1",
+      "secondary_containers": [
+        {
+          "purpose": "filtering_and_fastq_conversion",
+          "url": "quay.io/biocontainers/samtools:1.10--h9402c20_1"
+        }
+      ],
+      "input_types": ["fastq_trimmed", "reference_genome_fasta"],
+      "output_types": [
+        "fastq_filtered", 
+        "minimap2_log", 
+        "samtools_log",
+        "bam_sorted"
+      ],
+      "params": ["--reference_path"],
+      "compatible_seq_types": ["nanopore"]
+    },
+    {
+      "id": "step_1PP_downsampling__bbnorm",
+      "domain": "Preprocessing",
+      "tool": "BBNorm",
+      "description": "Normalizes read depth (coverage) to reduce computational load. Specifically configured for paired-end Illumina data using k-mer based normalization.",
+      "container": "quay.io/biocontainers/bbmap:39.01--h5c4e2a8_0",
+      "input_types": ["fastq_trimmed", "fastq_host_depleted"],
+      "output_types": [
+        "fastq_downsampled", 
+        "bbnorm_hist", 
+        "bbnorm_log"
+      ],
+      "params": ["--k", "--target"],
+      "compatible_seq_types": ["illumina_paired"],
+      "notes": "Script explicitly handles Java heap memory calculation (-Xmx) based on 85% of available container memory."
+    },
+    {
+      "id": "step_1PP_generated__fasta2fastq",
+      "domain": "Preprocessing",
+      "tool": "BioPython (Custom Script)",
+      "description": "Synthetic FastQ generation from Fasta files. Uses a custom Python script to create artificial quality scores and generate paired-end reads from an assembly or consensus sequence.",
+      "container": "quay.io/biocontainers/biopython:1.78",
+      "input_types": ["fasta_assembly", "fasta_consensus"],
+      "output_types": ["fastq_synthetic"],
+      "compatible_seq_types": ["synthetic", "assembly_derived"],
+      "helper_scripts": ["scripts/step_1PP_generated__fasta2fastq/fasta2fastq.py"]
+    },
+    {
+      "id": "step_2AS_denovo__spades",
+      "domain": "Assembly",
+      "tool": "SPAdes (Workflow)",
+      "description": "Accurate de novo assembly workflow. Performs: 1) Assembly with SPAdes (optimized for Illumina or Ion Torrent), 2) Post-assembly filtering (removing scaffolds < 200bp), and 3) Quality assessment with QUAST.",
+      "container": "quay.io/biocontainers/spades:3.11.1--py27_zlib1.2.8_0",
+      "secondary_containers": [
+        {
+          "purpose": "assembly_filter",
+          "url": "ghcr.io/genpat-it/python3:3.10.1--29cf21c1f1"
+        },
+        {
+          "purpose": "quality_control",
+          "url": "quay.io/biocontainers/quast:4.4--boost1.61_1"
+        }
+      ],
+      "input_types": ["fastq_trimmed", "fastq_filtered", "fastq_host_depleted"],
+      "output_types": [
+        "assembly_scaffolds_filtered", 
+        "spades_log", 
+        "quast_report_csv"
+      ],
+      "compatible_seq_types": ["illumina_paired", "ion"],
+      "helper_scripts": ["scripts/step_2AS_denovo__spades/AssemblyFilter.py"]
+    },
+    {
+      "id": "step_2AS_denovo__shovill",
+      "domain": "Assembly",
+      "tool": "Shovill (Workflow)",
+      "description": "Fast assembly pipeline wrapping SPAdes/Velvet. optimized for bacterial isolates. Includes distinct paths for Illumina Paired-End (Shovill) and Ion Torrent (Shovill-SE), followed by QC with QUAST and optional CheckM.",
+      "container": "ghcr.io/genpat-it/shovill:1.1.0--d84470570e",
+      "secondary_containers": [
+        {
+          "purpose": "ion_torrent_assembly",
+          "url": "ghcr.io/genpat-it/shovill-se:1.1.1--ba51ea69e5"
+        },
+        {
+          "purpose": "quality_control_quast",
+          "url": "quay.io/biocontainers/quast:4.4--boost1.61_1"
+        },
+        {
+          "purpose": "quality_control_checkm",
+          "url": "quay.io/biocontainers/checkm-genome:1.1.3--py_1"
+        }
+      ],
+      "input_types": ["fastq_trimmed", "fastq_filtered"],
+      "output_types": [
+        "assembly_fasta", 
+        "quast_report_csv", 
+        "checkm_results_tab"
+      ],
+      "compatible_seq_types": ["illumina_paired", "ion"],
+      "params": ["--skip_checkm"]
+    },
+    {
+      "id": "step_2AS_denovo__unicycler",
+      "domain": "Assembly",
+      "tool": "Unicycler",
+      "description": "Hybrid assembly pipeline optimizer.",
+      "container": "ghcr.io/genpat-it/unicycler:0.4.8",
+      "input_types": ["fastq_trimmed"],
+      "output_types": ["assembly_scaffolds", "assembly_gfa"],
+      "compatible_seq_types": ["illumina"]
+    },
+    {
+      "id": "step_2AS_denovo__unicycler",
+      "domain": "Assembly",
+      "tool": "Unicycler (Workflow)",
+      "description": "Short-read assembly optimizer workflow for bacterial genomes. Performs: 1) Assembly using Unicycler (SPAdes optimizer), 2) Post-assembly filtering (<200bp), and 3) Quality control with QUAST.",
+      "container": "docker.io/biocontainers/unicycler:v0.4.7dfsg-2-deb_cv1",
+      "secondary_containers": [
+        {
+          "purpose": "assembly_filter",
+          "url": "ghcr.io/genpat-it/python3:3.10.1--29cf21c1f1"
+        },
+        {
+          "purpose": "quality_control",
+          "url": "quay.io/biocontainers/quast:4.4--boost1.61_1"
+        }
+      ],
+      "input_types": ["fastq_trimmed"],
+      "output_types": [
+        "assembly_scaffolds_filtered", 
+        "assembly_gfa", 
+        "unicycler_log", 
+        "quast_report_csv"
+      ],
+      "compatible_seq_types": ["illumina_paired"],
+      "helper_scripts": ["scripts/step_2AS_denovo__unicycler/AssemblyFilter.py"]
+    },
+    {
+      "id": "step_2AS_denovo__plasmidspades",
+      "domain": "Assembly",
+      "tool": "plasmidSPAdes (Workflow)",
+      "description": "Specialized pipeline for extracting and assembling plasmids. Performs: 1) Plasmid-specific assembly with SPAdes (Illumina or Ion Torrent), 2) Specialized filtering using AssemblyFilterPlasmids.py, and 3) Quality control with QUAST.",
+      "container": "quay.io/biocontainers/spades:3.11.1--py27_zlib1.2.8_0",
+      "secondary_containers": [
+        {
+          "purpose": "assembly_filter",
+          "url": "ghcr.io/genpat-it/python3:3.10.1--29cf21c1f1"
+        },
+        {
+          "purpose": "quality_control",
+          "url": "quay.io/biocontainers/quast:4.4--boost1.61_1"
+        }
+      ],
+      "input_types": ["fastq_trimmed"],
+      "output_types": [
+        "assembly_plasmids_filtered", 
+        "spades_log", 
+        "quast_report_csv"
+      ],
+      "compatible_seq_types": ["illumina_paired", "ion"],
+      "helper_scripts": ["scripts/step_2AS_denovo__plasmidspades/AssemblyFilterPlasmids.py"]
+    },
+    {
+      "id": "step_2AS_hybrid__unicycler",
+      "domain": "Assembly",
+      "tool": "Unicycler (Hybrid Workflow)",
+      "description": "Hybrid assembly workflow combining Short Reads (Illumina) for accuracy and Long Reads (Nanopore) for continuity. Performs: 1) Hybrid assembly with Unicycler, 2) Quality control with QUAST.",
+      "container": "quay.io/biocontainers/unicycler:0.5.0--py38h5cf8b27_3",
+      "secondary_containers": [
+        {
+          "purpose": "quality_control",
+          "url": "quay.io/biocontainers/quast:4.4--boost1.61_1"
+        }
+      ],
+      "input_types": ["fastq_short_reads", "fastq_long_reads"],
+      "output_types": [
+        "assembly_scaffolds", 
+        "assembly_gfa", 
+        "quast_report_csv"
+      ],
+      "params": ["--mode"],
+      "compatible_seq_types": ["hybrid"]
+    },
+    {
+      "id": "step_2AS_mapping__bowtie",
+      "domain": "Assembly/Mapping",
+      "tool": "Bowtie2 (Workflow)",
+      "description": "Reference-based consensus calling workflow. Performs: 1) Alignment with Bowtie2, 2) Consensus generation using Samtools (legacy) and BioPython, 3) Comprehensive coverage analysis (depth, min/max stats), and 4) Visualization with Matplotlib.",
+      "container": "ghcr.io/genpat-it/bowtie2:2.1.0--37ad014737",
+      "secondary_containers": [
+        {
+          "purpose": "consensus_calling_legacy",
+          "url": "ghcr.io/genpat-it/samtools:0.1.19--f3869562fe"
+        },
+        {
+          "purpose": "coverage_depth_calc",
+          "url": "quay.io/biocontainers/samtools:1.10--h9402c20_1"
+        },
+        {
+          "purpose": "python_scripts_biopython",
+          "url": "ghcr.io/genpat-it/python3:3.10.1--29cf21c1f1"
+        },
+        {
+          "purpose": "plotting",
+          "url": "quay.io/biocontainers/matplotlib:3.1.2"
+        },
+        {
+          "purpose": "csv_processing",
+          "url": "ubuntu:20.04"
+        }
+      ],
+      "input_types": ["fastq_trimmed", "reference_genome_fasta"],
+      "output_types": [
+        "consensus_fasta", 
+        "alignment_bam", 
+        "coverage_plot_png", 
+        "coverage_stats_csv"
+      ],
+      "params": ["--reference"],
+      "compatible_seq_types": ["illumina_paired", "ion"],
+      "helper_scripts": [
+        "scripts/step_2AS_mapping__bowtie/coverage.py", 
+        "scripts/step_2AS_mapping__bowtie/coverage_plot.py",
+        "scripts/step_2AS_mapping__bowtie/coverage_minmax.py"
+      ]
+    },
+    {
+      "id": "step_2AS_mapping__minimap2",
+      "domain": "Assembly/Mapping",
+      "tool": "Minimap2 (Workflow)",
+      "description": "Reference-based consensus calling workflow for Nanopore long reads. Performs: 1) Alignment with Minimap2 (map-ont), 2) Consensus generation using Samtools (legacy) and BioPython, 3) Coverage depth analysis, and 4) Visualization with Matplotlib.",
+      "container": "quay.io/biocontainers/minimap2:2.26--he4a0461_1",
+      "secondary_containers": [
+        {
+          "purpose": "consensus_calling_legacy",
+          "url": "ghcr.io/genpat-it/samtools:0.1.19--f3869562fe"
+        },
+        {
+          "purpose": "coverage_depth_calc",
+          "url": "quay.io/biocontainers/samtools:1.10--h9402c20_1"
+        },
+        {
+          "purpose": "python_scripts_biopython",
+          "url": "ghcr.io/genpat-it/python3:3.10.1--29cf21c1f1"
+        },
+        {
+          "purpose": "plotting",
+          "url": "quay.io/biocontainers/matplotlib:3.1.2"
+        },
+        {
+          "purpose": "csv_processing",
+          "url": "ubuntu:20.04"
+        }
+      ],
+      "input_types": ["fastq_trimmed", "reference_genome_fasta"],
+      "output_types": [
+        "consensus_fasta", 
+        "alignment_bam", 
+        "coverage_plot_png", 
+        "coverage_stats_csv"
+      ],
+      "params": ["--reference"],
+      "compatible_seq_types": ["nanopore"],
+      "helper_scripts": [
+        "scripts/step_2AS_mapping__minimap2/coverage.py", 
+        "scripts/step_2AS_mapping__minimap2/coverage_plot.py",
+        "scripts/step_2AS_mapping__minimap2/coverage_minmax.py"
+      ]
+    },
+    {
+      "id": "step_2AS_mapping__snippy",
+      "domain": "Assembly/Mapping",
+      "tool": "Snippy",
+      "description": "Rapid variant calling and core genome alignment pipeline. Supports Illumina Paired-end reads, Ion Torrent reads, and pre-assembled Contigs (FASTA mode) against a reference genome (FASTA or GenBank).",
+      "container": "ghcr.io/genpat-it/snippy:4.5.1--7be4a1c45a",
+      "input_types": [
+        "fastq_trimmed", 
+        "assembly_fasta", 
+        "reference_genome"
+      ],
+      "output_types": [
+        "variants_vcf", 
+        "consensus_fasta", 
+        "alignment_bam", 
+        "variants_table", 
+        "annotation_gff"
+      ],
+      "params": ["--reference"],
+      "compatible_seq_types": ["illumina_paired", "ion"]
+    },
+    {
+      "id": "step_2AS_mapping__ivar",
+      "domain": "Assembly/Mapping",
+      "tool": "iVar (Workflow via Snippy)",
+      "description": "Viral consensus calling workflow. Performs: 1) Alignment using Snippy, 2) Pileup generation with Samtools, 3) Consensus calling with iVar (trimming primers/quality). Supports **Segmented Genomes** (e.g., Influenza) by aggregating consensus sequences from multiple reference segments.",
+      "container": "quay.io/biocontainers/ivar:1.3--h089eab3_1",
+      "secondary_containers": [
+        {
+          "purpose": "alignment_snippy",
+          "url": "ghcr.io/genpat-it/snippy:4.5.1--7be4a1c45a"
+        },
+        {
+          "purpose": "pileup_generation",
+          "url": "quay.io/biocontainers/samtools:1.10--h2e538c0_3"
+        },
+        {
+          "purpose": "coverage_calc_legacy",
+          "url": "ghcr.io/genpat-it/samtools:0.1.19--f3869562fe"
+        },
+        {
+          "purpose": "python_scripts",
+          "url": "ghcr.io/genpat-it/python3:3.10.1--29cf21c1f1"
+        },
+        {
+          "purpose": "plotting",
+          "url": "quay.io/biocontainers/matplotlib:3.1.2"
+        },
+        {
+          "purpose": "aggregation",
+          "url": "ubuntu:20.04"
+        }
+      ],
+      "input_types": ["fastq_trimmed", "reference_genome_fasta"],
+      "output_types": [
+        "consensus_fasta", 
+        "alignment_bam", 
+        "coverage_plot_png", 
+        "aggregated_consensus_fasta"
+      ],
+      "params": ["--ivar_quality_threshold"],
+      "compatible_seq_types": ["illumina_paired", "ion"],
+      "helper_scripts": [
+        "scripts/step_2AS_mapping__ivar/coverage.py",
+        "scripts/step_2AS_mapping__ivar/coverage_plot.py",
+        "scripts/step_2AS_mapping__ivar/coverage_minmax.py"
+      ],
+      "notes": "Includes logic for calculating Execution Dates (DT) based on reference index for segmented viruses."
+    },
+    {
+      "id": "step_2AS_mapping__medaka",
+      "domain": "Assembly/Mapping",
+      "tool": "Medaka (Workflow)",
+      "description": "Nanopore consensus polishing and variant calling workflow. Performs: 1) Consensus generation using Medaka (neural network-based), 2) Coverage depth analysis using Samtools and custom scripts, and 3) Visualization of coverage plots.",
+      "container": "quay.io/biocontainers/medaka:1.8.0--py38hdaa7744_0",
+      "secondary_containers": [
+        {
+          "purpose": "coverage_minmax_calc",
+          "url": "ghcr.io/genpat-it/samtools:0.1.19--f3869562fe"
+        },
+        {
+          "purpose": "coverage_depth_calc",
+          "url": "quay.io/biocontainers/samtools:1.10--h9402c20_1"
+        },
+        {
+          "purpose": "python_scripts_check",
+          "url": "ghcr.io/genpat-it/python3:3.10.1--29cf21c1f1"
+        },
+        {
+          "purpose": "plotting",
+          "url": "quay.io/biocontainers/matplotlib:3.1.2"
+        },
+        {
+          "purpose": "csv_processing",
+          "url": "ubuntu:20.04"
+        }
+      ],
+      "input_types": ["fastq_trimmed", "reference_genome_fasta"],
+      "output_types": [
+        "consensus_fasta", 
+        "alignment_bam", 
+        "coverage_plot_png", 
+        "coverage_stats_csv"
+      ],
+      "params": ["--reference"],
+      "compatible_seq_types": ["nanopore"],
+      "helper_scripts": [
+        "scripts/step_2AS_mapping__medaka/coverage.py", 
+        "scripts/step_2AS_mapping__medaka/coverage_plot.py",
+        "scripts/step_2AS_mapping__medaka/coverage_minmax.py"
+      ]
+    },
+    {
+      "id": "step_2AS_filtering__seqio",
+      "domain": "Assembly Filtering",
+      "tool": "BioPython (Custom Script)",
+      "description": "Post-assembly filtering utility using a custom Python script (`cleanDenovo.py`). It filters de novo assembly contigs based on variant calls and reference alignment. **Note:** Only executes if the reference genome is located within the `FILTERABLE_REFERENCES_PATH` (typically a Viral DB).",
+      "container": "ghcr.io/genpat-it/python3:3.10.1--29cf21c1f1",
+      "input_types": [
+        "variant_calls", 
+        "assembly_fasta", 
+        "reference_genome"
+      ],
+      "output_types": ["assembly_filtered"],
+      "params": ["--step_2AS_filtering__seqio (Path to filterable refs)"],
+      "compatible_seq_types": ["all"],
+      "helper_scripts": ["scripts/step_2AS_denovo__spades/cleanDenovo.py"],
+      "notes": "The helper script location is derived from the '2AS_denovo__spades' directory in the code, despite the step ID being 'filtering'."
+    },
+    {
+      "id": "step_2MG_denovo__metaspades",
+      "domain": "Metagenomics",
+      "tool": "metaSPAdes (Workflow)",
+      "description": "Metagenomic assembly workflow for multiple species. Performs: 1) Assembly using metaSPAdes (k-mers 21,33,55,77), 2) Post-assembly filtering (<200bp) using a custom Python script, and 3) Quality assessment with QUAST.",
+      "container": "quay.io/biocontainers/spades:3.11.1--py27_zlib1.2.8_0",
+      "secondary_containers": [
+        {
+          "purpose": "assembly_filter",
+          "url": "ghcr.io/genpat-it/python3:3.10.1--29cf21c1f1"
+        },
+        {
+          "purpose": "quality_control",
+          "url": "quay.io/biocontainers/quast:4.4--boost1.61_1"
+        }
+      ],
+      "input_types": ["fastq_trimmed", "fastq_host_depleted"],
+      "output_types": [
+        "metagenome_scaffolds_filtered", 
+        "spades_log", 
+        "quast_report_csv"
+      ],
+      "compatible_seq_types": ["illumina_paired"],
+      "helper_scripts": ["scripts/step_2MG_denovo__metaspades/AssemblyFilter.py"]
+    },
+    {
+      "id": "step_3TX_class__kraken",
+      "domain": "Taxonomy",
+      "tool": "Kraken (Legacy) + Bracken (Workflow)",
+      "description": "Legacy taxonomic classification workflow. Performs: 1) Classification with Kraken 1.0, 2) Abundance estimation with Bracken (Genus & Species levels), and 3) Output formatting for system import. **Note:** Automatically skipped for SARS-CoV-2, Control, and 16S samples.",
+      "container": "quay.io/biocontainers/kraken:1.0--pl5.22.0_0",
+      "secondary_containers": [
+        {
+          "purpose": "abundance_estimation_bracken",
+          "url": "quay.io/biocontainers/bracken:1.0.0--1"
+        }
+      ],
+      "input_types": ["fastq_trimmed", "fastq_host_depleted"],
+      "output_types": [
+        "kraken_report_tsv", 
+        "bracken_genus_tsv", 
+        "bracken_species_tsv", 
+        "taxa_import_csv"
+      ],
+      "params": [
+        "--db_kraken", 
+        "--db_bracken"
+      ],
+      "compatible_seq_types": ["illumina_paired", "ion"],
+      "helper_scripts": ["scripts/step_3TX_class__kraken/create_import.py"]
+    },
+    {
+      "id": "step_3TX_class__kraken2",
+      "domain": "Taxonomy",
+      "tool": "Kraken2 + Bracken (Workflow)",
+      "description": "Standard taxonomic classification workflow. Performs: 1) Classification with Kraken2, 2) Abundance re-estimation with Bracken (Species and Genus level), and 3) Format conversion for system import.",
+      "container": "quay.io/biocontainers/kraken2:2.1.2--pl5262h7d875b9_0",
+      "secondary_containers": [
+        {
+          "purpose": "abundance_estimation_bracken",
+          "url": "quay.io/biocontainers/bracken:2.6.1--py39h7cff6ad_2"
+        }
+      ],
+      "input_types": ["fastq_trimmed", "fastq_host_depleted"],
+      "output_types": [
+        "kraken_report_tsv", 
+        "kraken_output_gz", 
+        "bracken_genus_tsv", 
+        "bracken_species_tsv", 
+        "taxa_import_csv"
+      ],
+      "params": ["--db"],
+      "compatible_seq_types": ["illumina_paired", "ion"],
+      "helper_scripts": ["scripts/step_3TX_class__kraken2/create_import.py"],
+      "notes": "Requires a valid Kraken2 database path passed via parameters."
+    },
+    {
+      "id": "step_3TX_class__centrifuge",
+      "domain": "Taxonomy",
+      "tool": "Centrifuge (Workflow)",
+      "description": "Long-read taxonomic classification workflow. Performs: 1) Classification with Centrifuge (optimized for Nanopore), 2) Generation of Genus/Species specific reports, 3) Conversion to Kraken-like reports, and 4) Formatting for system import.",
+      "container": "quay.io/biocontainers/centrifuge:1.0.4_beta--h9a82719_6",
+      "secondary_containers": [
+        {
+          "purpose": "import_formatting",
+          "url": "quay.io/biocontainers/biopython:1.78"
+        }
+      ],
+      "input_types": ["fastq_trimmed", "fastq_host_depleted"],
+      "output_types": [
+        "centrifuge_report", 
+        "centrifuge_output", 
+        "genus_report", 
+        "species_report", 
+        "kraken_like_report",
+        "taxa_import_csv"
+      ],
+      "params": [
+        "--db_path", 
+        "--db_name"
+      ],
+      "compatible_seq_types": ["nanopore"],
+      "helper_scripts": ["scripts/step_3TX_class__centrifuge/create_import.py"],
+      "notes": "Code explicitly restricts execution to Nanopore reads via 'isCompatibleWithSeqType(reads, ['nanopore'])'."
+    },
+    {
+      "id": "step_3TX_class__confindr",
+      "domain": "Taxonomy",
+      "tool": "ConFindr",
+      "description": "Detects intra-species bacterial contamination in raw reads. Uses core genome MLST (cgMLST) to identify multiple strains. **Constraint:** Only runs if the genus is 'Escherichia', 'Salmonella', or 'Listeria'.",
+      "container": "ghcr.io/genpat-it/confindr:0.7.4--8fe19dd246",
+      "input_types": ["fastq_trimmed"],
+      "output_types": [
+        "confindr_report_csv", 
+        "rmlst_report_csv", 
+        "contamination_report_csv", 
+        "confindr_log"
+      ],
+      "params": ["--genus_species"],
+      "compatible_seq_types": ["illumina_paired", "ion"],
+      "notes": "Logic enforces 'isSpeciesSupported' check against a hardcoded allowlist: [escherichia, salmonella, listeria]."
+    },
+    {
+      "id": "step_3TX_species__kmerfinder",
+      "domain": "Taxonomy",
+      "tool": "KmerFinder (Python 2.7 Wrapper)",
+      "description": "Predicts bacterial and viral species using a K-mer based template search. Runs `FindTemplate.py` against both Bacterial and Viral databases, then parses the results to assign a definitive species and reference genome path.",
+      "container": "python:2.7.8",
+      "secondary_containers": [],
+      "input_types": ["assembly_fasta", "consensus_fasta"],
+      "output_types": [
+        "kmerfinder_check", 
+        "kmerfinder_bacterial_tsv", 
+        "kmerfinder_viral_tsv", 
+        "kmerfinder_log"
+      ],
+      "params": ["--db"],
+      "compatible_seq_types": ["all"],
+      "helper_scripts": [
+        "scripts/step_3TX_species__kmerfinder/FindTemplate.py",
+        "scripts/step_3TX_species__kmerfinder/ParseSpeciesFile_newDB.py"
+      ],
+      "notes": "Logic extracts 'speciesAssigned' and 'assembly_accBacteria' from the output check file to drive downstream steps."
+    },
+    {
+      "id": "step_3TX_species__vdabricate",
+      "domain": "Taxonomy",
+      "tool": "Abricate (Virulence DB)",
+      "description": "Mass screening of contigs for viral species using predefined databases. Specifically configured to use the 'viruses_TREF' database located in the mounted `abricateDBDir`.",
+      "container": "quay.io/biocontainers/abricate:0.9.8--h1341992_0",
+      "input_types": [
+        "assembly_fasta", 
+        "consensus_fasta",
+        "database_name_string"
+      ],
+      "output_types": [
+        "abricate_calls_txt", 
+        "abricate_log"
+      ],
+      "params": ["--db"],
+      "compatible_seq_types": ["viral", "all"],
+      "notes": "Workflow automatically injects 'viruses_TREF' as the database argument. Requires explicit mounting of the database directory."
+    },
+    {
+      "id": "step_3TX_species__mash",
+      "domain": "Taxonomy",
+      "tool": "Mash (Screen)",
+      "description": "Fast genome distance estimation using MinHash. Runs `mash screen` against a pre-packaged RefSeq database (`refseq.genomes.k21s1000.msh`) and assesses results using `assess_mash_screen.py` to determine Gram stain and species identity.",
+      "container": "ghcr.io/genpat-it/mash:2.3--debdd7eb23",
+      "input_types": ["fastq_trimmed", "fastq_host_depleted"],
+      "output_types": [
+        "mash_screen_tsv", 
+        "mash_screening_results_tsv", 
+        "mash_log"
+      ],
+      "compatible_seq_types": ["illumina_paired", "ion"],
+      "notes": "Uses internal container paths for RefSeq DB and Gram stain resources. Does NOT require external DB mounting."
+    },
+    {
+      "id": "step_4AN_AMR__resfinder",
+      "domain": "AMR Analysis",
+      "tool": "ResFinder",
+      "description": "Predicts antibiotic resistance genes from raw reads. Runs `run_resfinder.py` with specific thresholds (L=0.6, T=0.9) against the acquired resistance database.",
+      "container": "ghcr.io/genpat-it/resfinder:4.1.5--858219071c",
+      "input_types": ["fastq_trimmed", "fastq_host_depleted"],
+      "output_types": [
+        "resfinder_json", 
+        "resfinder_results_txt", 
+        "resfinder_fsa", 
+        "resfinder_log"
+      ],
+      "params": ["--genus_species"],
+      "compatible_seq_types": ["illumina_paired", "ion"],
+      "notes": "Uses internal container database at `/resfinder/db_resfinder`. Requires 'genus_species' parameter formatted with underscores (e.g., Escherichia_coli)."
+    },
+    {
+      "id": "step_4AN_AMR__staramr",
+      "domain": "AMR Analysis",
+      "tool": "StarAMR",
+      "description": "Scans for AMR genes and point mutations using StarAMR. **Constraint:** Currently restricted to 'Campylobacter' species via the `isSpeciesSupported` check. It dynamically maps the genus to the correct PointFinder organism parameter.",
+      "container": "ghcr.io/genpat-it/staramr:0.9.1--8fe6b5a239",
+      "input_types": ["assembly_fasta"],
+      "output_types": [
+        "staramr_summary_tsv", 
+        "staramr_detailed_tsv", 
+        "staramr_hits_fasta", 
+        "staramr_log"
+      ],
+      "params": ["--genus_species"],
+      "compatible_seq_types": ["bacterial"],
+      "notes": "Logic enforces a hardcoded allowlist: [campylobacter]. Requires 'genus_species' to resolve the '--pointfinder-organism' flag."
+    },
+    {
+      "id": "step_4AN_AMR__abricate",
+      "domain": "AMR Analysis",
+      "tool": "Abricate (VFDB)",
+      "description": "Mass screening of contigs against the Virulence Factor Database (VFDB). Generates CSV reports, detailed calls, and a summary of virulence factors found.",
+      "container": "staphb/abricate:1.0.0",
+      "input_types": ["assembly_fasta"],
+      "output_types": [
+        "abricate_csv", 
+        "abricate_summary", 
+        "abricate_calls_txt", 
+        "abricate_log"
+      ],
+      "compatible_seq_types": ["all"],
+      "notes": "Hardcoded to use '--db vfdb'. Does not support dynamic database selection in this specific module configuration."
+    },
+    {
+      "id": "step_4AN_AMR__filtering",
+      "domain": "AMR Analysis",
+      "tool": "Python (Inline Script)",
+      "description": "Post-processing logic to filter Abricate results based on Coverage and Identity thresholds. **Note:** The filtering logic is embedded directly in the Nextflow script as an inline Python block.",
+      "container": "ghcr.io/genpat-it/python3:3.10.1--29cf21c1f1",
+      "input_types": ["abricate_calls_txt"],
+      "output_types": [
+        "abricate_filtered_calls_txt", 
+        "filtering_input_json"
+      ],
+      "params": [
+        "--coverage", 
+        "--identity"
+      ],
+      "compatible_seq_types": ["all"],
+      "notes": "Reads column 9 (Coverage) and 10 (Identity) from Abricate output. Does NOT require an external script file."
+    },
+    {
+      "id": "step_4AN_genes__prokka",
+      "domain": "Annotation",
+      "tool": "Prokka",
+      "description": "Functional genome annotation pipeline. Supports Bacteria, Viruses, Archaea, and Mitochondria. Can optionally use a reference GenBank file (`--proteins`) to transfer annotations.",
+      "container": "quay.io/biocontainers/prokka:1.14.5--pl526_1",
+      "input_types": [
+        "assembly_fasta", 
+        "kingdom_enum", 
+        "reference_genbank_optional"
+      ],
+      "output_types": [
+        "annotation_gff", 
+        "annotation_gbk", 
+        "annotation_tbl", 
+        "annotation_fsa", 
+        "prokka_log"
+      ],
+      "params": ["--kingdom", "--proteins"],
+      "compatible_seq_types": ["all"],
+      "notes": "Kingdom is validated against an allowed Enum: [Viruses, Bacteria, Archaea, Mitochondria]. Reference GenBank input is optional."
+    },
+    {
+      "id": "step_4TY_MLST__mlst",
+      "domain": "Typing",
+      "tool": "mlst (Workflow)",
+      "description": "Multi Locus Sequence Typing (MLST) workflow. Performs: 1) ST assignment using `mlst` tool (with optional schema exclusion), 2) Result processing and Clonal Complex (CC) assignment using a custom Python script.",
+      "container": "ghcr.io/genpat-it/mlst-w-db:2.23.0--60b8b2e3dd_231219.124455",
+      "secondary_containers": [
+        {
+          "purpose": "processing_script",
+          "url": "ghcr.io/genpat-it/mlst-w-db:2.23.0--60b8b2e3dd_231219.124455"
+        }
+      ],
+      "input_types": ["assembly_fasta", "consensus_fasta"],
+      "output_types": [
+        "mlst_tsv", 
+        "mlst_cc_csv", 
+        "mlst_log"
+      ],
+      "params": ["--excluded_schemas"],
+      "compatible_seq_types": ["all"],
+      "helper_scripts": ["scripts/step_4TY_MLST__mlst/process-mlst-result.py"],
+      "notes": "Helper script relies on internal container path `/NGStools/mlst/db/pubmlst` to map STs to Clonal Complexes."
+    },
+    {
+      "id": "step_4TY_cgMLST__chewbbaca",
+      "domain": "Typing",
+      "tool": "ChewBBACA (Workflow)",
+      "description": "Core/Whole Genome MLST workflow. Performs: 1) Allele calling using ChewBBACA with pre-loaded schemas (Listeria, E. coli, Salmonella), 2) Quality checks on called alleles using `chewieCheck.py`, and 3) CRC32 hashing of the allelic profile for anonymized sharing.",
+      "container": "ghcr.io/genpat-it/chewbbaca-w-chewie-schemas:2.8.5--16b816c96d",
+      "secondary_containers": [
+        {
+          "purpose": "quality_check",
+          "url": "quay.io/biocontainers/python:3.9"
+        },
+        {
+          "purpose": "profile_hashing",
+          "url": "ghcr.io/genpat-it/hashing:1.0--29180a232f"
+        }
+      ],
+      "input_types": ["assembly_fasta"],
+      "output_types": [
+        "allelic_profile_tsv", 
+        "chewbbaca_stats_tsv", 
+        "chewbbaca_qc_csv", 
+        "hashed_profile_tsv", 
+        "new_alleles_txt"
+      ],
+      "params": ["--genus_species", "--schema"],
+      "compatible_seq_types": ["all"],
+      "helper_scripts": ["scripts/step_4TY_cgMLST__chewbbaca/chewieCheck.py"],
+      "notes": "Restricted to specific species (Listeria, E. coli, Salmonella) via internal schema maps. Automatically adjusts parameters for Ion Torrent data."
+    },
+    {
+      "id": "step_4TY_flaA__flaA",
+      "domain": "Typing",
+      "tool": "mlst (flaA Schema)",
+      "description": "Infers the flaA locus variant for Campylobacter samples. Uses the standard `mlst` tool but forces the schema to 'flaA'. Includes post-processing to map results to clonal complexes.",
+      "container": "ghcr.io/genpat-it/mlst-w-db:2.23.0--60b8b2e3dd_231219.124455",
+      "secondary_containers": [],
+      "input_types": ["assembly_fasta", "consensus_fasta"],
+      "output_types": [
+        "flaA_tsv", 
+        "flaA_cc_csv", 
+        "mlst_log"
+      ],
+      "params": ["--genus_species"],
+      "compatible_seq_types": ["campylobacter"],
+      "helper_scripts": ["scripts/step_4TY_flaA__flaA/process-mlst-result.py"],
+      "notes": "Strictly restricted to 'campylobacter' via 'isSpeciesSupported'. Uses internal container path `/NGStools/mlst/db/pubmlst` for post-processing."
+    },
+    {
+      "id": "step_4TY_lineage__pangolin",
+      "domain": "Typing",
+      "tool": "Pangolin",
+      "description": "SARS-CoV-2 Lineage assignment using Pangolin. Assigns Pango lineages to query SARS-CoV-2 sequences.",
+      "container": "ghcr.io/genpat-it/pangolin:v4.3.1-v0.1.12-v0.3.17-v1.21",
+      "input_types": ["consensus_fasta"],
+      "output_types": [
+        "lineage_report_csv", 
+        "pangolin_log"
+      ],
+      "params": [],
+      "compatible_seq_types": ["sars-cov-2"],
+      "notes": "Uses a custom container with specific pango-data versions (v4.3.1-v0.1.12-v0.3.17-v1.21). Requires root user execution."
+    },
+    {
+      "id": "step_4TY_lineage__westnile",
+      "domain": "Typing",
+      "tool": "Snippy + Custom Script (Workflow)",
+      "description": "West Nile Virus (WNV) lineage assignment workflow. Performs: 1) Alignment of reads against multiple reference genomes (defined in `westnile_lineage_references.json`) using Snippy, 2) Coverage depth calculation with Samtools, and 3) Lineage determination using a custom Python script based on coverage thresholds.",
+      "container": "ghcr.io/genpat-it/python3:3.10.1--29cf21c1f1",
+      "secondary_containers": [
+        {
+          "purpose": "alignment_snippy",
+          "url": "ghcr.io/genpat-it/snippy:4.5.1--7be4a1c45a"
+        },
+        {
+          "purpose": "coverage_calc",
+          "url": "quay.io/biocontainers/samtools:1.10--h9402c20_1"
+        }
+      ],
+      "input_types": ["fastq_trimmed"],
+      "output_types": [
+        "lineage_report_csv", 
+        "coverage_summary_csv", 
+        "snippy_bam"
+      ],
+      "params": ["--threshold", "--assets_dir"],
+      "compatible_seq_types": ["west_nile_virus"],
+      "helper_scripts": ["scripts/step_4TY_lineage__westnile/select_lineage.py"],
+      "notes": "Relies on an external JSON file (`westnile_lineage_references.json`) in the assets directory to define the reference panel. Uses a mapping-based approach rather than a classifier tool."
+    },
+    {
+      "id": "step_4TY_plasmid__mobsuite",
+      "domain": "Typing",
+      "tool": "MOB-suite",
+      "description": "Reconstruction and typing of plasmid sequences from assembly contigs. Uses `mob_recon` to identify and reconstruct plasmids.",
+      "container": "ghcr.io/genpat-it/mobsuite:3.1.4--c2c728b1a2",
+      "input_types": ["assembly_fasta"],
+      "output_types": [
+        "plasmid_fasta", 
+        "mobsuite_report_txt", 
+        "mobsuite_log"
+      ],
+      "params": [],
+      "compatible_seq_types": ["bacteria"],
+      "notes": "Runs `mob_recon` with `--unicycler_contigs` and `--run_overhang` flags. Expects input assembly to be potentially generated by Unicycler."
+    },
+    {
+      "id": "multi_alignment__snippycore",
+      "domain": "Multi-Sample",
+      "tool": "Snippy-core (Workflow)",
+      "description": "Multi-sample core SNP alignment workflow. Supports two modes: 1) **Full Run**: Takes raw/trimmed reads, runs Snippy on each against a reference, then aggregates with Snippy-core. 2) **Aggregation Only**: Takes existing Snippy result folders (VCFs) and aggregates them. Generates a core SNP alignment and clean full alignment.",
+      "container": "ghcr.io/genpat-it/snippy:4.5.1--7be4a1c45a",
+      "input_types": [
+        "fastq_trimmed", 
+        "directory_of_snippy_results",
+        "reference_genome_genbank"
+      ],
+      "output_types": [
+        "core_snp_alignment_fasta", 
+        "clean_full_alignment_fasta", 
+        "snippy_core_log"
+      ],
+      "params": [],
+      "compatible_seq_types": ["illumina_paired", "ion"],
+      "notes": "Automatically handles sample renaming based on VCF filenames. Supports both GenBank and FASTA references, but prefers GenBank ('gb') for annotation context."
+    },
+    {
+      "id": "multi_pangenome__panaroo",
+      "domain": "Multi-Sample",
+      "tool": "Panaroo",
+      "description": "Pangenome analysis pipeline. Constructs a pangenome graph from multiple GFF files (typically from Prokka), cleans invalid genes, and generates gene presence/absence matrices and a core genome alignment using MAFFT.",
+      "container": "quay.io/biocontainers/panaroo:1.3.3--pyhdfd78af_0",
+      "input_types": ["list_of_gff_files"],
+      "output_types": [
+        "pangenome_graph", 
+        "gene_presence_absence_matrix", 
+        "core_genome_alignment", 
+        "panaroo_log"
+      ],
+      "dependencies": ["step_4AN_genes__prokka"],
+      "params": [
+        "--clean_mode", 
+        "--threshold", 
+        "--family_threshold", 
+        "--len_dif_percent", 
+        "--threads", 
+        "--extra"
+      ],
+      "compatible_seq_types": ["all"],
+      "notes": "Hardcoded to use `--aligner mafft` and `--alignment core`. Requires a list of GFF files as input."
+    },
+    {
+      "id": "multi_clustering__augur",
+      "domain": "Phylogeny",
+      "tool": "Augur (Workflow)",
+      "description": "Complete Nextstrain/Augur phylogenetic pipeline. Performs: 1) Metadata standardization, 2) Multi-sequence alignment, 3) Tree building & refinement (TimeTree/Coalescent), 4) Ancestral state reconstruction (nucleotide & amino acid), 5) Trait inference (Geography), and 6) Export to Auspice JSON format.",
+      "container": "quay.io/biocontainers/augur:23.1.1--pyhdfd78af_1",
+      "input_types": [
+        "list_of_fasta", 
+        "reference_genome_genbank", 
+        "metadata_tsv", 
+        "geodata_tsv"
+      ],
+      "output_types": [
+        "auspice_json", 
+        "alignment_fasta", 
+        "tree_nwk", 
+        "traits_json", 
+        "ancestral_mutations_json"
+      ],
+      "params": [
+        "--traits_columns", 
+        "--tree_method", 
+        "--refine_coalescent", 
+        "--ancestral_inference"
+      ],
+      "compatible_seq_types": ["viral", "multi_sample"],
+      "notes": "Automatically standardizes metadata columns (renaming to 'name' and 'date') before processing. Requires a GenBank reference for feature translation."
+    },
+    {
+      "id": "multi_clustering__reportree",
+      "domain": "Phylogeny",
+      "tool": "ReporTree (Dynamic Wrapper)",
+      "description": "Multi-sample clustering and surveillance workflow. Dynamically routes execution to one of three sub-pipelines based on input type: 1) **Alleles** (cgMLST profiles), 2) **Alignment** (FASTA MSA), or 3) **VCF** (SNP calls). Generates Minimum Spanning Trees (MST) and metadata-enriched visualizations.",
+      "container": "ghcr.io/genpat-it/reportree:1.0.0--1",
+      "input_types": [
+        "allelic_profile_tsv", 
+        "alignment_fasta", 
+        "variants_vcf", 
+        "metadata_tsv", 
+        "geodata_tsv"
+      ],
+      "output_types": [
+        "reportree_cluster_tsv", 
+        "reportree_partitions_tsv", 
+        "reportree_tree_nwk", 
+        "grape_tree_json"
+      ],
+      "params": [
+        "--input_type", 
+        "--metadata", 
+        "--geodata", 
+        "--nomenclature"
+      ],
+      "compatible_seq_types": ["multi_sample"],
+      "notes": "Acts as a router. Requires `multi_clustering__reportree__input` parameter to be one of ['alleles', 'alignment', 'vcf'] to select the correct logic path."
+    }
+  ]
+}

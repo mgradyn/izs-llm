@@ -1,0 +1,346 @@
+{
+  "templates": [
+    {
+      "template_name": "Mapping for Segmented Viruses Pipeline",
+      "id": "module_segmented",
+      "description": "Performs mapping of genome fragments from segmented viruses (e.g., Influenza) using multiple references. **Constraint:** Current implementation supports only Short Reads (Illumina/Ion Torrent) using iVar.",
+      "keywords": ["segmented virus", "mapping", "ivar", "multifasta", "influenza"],
+      "accepted_inputs": ["fastq_trimmed"],
+      "logic_flow": [
+        {
+          "step": "step_2AS_mapping__ivar",
+          "note": "Maps reads against multiple reference segments (fetched via `getReferences('any')`) and aggregates the consensus sequences."
+        }
+      ],
+      "outputs": ["consensus_fasta"],
+      "compatible_seq_types": ["illumina_paired", "ion"],
+      "notes": "The code uses `getReferences('any')` to iteratively run iVar against all available segments for the sample."
+    },
+    {
+      "template_name": "Covid Emergency Pipeline",
+      "id": "module_covid_emergency",
+      "description": "Fast SARS-CoV-2 analysis pipeline. Performs: 1) Mapping and consensus calling against Wuhan-Hu-1 reference using **iVar** (not Snippy), and 2) Lineage assignment using **Pangolin**.",
+      "keywords": ["covid", "sars-cov-2", "ivar", "pangolin", "emergency"],
+      "accepted_inputs": ["fastq_trimmed"],
+      "logic_flow": [
+        {
+          "step": "step_2AS_mapping__ivar",
+          "params": { 
+            "reference_code": "NC_045512.2", 
+            "reference_path": "${params.assets_dir}/module_covid_emergency/NC_045512.fasta" 
+          },
+          "note": "Hardcoded reference mapping"
+        },
+        {
+          "step": "step_4TY_lineage__pangolin",
+          "note": "Assign lineage from consensus"
+        }
+      ],
+      "outputs": ["consensus_fasta", "lineage_report_csv"],
+      "compatible_seq_types": ["illumina_paired", "ion"],
+      "notes": "Relies on an external asset file `NC_045512.fasta`."
+    },
+    {
+      "template_name": "Depletion & de novo Pipeline",
+      "id": "module_denovo",
+      "description": "De novo assembly pipeline with optional host depletion. **Logic:** 1) Checks if a host reference is provided. 2) If yes, runs `step_1PP_hostdepl__bowtie`. 3) If no, skips directly to assembly. 4) Performs de novo assembly using `step_2AS_denovo__spades`.",
+      "keywords": ["host depletion", "de novo", "assembly", "bowtie", "spades", "conditional"],
+      "accepted_inputs": ["fastq_trimmed", "reference_host"],
+      "logic_flow": [
+        {
+          "decision_point": "Host Reference Check",
+          "options": [
+            {
+              "condition": "Host Provided",
+              "step": "step_1PP_hostdepl__bowtie",
+              "note": "Deplete host reads"
+            },
+            {
+              "condition": "No Host",
+              "step": "SKIP",
+              "note": "Use raw trimmed reads"
+            }
+          ]
+        },
+        {
+          "step": "step_2AS_denovo__spades",
+          "note": "Assemble (depleted or raw) reads"
+        }
+      ],
+      "outputs": ["assembled_scaffolds", "depleted_reads_fastq"],
+      "compatible_seq_types": ["illumina_paired", "ion"],
+      "notes": "Uses `.cross()` and `.branch()` operators to dynamically route samples based on host availability."
+    },
+    {
+      "template_name": "Genome Draft Pipeline",
+      "id": "module_draft_genome",
+      "description": "Viral genome reconstruction and annotation pipeline. Performs: 1) QC Mapping/Coverage analysis with Bowtie2, 2) Consensus calling with **iVar** (not Snippy), and 3) Genome annotation with Prokka (specifically configured for **Viruses**).",
+      "keywords": ["genome draft", "viral", "ivar", "bowtie2", "prokka", "annotation"],
+      "accepted_inputs": [
+        "fastq_trimmed", 
+        "reference_genome_fasta", 
+        "reference_genome_genbank"
+      ],
+      "logic_flow": [
+        {
+          "parallel_execution": [
+            {
+              "step": "step_2AS_mapping__bowtie",
+              "note": "Generate BAM and coverage plots"
+            },
+            {
+              "step": "step_2AS_mapping__ivar",
+              "note": "Generate consensus sequence",
+              "next": [
+                {
+                  "step": "step_4AN_genes__prokka",
+                  "note": "Annotate consensus (Kingdom: Viruses)"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "outputs": [
+        "consensus_fasta", 
+        "annotation_gff", 
+        "annotation_gbk", 
+        "coverage_plot_png"
+      ],
+      "compatible_seq_types": ["illumina_paired", "ion"],
+      "notes": "Hardcoded `PROKKA_KINGDOM = 'Viruses'`. Takes an optional GenBank reference file to improve annotation transfer."
+    },
+    {
+      "template_name": "Enterotoxin S. aureus Finder Pipeline",
+      "id": "module_enterotoxin_saureus_finder",
+      "description": "Specific pipeline for detecting enterotoxin genes in *Staphylococcus aureus*. Performs de novo assembly with **Unicycler** followed by targeted detection using **BLAST**.",
+      "keywords": ["staphylococcus aureus", "enterotoxin", "unicycler", "blast", "de novo", "amr"],
+      "accepted_inputs": ["fastq_trimmed"],
+      "logic_flow": [
+        {
+          "step": "step_2AS_denovo__unicycler",
+          "note": "De novo assembly"
+        },
+        {
+          "step": "step_4AN_AMR__blast",
+          "params": { "genus_species": "Staphylococcus_aureus" },
+          "note": "Detect enterotoxin genes using BLAST (requires species parameter)"
+        }
+      ],
+      "outputs": ["assembly_scaffolds", "blast_hits_txt"],
+      "compatible_seq_types": ["illumina_paired"],
+      "notes": "Pipeline expects `genus_species` as an input parameter to configure the BLAST search."
+    },
+    {
+      "template_name": "Raw Reads Processing Pipeline",
+      "id": "module_reads_processing",
+      "description": "Comprehensive reads preprocessing module. Performs: 1) Raw Data QC, 2) **Conditional Trimming** (routes Ion Torrent and Bacterial Illumina reads to **fastp**; generic Illumina reads to **Trimmomatic**), and 3) Taxonomic classification with Kraken. Includes checks for empty files and insufficient read counts.",
+      "keywords": ["raw reads", "trimming", "fastp", "trimmomatic", "kraken", "conditional"],
+      "accepted_inputs": ["raw_reads_fastq"],
+      "logic_flow": [
+        {
+          "step": "step_0SQ_rawreads__fastq",
+          "note": "Initial Quality Control on raw reads"
+        },
+        {
+          "decision_point": "Trimming Strategy",
+          "options": [
+            {
+              "condition": "Ion Torrent OR (Illumina AND Bacteria)",
+              "step": "step_1PP_trimming__fastp",
+              "note": "Optimized trimming for Bacteria/Ion"
+            },
+            {
+              "condition": "Illumina (Non-Bacteria)",
+              "step": "step_1PP_trimming__trimmomatic",
+              "note": "Legacy trimming for other Illumina samples"
+            }
+          ]
+        },
+        {
+          "step": "step_3TX_class__kraken",
+          "note": "Taxonomic classification on valid trimmed reads"
+        }
+      ],
+      "outputs": [
+        "trimmed_reads_fastq", 
+        "kraken_report_tsv", 
+        "qc_reports"
+      ],
+      "compatible_seq_types": ["illumina_paired", "ion"],
+      "notes": "Nanopore reads are detected but explicitly excluded from processing in this specific module logic."
+    },
+    {
+      "template_name": "Pipeline Typing on Bacteria",
+      "id": "module_typing_bacteria",
+      "description": "Comprehensive bacterial characterization pipeline. **Logic:** 1) Identifies species using KmerFinder. 2) **Dynamic Mapping:** If enabled, maps trimmed reads against the best matching reference found by KmerFinder (using Bowtie2). 3) Runs a suite of typing and analysis tools (AMR, MLST, cgMLST, Annotation) using the identified species context.",
+      "keywords": ["bacteria", "typing", "mlst", "amr", "annotation", "kmerfinder", "best reference"],
+      "accepted_inputs": [
+        "fastq_trimmed", 
+        "assembly_scaffolds"
+      ],
+      "logic_flow": [
+        {
+          "step": "step_3TX_species__kmerfinder",
+          "note": "Determine species and best reference genome"
+        },
+        {
+          "decision_point": "Best Reference Mapping",
+          "options": [
+            {
+              "condition": "!params.skip_bestref_mapping",
+              "step": "step_2AS_mapping__bowtie",
+              "note": "Map reads to KmerFinder-identified reference"
+            }
+          ]
+        },
+        {
+          "parallel_execution": [
+            { 
+              "step": "step_4AN_AMR__abricate", 
+              "note": "Virulence genes" 
+            },
+            { 
+              "step": "step_4AN_AMR__staramr", 
+              "input_source": "species_from_kmerfinder",
+              "note": "Resistance genes (requires species)" 
+            },
+            { 
+              "step": "step_4AN_genes__prokka", 
+              "params": { "kingdom": "Bacteria" },
+              "note": "Annotation (Kingdom: Bacteria)" 
+            },
+            { 
+              "step": "step_4TY_MLST__mlst", 
+              "note": "Classical MLST" 
+            },
+            { 
+              "step": "step_4TY_cgMLST__chewbbaca", 
+              "input_source": "species_from_kmerfinder",
+              "note": "cgMLST/wgMLST (requires species)" 
+            },
+            { 
+              "step": "step_4TY_flaA__flaA", 
+              "input_source": "species_from_kmerfinder",
+              "note": "Campylobacter specific typing" 
+            }
+          ]
+        }
+      ],
+      "outputs": [
+        "species_prediction_json", 
+        "alignment_bam", 
+        "resfinder_json", 
+        "mlst_tsv", 
+        "allelic_profile_tsv", 
+        "annotation_gff"
+      ],
+      "compatible_seq_types": ["illumina_paired", "ion"],
+      "params": ["--skip_bestref_mapping"],
+      "notes": "Key Feature: Uses the output of KmerFinder to drive downstream tools (StarAMR, flaA, cgMLST) and to select the reference for Bowtie2."
+    },
+    {
+      "template_name": "WNV (West Nile Virus) Pipeline",
+      "id": "module_westnile",
+      "description": "West Nile Virus surveillance pipeline with dynamic reference selection. Performs: 1) Lineage assignment on raw/trimmed reads, 2) **Dynamic Selection** of the appropriate reference genome based on the detected lineage, and 3) Consensus mapping using iVar against that specific reference.",
+      "keywords": ["west nile virus", "wnv", "lineage", "mapping", "ivar", "dynamic reference"],
+      "accepted_inputs": ["fastq_trimmed"],
+      "logic_flow": [
+        {
+          "step": "step_4TY_lineage__westnile",
+          "note": "Compute lineage to identify the best reference genome"
+        },
+        {
+          "step": "step_2AS_mapping__ivar",
+          "input_source": "dynamic_reference_from_lineage",
+          "note": "Map reads using the specific reference derived from the previous step"
+        }
+      ],
+      "outputs": [
+        "consensus_fasta", 
+        "lineage_report_csv",
+        "coverage_plot_png"
+      ],
+      "compatible_seq_types": ["illumina_paired", "ion"],
+      "notes": "Uses `getReferenceForLineage` helper to bridge the lineage output to the mapping input."
+    },
+    {
+      "template_name": "Filtering & de novo",
+      "id": "module_filtered_denovo",
+      "description": "Positive selection assembly pipeline. **Logic:** 1) Maps reads against a specific reference genome (e.g., a viral reference in a clinical sample). 2) Retains *only* the reads that map to that reference. 3) Performs de novo assembly on the filtered read set using SPAdes.",
+      "keywords": ["filtering", "positive selection", "de novo", "assembly", "spades", "bowtie", "targeted assembly"],
+      "accepted_inputs": [
+        "fastq_trimmed", 
+        "reference_genome_fasta"
+      ],
+      "logic_flow": [
+        {
+          "step": "step_1PP_filtering__bowtie",
+          "note": "Filter reads: Keep only those matching the reference"
+        },
+        {
+          "step": "step_2AS_denovo__spades",
+          "note": "Assemble the filtered (target-specific) reads"
+        }
+      ],
+      "outputs": [
+        "assembly_scaffolds_filtered", 
+        "fastq_filtered"
+      ],
+      "compatible_seq_types": ["illumina_paired", "ion"],
+      "notes": "Uses `.cross()` to pair reads with the reference. Useful for extracting and assembling a specific pathogen from a complex sample."
+    },
+    {
+      "template_name": "QC fastqc",
+      "id": "module_qc_fastqc",
+      "description": "Runs FastQC on raw or trimmed reads (Illumina or Ion Torrent).",
+      "keywords": ["quality check", "qc", "fastqc", "illumina", "ion torrent"],
+      "accepted_inputs": ["fastq_raw_short", "fastq_trimmed"],
+      "logic_flow": [
+        { 
+          "step": "module_qc_fastqc", 
+          "note": "Execute FastQC with 1GB memory limit" 
+        }
+      ],
+      "outputs": ["qc_report_html", "qc_report_zip", "fastqc_log"],
+      "compatible_seq_types": ["illumina_paired", "ion"],
+      "notes": "Checks `isCompatibleWithSeqType` for ['illumina_paired','ion']. Uses `biocontainers/fastqc:v0.11.5_cv4`."
+    },
+    {
+      "template_name": "QC Nanoplot",
+      "id": "module_qc_nanoplot",
+      "description": "Runs Nanoplot software on raw Nanopore reads.",
+      "keywords": ["quality check", "qc", "nanoplot", "nanopore", "long reads"],
+      "accepted_inputs": ["fastq_raw_long"],
+      "logic_flow": [
+        { 
+          "step": "module_qc_nanoplot", 
+          "note": "Execute NanoPlot with 2GB memory limit" 
+        }
+      ],
+      "outputs": ["nanoplot_report_html", "nanoplot_stats_txt", "nanoplot_log"],
+      "compatible_seq_types": ["nanopore"],
+      "notes": "Checks `isCompatibleWithSeqType` for ['nanopore']. Uses `quay.io/biocontainers/nanoplot:1.41.3--pyhdfd78af_0`."
+    },
+    {
+      "template_name": "QC Quast",
+      "id": "module_qc_quast",
+      "description": "Runs Quast on genomic assemblies and aggregates results.",
+      "keywords": ["quality check", "qc", "quast", "assembly metrics", "aggregation"],
+      "accepted_inputs": ["assembly_fasta"],
+      "logic_flow": [
+        { 
+          "step": "quast", 
+          "note": "Run Quast on each assembly" 
+        },
+        { 
+          "step": "summary", 
+          "note": "Collect and summarize all Quast reports" 
+        }
+      ],
+      "outputs": ["quast_report_tsv", "quast_summary_tsv", "quast_log"],
+      "compatible_seq_types": ["all"],
+      "notes": "Aggregates results using a simple ubuntu container. Quast uses `quay.io/biocontainers/quast:4.4--boost1.61_1`."
+    }
+  ]
+}
