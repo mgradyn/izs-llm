@@ -14,6 +14,6 @@ class Settings:
     
     # Model Config
     EMBEDDING_MODEL = "Qwen/Qwen3-Embedding-0.6B"
-    LLM_MODEL = "devstral-small-2"
+    LLM_MODEL = "labs-devstral-small-2512"
 
 settings = Settings()

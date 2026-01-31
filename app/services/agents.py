@@ -1,7 +1,7 @@
 import json
 from langchain_core.prompts import ChatPromptTemplate
-from app.models.plan import PipelinePlan
-from app.models.ast import NextflowPipelineAST
+from app.models.plan_structure import PipelinePlan
+from app.models.ast_structure import NextflowPipelineAST
 from app.services.llm import get_llm
 from app.services.tools import retrieve_rag_context
 from app.services.graph_state import GraphState
