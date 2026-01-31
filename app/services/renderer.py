@@ -28,6 +28,7 @@ def render_nextflow_code(ast) -> str:
     return rendered.strip()
 
 def render_mermaid(ast: Union[Any, Dict[str, Any]]) -> str:
+    # --- 1. HELPERS ---
     def get_val(obj, key, default=None):
         if isinstance(obj, dict): 
             return obj.get(key, default)
@@ -45,14 +46,10 @@ def render_mermaid(ast: Union[Any, Dict[str, Any]]) -> str:
         return str(text).replace('\n', ' ').replace('"', "'")
 
     def resolve_variable_link(text_fragment, target_node_id, variable_registry, lines, seen_edges, style="-->"):
-        """
-        Smartly links variables found in 'text_fragment' (STRING) to 'target_node_id'.
-        """
-        if not isinstance(text_fragment, str): return # Guard against non-string input
+        if not isinstance(text_fragment, str): return 
 
-        # --- Strategy A: Exact or Dot-Notation Match ---
+        # Strategy A: Exact or Dot-Notation Match
         root_candidate = text_fragment.split('.')[0] if "." in text_fragment else text_fragment
-        
         is_func_call = "(" in text_fragment and ")" in text_fragment
 
         if root_candidate in variable_registry and not is_func_call and " " not in text_fragment:
@@ -67,9 +64,8 @@ def render_mermaid(ast: Union[Any, Dict[str, Any]]) -> str:
                 seen_edges.add(edge_key)
             return
 
-        # --- Strategy B: Deep Scan for Embedded Variables ---
+        # Strategy B: Deep Scan for Embedded Variables
         potential_vars = re.findall(r'\b([a-zA-Z_][\w\.]*)\b', text_fragment)
-        
         ignore_keywords = {
             'mix', 'join', 'groupTuple', 'collect', 'map', 'flatten', 'cross', 'multiMap',
             'true', 'false', 'null', 'it', 'get', 'return', 'branch', 'file', 'extractKey',
@@ -147,28 +143,20 @@ def render_mermaid(ast: Union[Any, Dict[str, Any]]) -> str:
                 else:
                     lines.append(f'    {proc_node_id}[{proc_name}]:::process')
                 
-                # --- [FIX] UNPACK TYPED ARGUMENTS ---
+                # Unpack Typed Arguments
                 args = get_val(stmt, 'args', [])
                 for arg in args:
-                    # Arg is now a Dict: {'type': 'variable', 'name': 'reads'}
                     atype = get_val(arg, 'type')
-                    
                     if atype == 'variable':
-                        # Link to existing variable node
-                        var_name = get_val(arg, 'name')
-                        resolve_variable_link(var_name, proc_node_id, variable_registry, lines, seen_edges)
-                    
+                        resolve_variable_link(get_val(arg, 'name'), proc_node_id, variable_registry, lines, seen_edges)
                     elif atype in ['string', 'numeric']:
-                        # Create constant node
                         val = str(get_val(arg, 'value'))
                         const_id = make_id(f"const_{val}_{proc_node_id}")
                         if const_id not in seen_edges:
                             lines.append(f'    {const_id}({val}):::global')
                             lines.append(f'    {const_id} -.-> {proc_node_id}')
                             seen_edges.add(const_id)
-                    
-                    # Fallback for legacy strings (just in case)
-                    elif isinstance(arg, str):
+                    elif isinstance(arg, str): # Fallback
                         resolve_variable_link(arg, proc_node_id, variable_registry, lines, seen_edges)
 
                 if assign_to:
@@ -196,17 +184,13 @@ def render_mermaid(ast: Union[Any, Dict[str, Any]]) -> str:
                     resolve_variable_link(start_var, op_node_id, variable_registry, lines, seen_edges)
 
                 for step in steps:
-                    # Args in Operators are still list[str] (e.g., ['host'])
                     args = get_val(step, 'args', [])
                     for arg in args:
-                         # Direct string resolution for operators
                          if isinstance(arg, str):
                             resolve_variable_link(arg, op_node_id, variable_registry, lines, seen_edges, style="-.->")
-                    
                     closure_lines = get_val(step, 'closure_lines', [])
                     if closure_lines:
-                        raw_text = " ".join(closure_lines)
-                        resolve_variable_link(raw_text, op_node_id, variable_registry, lines, seen_edges, style="-.->")
+                        resolve_variable_link(" ".join(closure_lines), op_node_id, variable_registry, lines, seen_edges, style="-.->")
 
                 if set_var:
                     var_node_id = f"Var_{make_id(set_var)}"
@@ -220,12 +204,37 @@ def render_mermaid(ast: Union[Any, Dict[str, Any]]) -> str:
             elif stype == 'conditional':
                 cond_str = clean_label(get_val(stmt, 'condition'))
                 sub_id = f"sub_{hashlib.md5(cond_str.encode()).hexdigest()[:4]}"
-                
                 lines.append(f'    subgraph {sub_id} ["if {cond_str}"]')
                 lines.append(f'    direction TB')
                 process_statements(get_val(stmt, 'body', []), subgraph_prefix=sub_id)
                 lines.append("    end")
                 lines.append(f'    style {sub_id} fill:#ffebee,stroke:#c62828,stroke-dasharray: 5 5')
+
+            # ==============================
+            # CASE D: ASSIGNMENT
+            # ==============================
+            elif stype == 'assignment':
+                var_name = get_val(stmt, 'variable')
+                value = str(get_val(stmt, 'value'))
+                
+                # Create a node for the assignment action
+                assign_id = make_id(f"assign_{var_name}")
+                
+                # Visual style: Function call vs Literal
+                if "(" in value and ")" in value:
+                    lines.append(f'    {assign_id}[[{value}]]:::process')
+                else:
+                    lines.append(f'    {assign_id}[{value}]:::operator')
+                
+                # Register the output variable node
+                if var_name:
+                    var_node_id = f"Var_{make_id(var_name)}"
+                    lines.append(f'    {var_node_id}(({var_name})):::data')
+                    lines.append(f'    {assign_id} --> {var_node_id}')
+                    variable_registry[var_name] = var_node_id
+                
+                # Try to link inputs found in the value string
+                resolve_variable_link(value, assign_id, variable_registry, lines, seen_edges)
 
     process_statements(get_val(mw, 'body', []))
     
