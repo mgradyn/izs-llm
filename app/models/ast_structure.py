@@ -552,7 +552,6 @@ class NextflowPipelineAST(BaseModel):
 
     @model_validator(mode='before')
     def deduplicate_logic(cls, values: Dict[str, Any]) -> Dict[str, Any]:
-
         main_wf = values.get('main_workflow')
         sub_wfs = values.get('sub_workflows', [])
         
@@ -577,9 +576,6 @@ class NextflowPipelineAST(BaseModel):
 
                 is_chain = stmt.get('type') == 'channel_chain' or 'start_variable' in stmt
                 is_call  = stmt.get('type') == 'process_call' or 'process_name' in stmt
-
-                if is_chain: 
-                    continue 
 
                 if is_call and inputs:
                     if stmt.get('process_name') in sub_wf_names: 
