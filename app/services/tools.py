@@ -221,4 +221,7 @@ def hydrator_node(state: GraphState):
                 context_parts.append(f"- {h_name}: {res_def.get('description')}")
                 context_parts.append(f"  Usage: `{res_def.get('usage')}`")
     full_context = "\n\n".join(context_parts)
+
+    print(f"technical_context: {full_context}")
+
     return {"technical_context": full_context}

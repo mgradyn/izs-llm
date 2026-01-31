@@ -85,24 +85,6 @@ Populate the root fields of the AST based on the component type found in the con
 * **Action:** Create a `GlobalDef` entry.
 * **Constraint:** All constants must be defined here, never inside the workflow body.
 
-## A. Imports (`imports`)
-**Trigger:** Step ID matches a `[[REFERENCE]]` block or uses helper logic.
-* **Action:** Add to the `imports` list.
-* **Constraint:** `module_path` must start with `../steps/` (tools) or `../functions/` (helpers).
-* **Aliasing:** If a name conflict exists, use the format `"OriginalName as AliasName"`.
-
-## B. Custom Scripts (`inline_processes`)
-**Trigger:** Step matches `[[INSTRUCTIONS]]` containing raw bash/script.
-* **Action:** specific the process definition as a dictionary/string in `inline_processes`.
-* **Constraint:** Do **not** use the prefix `step_` for the process name in this section.
-* **Constraint:** Do **not** use uppercase names for processes (e.g., `PROCESS_NAME` is forbidden).
-
-## C. Global Definitions (`globals`)
-**Trigger:** Usage of constant paths, IDs, or reference codes (e.g., `NC_045512.2`, `/db/ref.fasta`).
-* **Action:** Create a `GlobalDef` entry with `name` and `value`.
-* **Constraint:** You **MUST** define constants here. Defining constants inside the workflow body (e.g., `def ref = ...`) is **ILLEGAL**.
-* **Formatting:** Strings must be double-quoted inside the value field (e.g., value: `"'NC_045512.2'"`).
-
 # 2. LOGIC CONSTRUCTION (Workflow Body)
 Populate `main_workflow.body` using the following strict node types.
 
@@ -116,14 +98,13 @@ Populate `main_workflow.body` using the following strict node types.
 * **Constraint:** Do not invent operators (e.g., `.view`, `.set` are forbidden).
 
 ## B. Process Calls (`ProcessCall`)
-* **Trigger:** Execution of a tool.
-* **Argument Types (CRITICAL):**
-    * **Variables (Channels):** You MUST use `variable` type for inputs passed between steps.
-        * *Correct:* `{"type": "variable", "name": "reads"}` -> renders as `reads`
-    * **Strings (Options):** Only use `string` type for literal text options.
-        * *Correct:* `{"type": "string", "value": "strict"}` -> renders as `'strict'`
-    * **Common Error:** Do NOT use `string` for channel names like 'reads' or 'ch_input'. Nextflow needs the object, not the text name.
-    
+**Trigger:** Execution of a tool or sub-workflow.
+* **Field `args` (CRITICAL):** Must be a list of **Typed Objects**:
+    * **Variables:** `{{"type": "variable", "name": "ch_input"}}` (Renders as `ch_input`)
+    * **Strings:** `{{"type": "string", "value": "some_option"}}` (Renders as `'some_option'`)
+    * **Numbers:** `{{"type": "numeric", "value": 10}}`
+* **Continuity:** You MUST pass the `assign_to` variable from the *previous* step as the `args` variable for the *current* step.
+
 ## C. Assignments (`Assignment`)
 **Trigger:** Simple variable aliasing.
 * **Constraint:** **NEVER** use this to run a process.

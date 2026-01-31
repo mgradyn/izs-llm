@@ -7,3 +7,4 @@ venv/
 # codes
 app/services/test_inject.py
 app/models/test_agent.py
+app/models/__pycache__/ast.cpython-311.pyc

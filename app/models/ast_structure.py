@@ -1,38 +1,65 @@
 from pydantic import BaseModel, Field, field_validator, model_validator
 import re
-from typing import Literal, List, Optional, Union
+from typing import Any, Literal, List, Optional, Union
+
+def repair_lazy_calls(statements: List[Any]) -> List[Any]:
+    if not isinstance(statements, list):
+        return statements
+
+    cleaned = []
+    for stmt in statements:
+        # Check if it's a lazy assignment: {type: assignment, value: "func(...)"}
+        if isinstance(stmt, dict) and stmt.get('type') == 'assignment':
+            val = stmt.get('value', '').strip()
+            var = stmt.get('variable')
+            
+            # Regex to detect "funcName( args )" or "funcName(args).out.attr"
+            match = re.match(r'^([a-zA-Z0-9_]+)\s*\((.*)\)(\.[a-zA-Z0-9_]+)?$', val)
+            
+            # If it matches syntax AND looks like a tool (step_, prepare_, module_)
+            if match and ("step_" in val or "prepare_" in val or "module_" in val):
+                proc_name = match.group(1)
+                raw_args = match.group(2)
+                suffix = match.group(3) # e.g. .out.bam
+                
+                # Simple arg splitter (handles basic commas)
+                args_list = [a.strip() for a in raw_args.split(',')] if raw_args.strip() else []
+                
+                # REWRITE AS PROCESS CALL
+                new_stmt = {
+                    "type": "process_call",
+                    "process_name": proc_name,
+                    "args": args_list, # ArgumentParser will handle typing later
+                    "assign_to": var,
+                    "output_attribute": suffix[1:] if suffix else None
+                }
+                cleaned.append(new_stmt)
+            else:
+                cleaned.append(stmt)
+        else:
+            cleaned.append(stmt)
+    
+    return cleaned
 
 class ImportItem(BaseModel):
-    module_path: str = Field(..., description="Path to the module. MUST start with '../steps/' for tools or '../functions/' for helpers.")
-    
-    functions: List[str] = Field(..., description="List of process names to import (e.g., ['step_2AS_mapping__ivar']).")
+    module_path: str = Field(..., description="Path to the module. MUST start with '../steps/' or '../functions/'.")
+    functions: List[str] = Field(..., description="List of process names to import.")
 
     @field_validator('functions')
     def validate_aliases(cls, v):
         cleaned = []
         for func in v:
             if ' as ' in func:
-                # This is valid DSL2, but ensure strict formatting if needed
                 parts = func.split(' as ')
                 if len(parts) != 2 or not parts[0].strip() or not parts[1].strip():
                     raise ValueError(f"Invalid alias format: '{func}'. Use 'OriginalName as AliasName'")
             cleaned.append(func)
         return cleaned
-
-    def get_names_in_scope(self):
-        """Helper to return the name that will actually exist in the workflow scope"""
-        names = []
-        for f in self.functions:
-            if ' as ' in f:
-                names.append(f.split(' as ')[1].strip())
-            else:
-                names.append(f)
-        return names
-
+        
 class GlobalDef(BaseModel):
     name: str = Field(..., description="The variable name.")
     value: str = Field(..., description="The value.")
-
+    
 # --- 2. LOGIC BUILDING BLOCKS (The "Atoms") ---
 
 # --- Category 1: Logic Operators (MUST have a closure block { ... }) ---
@@ -49,7 +76,7 @@ class LogicOperator(BaseModel):
 
 # --- Category 2: Parametric Operators (MUST have (...) args, NO closure) ---
 class ParametricOperator(BaseModel):
-    operator: Literal['groupTuple', 'join', 'cross', 'mix', 'concat']
+    operator: Literal['groupTuple', 'join', 'mix', 'concat']
     
     args: List[str] = Field(
         ..., 
@@ -63,7 +90,7 @@ class ParametricOperator(BaseModel):
 
 # --- Category 3: Flexible Operators (Can have Args OR Closure) ---
 class FlexibleOperator(BaseModel):
-    operator: Literal['filter', 'unique', 'distinct', 'collect', 'buffer']
+    operator: Literal['filter', 'unique', 'distinct', 'collect', 'cross', 'buffer']
     
     args: List[str] = Field(
         default=[], 
@@ -91,6 +118,18 @@ class StructuralOperator(BaseModel):
 
 ChainOperator = Union[LogicOperator, ParametricOperator, FlexibleOperator, StructuralOperator]
 
+class VarArg(BaseModel):
+    type: Literal["variable"] = "variable"
+    name: str = Field(..., description="The variable name.")
+
+class StringArg(BaseModel):
+    type: Literal["string"] = "string"
+    value: str = Field(..., description="The string value. Do NOT add quotes; renderer will add them.")
+
+class NumericArg(BaseModel):
+    type: Literal["numeric"] = "numeric"
+    value: Union[int, float, bool]
+
 class ChannelChain(BaseModel):
     type: Literal["channel_chain"] = "channel_chain"
     
@@ -109,6 +148,7 @@ class ChannelChain(BaseModel):
     @field_validator('start_variable')
     def validate_source_syntax(cls, v):
         v = v.strip()
+        
         
         # 1. Channel Factories (Strict Allow List)
         if v.startswith("Channel."):
@@ -145,19 +185,31 @@ class ChannelChain(BaseModel):
             )
         return self
 
-class VarArg(BaseModel):
-    type: Literal["variable"] = "variable"
-    name: str = Field(..., description="The variable name.")
-
-class StringArg(BaseModel):
-    type: Literal["string"] = "string"
-    value: str = Field(..., description="The string value. Do NOT add quotes; renderer will add them.")
-
-class NumericArg(BaseModel):
-    type: Literal["numeric"] = "numeric"
-    value: Union[int, float, bool]
-
 ProcessArgument = Union[VarArg, StringArg, NumericArg]
+
+class ArgumentParser(BaseModel):
+    @classmethod
+    def parse(cls, v: Any) -> ProcessArgument:
+        # If it's already a valid dict structure, let it pass
+        if isinstance(v, dict) and 'type' in v:
+            return v
+        
+        # If it's a raw string, we infer the type
+        if isinstance(v, str):
+            v = v.strip()
+            # Check for quotes = String
+            if (v.startswith("'") and v.endswith("'")) or (v.startswith('"') and v.endswith('"')):
+                return {"type": "string", "value": v[1:-1]}
+            # Check for numeric
+            if v.isdigit() or v.lower() in ['true', 'false', 'null']:
+                # Let Pydantic cast it later, or handle strict bools here
+                val = True if v.lower() == 'true' else False if v.lower() == 'false' else None
+                if val is None and v.lower() != 'null': val = int(v) 
+                return {"type": "numeric", "value": val if val is not None else 0}
+            # Default = Variable
+            return {"type": "variable", "name": v}
+        
+        return v
 
 class ProcessCall(BaseModel):
     type: Literal["process_call"] = "process_call"
@@ -176,26 +228,15 @@ class ProcessCall(BaseModel):
     # 2. 'output_attribute' handles the '.out.channelName' pattern.
     output_attribute: Optional[str] = Field(None, description="Specific named output to extract (e.g., 'bam' implies accessing '.out.bam').")
 
-    @field_validator('args')
-    def validate_literals(cls, v):
-        reserved = {'params', 'it', 'workflow', 'launchDir', 'projectDir', 'true', 'false', 'null'}
-        for arg in v:
-            # If alphanumeric, not reserved, and not quoted -> Suspect
-            if re.match(r'^[a-zA-Z0-9]+$', arg) and arg not in reserved:
-                raise ValueError(
-                    f"AMBIGUOUS ARGUMENT: '{arg}'.\n"
-                    f"Did you mean the STRING '{arg}' or the VARIABLE {arg}?\n"
-                    f" - For strings, use QUOTES: \"'{arg}'\"\n"
-                    f" - For variables, ensure it is defined."
-                )
+    @field_validator('args', mode='before')
+    def allow_lazy_args(cls, v):
+        """
+        Auto-converts ["reads", "'strict'"] -> [{"type": "variable"...}, ...]
+        """
+        if isinstance(v, list):
+            return [ArgumentParser.parse(item) for item in v]
         return v
     
-    @field_validator('args')
-    def validate_args_content(cls, v):
-        if any(a is None for a in v):
-            raise ValueError("Arguments cannot be None")
-        return v
-
     @model_validator(mode='after')
     def validate_process_call_logic(self):
         name = self.process_name
@@ -458,6 +499,11 @@ class EntrypointWorkflow(BaseModel):
         description="List of execution statements. NOTE: Complex logic (Chains, multiMap) is FORBIDDEN here. Logic must be inside the NamedWorkflow."
     )
 
+    @field_validator('body', mode='before')
+    def fix_lazy_process_calls(cls, v):
+        # Re-use the logic from NextflowWorkflow
+        return repair_lazy_calls(v)
+
     @model_validator(mode='after')
     def forbid_complex_logic(self):
         for stmt in self.body:
@@ -493,15 +539,101 @@ class NextflowPipelineAST(BaseModel):
     # 4. Entrypoint
     entrypoint: EntrypointWorkflow
 
+    @model_validator(mode='before')
+    def deduplicate_logic(cls, values: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        1. Removes 'heavy logic' (cross/multiMap) from main_workflow.
+        2. Removes CALLS to sub_workflows from main_workflow.
+        3. REPAIRS SCOPE: Renames variables to match 'take_channels'.
+        """
+        main_wf = values.get('main_workflow')
+        sub_wfs = values.get('sub_workflows', [])
+        
+        # Basic Type Safety
+        if not sub_wfs or not isinstance(main_wf, dict): return values
+        body = main_wf.get('body', [])
+        if not isinstance(body, list): return values
+        
+        # Get Valid Inputs (to map against)
+        inputs = main_wf.get('take_channels', [])
+        if not isinstance(inputs, list): inputs = []
+        
+        # Get Sub-workflow names (to prune calls)
+        sub_wf_names = {s.get('name') for s in sub_wfs if isinstance(s, dict) and 'name' in s}
+
+        clean_body = []
+        
+        for stmt in body:
+            if not isinstance(stmt, dict): continue
+            
+            # --- HELPER: Detect Types Robustly (LLM might omit "type" key) ---
+            # THIS IS THE CRITICAL FIX YOU ARE MISSING
+            is_chain = stmt.get('type') == 'channel_chain' or 'start_variable' in stmt
+            is_call  = stmt.get('type') == 'process_call' or 'process_name' in stmt
+
+            # --- RULE A: Drop Logic Chains ---
+            # If it looks like a chain, it's hallucinated logic. Delete it.
+            if is_chain:
+                continue 
+
+            # --- RULE B: Drop Recursive Sub-Workflow Calls ---
+            # If main tries to call 'prepare_inputs', delete it. Entrypoint handles that.
+            if is_call:
+                if stmt.get('process_name') in sub_wf_names:
+                    continue
+
+            # --- RULE C: Scope Repair & Input Mapping ---
+            # If a tool uses a variable we deleted (e.g. 'ch_prepared'), wire it to inputs.
+            if is_call:
+                args = stmt.get('args', [])
+                new_args = []
+                
+                for i, arg in enumerate(args):
+                    # Get string representation for matching
+                    arg_val = ""
+                    if isinstance(arg, dict):
+                        arg_val = arg.get('name') or arg.get('value') or ""
+                    else:
+                        arg_val = str(arg)
+                    
+                    # 1. Check if variable is ALREADY valid
+                    clean_name = arg_val.split('.')[0]
+                    if clean_name in inputs:
+                        new_args.append(arg) # It's fine, keep it
+                        continue
+
+                    # 2. Fuzzy Match (e.g. "ch_prepared.reads" -> "reads")
+                    match = next((inp for inp in inputs if inp in arg_val), None)
+                    
+                    # 3. Positional Fallback (Arg 0 -> Input 0)
+                    if not match and i < len(inputs):
+                        match = inputs[i]
+                    
+                    if match:
+                        # Fix: Force it to be a valid Variable object
+                        new_args.append({"type": "variable", "name": match})
+                    else:
+                        # Give up and keep original (prevents breaking constants)
+                        new_args.append(arg)
+                        
+                stmt['args'] = new_args
+                
+                # Ensure 'type' key exists for downstream validators
+                if 'type' not in stmt: stmt['type'] = 'process_call'
+                
+            clean_body.append(stmt)
+        
+        main_wf['body'] = clean_body
+        values['main_workflow'] = main_wf
+        
+        return values
+
     @model_validator(mode='after')
     def validate_prepare_inputs_location(self):
         for p in self.processes:
             if not p.input_declarations and not p.output_declarations:
                 if 'prepare' in p.name.lower() or 'logic' in p.name.lower():
-                    raise ValueError(
-                        f"CLASSIFICATION ERROR: '{p.name}' is defined as a Process but looks like logic.\n"
-                        f"Does it contain DSL code? Move it to 'sub_workflows'."
-                    )
+                    raise ValueError(f"'{p.name}' looks like logic but is defined as a Process. Move to 'sub_workflows'.")
         return self
     
     @model_validator(mode='after')
@@ -516,6 +648,7 @@ class NextflowPipelineAST(BaseModel):
                 name = f.split(' as ')[-1].strip()
                 scope.add(name)
 
+        # Add Sub-workflows to scope (so they can be called)
         for sub in self.sub_workflows:
             scope.add(sub.name)
 
@@ -525,11 +658,14 @@ class NextflowPipelineAST(BaseModel):
         # Scan Body
         for i, stmt in enumerate(self.main_workflow.body):
             if isinstance(stmt, ProcessCall):
+
                 for arg in stmt.args:
-                    root = arg.split('.')[0].split('(')[0]
-                    if root and root[0].isalpha() and root not in scope:
-                        raise ValueError(f"SCOPE ERROR: Step {i} uses undefined variable '{root}'.")
-                
+
+                    if arg.type == 'variable':
+                        root = arg.name.split('.')[0].split('(')[0]
+                        
+                        if root and root[0].isalpha() and root not in scope:
+                             raise ValueError(f"SCOPE ERROR: Step {i} uses undefined variable '{root}'.")
                 if stmt.assign_to: scope.add(stmt.assign_to)
                 scope.add(stmt.process_name)
 
