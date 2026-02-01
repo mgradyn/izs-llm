@@ -561,21 +561,31 @@ class NextflowPipelineAST(BaseModel):
         if not isinstance(inputs, list): inputs = []
         sub_wf_names = {s.get('name') for s in sub_wfs if isinstance(s, dict) and 'name' in s}
 
-        def clean_block(statements):
+        def clean_block(statements, parent_scope):
             if not isinstance(statements, list): return statements
+            
+            current_scope = set(parent_scope)
             cleaned = []
             
             for stmt in statements:
                 if not isinstance(stmt, dict): continue
                 
                 if stmt.get('type') == 'conditional':
-                    stmt['body'] = clean_block(stmt.get('body', []))
+                    stmt['body'] = clean_block(stmt.get('body', []), current_scope)
                     if stmt['body']: 
                         cleaned.append(stmt)
                     continue
 
                 is_chain = stmt.get('type') == 'channel_chain' or 'start_variable' in stmt
                 is_call  = stmt.get('type') == 'process_call' or 'process_name' in stmt
+                is_assign = stmt.get('type') == 'assignment'
+
+                if is_chain and stmt.get('set_variable'):
+                    current_scope.add(stmt.get('set_variable'))
+                if is_call and stmt.get('assign_to'):
+                    current_scope.add(stmt.get('assign_to'))
+                if is_assign and stmt.get('variable'):
+                    current_scope.add(stmt.get('variable'))
 
                 if is_call and inputs:
                     if stmt.get('process_name') in sub_wf_names: 
@@ -586,19 +596,22 @@ class NextflowPipelineAST(BaseModel):
                     new_args = []
                     for i, arg in enumerate(args):
                         arg_val = str(arg.get('name') or arg.get('value') or "") if isinstance(arg, dict) else str(arg)
-                        
-                        clean_name = arg_val.split('.')[0]
-                        if clean_name in inputs:
-                            new_args.append(arg)
-                            continue
+                        import re
+                        match_root = re.match(r'^([a-zA-Z_][a-zA-Z0-9_]*)', arg_val)
+                        root_var = match_root.group(1) if match_root else arg_val
 
-                        match = next((inp for inp in inputs if inp in arg_val), None)
-                        if not match and i < len(inputs): match = inputs[i]
-                        
-                        if match:
-                            new_args.append({"type": "variable", "name": match})
-                        else:
+                        if root_var in current_scope or root_var in inputs:
                             new_args.append(arg)
+                        else:
+                            match = next((inp for inp in inputs if inp in arg_val), None)
+                            
+                            if not match and i < len(inputs): 
+                                match = inputs[i]
+                            
+                            if match:
+                                new_args.append({"type": "variable", "name": match})
+                            else:
+                                new_args.append(arg)
                             
                     stmt['args'] = new_args
                     if 'type' not in stmt: stmt['type'] = 'process_call'
@@ -606,7 +619,7 @@ class NextflowPipelineAST(BaseModel):
                 cleaned.append(stmt)
             return cleaned
 
-        main_wf['body'] = clean_block(main_wf.get('body', []))
+        main_wf['body'] = clean_block(main_wf.get('body', []), set(inputs))
         values['main_workflow'] = main_wf
         return values
 
