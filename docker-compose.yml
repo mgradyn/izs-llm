@@ -1,0 +1,28 @@
+services:
+  # Your Python App
+  api:
+    build: .
+    container_name: api
+    restart: always
+    environment:
+      - MISTRAL_API_KEY=${MISTRAL_API_KEY}
+    # We DO NOT expose port 8080 to the world anymore.
+    # Only Caddy can talk to it.
+
+  # The HTTPS Server
+  caddy:
+    image: caddy:latest
+    restart: always
+    ports:
+      - "80:80" # HTTP
+      - "443:443" # HTTPS
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - api
+
+volumes:
+  caddy_data:
+  caddy_config:
