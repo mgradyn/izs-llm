@@ -1,5 +1,6 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from typing import Optional, Dict, Any
 
@@ -39,6 +40,15 @@ app = FastAPI(
     title="Mistral-Nextflow Agent API",
     version="1.0.0",
     lifespan=lifespan
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    # For production, put specific website URL: ["https://my-website.com"]
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],    
+    allow_headers=["*"],    
 )
 
 # --- 4. ENDPOINTS ---
