@@ -30,6 +30,7 @@ def render_nextflow_code(ast) -> str:
 def render_mermaid(ast: Union[Any, Dict[str, Any]]) -> str:
     # --- 1. HELPERS ---
     def get_val(obj, key, default=None):
+        if obj is None: return default  
         if isinstance(obj, dict): 
             return obj.get(key, default)
         return getattr(obj, key, default)
@@ -38,13 +39,19 @@ def render_mermaid(ast: Union[Any, Dict[str, Any]]) -> str:
         if not name: return "Unknown"
         clean = re.sub(r'[^a-zA-Z0-9_]', '_', str(name))
         
+        keywords = {'end', 'subgraph', 'classDef', 'direction', 'style', 'linkStyle', 'callback', 'click'}
+        if clean in keywords:
+            clean = f"{clean}_"
+
         if len(clean) > 30 or not clean or clean[0].isdigit() or clean.startswith('_'):
             h = hashlib.md5(str(name).encode()).hexdigest()[:6]
             return f"node_{h}"
         return clean
-
+    
     def clean_label(text):
-        return str(text).replace('\n', ' ').replace('"', "'")
+        text = str(text)
+        text = text.replace('\\', '\\\\') 
+        return text.replace('\n', ' ').replace('"', "'")
 
     def resolve_variable_link(text_fragment, target_node_id, variable_registry, lines, seen_edges, style="-->"):
         if not isinstance(text_fragment, str): return 
@@ -135,8 +142,8 @@ def render_mermaid(ast: Union[Any, Dict[str, Any]]) -> str:
             if stype == 'process_call':
                 proc_name = get_val(stmt, 'process_name')
                 assign_to = get_val(stmt, 'assign_to')
-                proc_node_id = make_id(f"{subgraph_prefix}_{proc_name}" if subgraph_prefix else proc_name)
-                
+                proc_node_id = make_id(f"{subgraph_prefix}_proc_{proc_name}" if subgraph_prefix else f"proc_{proc_name}")
+
                 if proc_name in sub_workflow_names:
                     lines.append(f'    {proc_node_id}[["{clean_label(proc_name)}"]]:::subworkflow')
                 else:
@@ -175,7 +182,7 @@ def render_mermaid(ast: Union[Any, Dict[str, Any]]) -> str:
                 op_name = "\\n".join(ops)
                 op_node_id = make_id(f"op_{start_var}_{len(seen_edges)}")
                 
-                lines.append(f'    {op_node_id}{{{{"{clean_label(op_name)}"}}:::operator')
+                lines.append(f'    {op_node_id}{{{{"{clean_label(op_name)}"}}}}:::operator')
 
                 if start_var:
                     resolve_variable_link(start_var, op_node_id, variable_registry, lines, seen_edges)
@@ -191,7 +198,6 @@ def render_mermaid(ast: Union[Any, Dict[str, Any]]) -> str:
 
                 if set_var:
                     var_node_id = f"Var_{make_id(set_var)}_{op_node_id}"
-                    # FIX: Wrap label in quotes
                     lines.append(f'    {var_node_id}(("{clean_label(set_var)}")):::data')
                     lines.append(f'    {op_node_id} --> {var_node_id}')
                     variable_registry[set_var] = var_node_id
@@ -200,7 +206,6 @@ def render_mermaid(ast: Union[Any, Dict[str, Any]]) -> str:
             elif stype == 'conditional':
                 cond_str = clean_label(get_val(stmt, 'condition'))
                 sub_id = f"sub_{hashlib.md5(cond_str.encode()).hexdigest()[:4]}"
-                # FIX: cleaned condition label
                 lines.append(f'    subgraph {sub_id} ["if {cond_str}"]')
                 lines.append(f'    direction TB')
                 process_statements(get_val(stmt, 'body', []), subgraph_prefix=sub_id)
