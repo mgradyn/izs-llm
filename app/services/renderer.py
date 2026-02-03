@@ -30,7 +30,7 @@ def render_nextflow_code(ast) -> str:
 def render_mermaid(ast: Union[Any, Dict[str, Any]]) -> str:
     # --- 1. HELPERS ---
     def get_val(obj, key, default=None):
-        if obj is None: return default  
+        if obj is None: return default
         if isinstance(obj, dict): 
             return obj.get(key, default)
         return getattr(obj, key, default)
@@ -47,11 +47,19 @@ def render_mermaid(ast: Union[Any, Dict[str, Any]]) -> str:
             h = hashlib.md5(str(name).encode()).hexdigest()[:6]
             return f"node_{h}"
         return clean
-    
-    def clean_label(text):
-        text = str(text)
-        text = text.replace('\\', '\\\\') 
-        return text.replace('\n', ' ').replace('"', "'")
+
+    def safe_get_label(text, fallback="?"):
+        """
+        Cleans text for Mermaid AND ensures it is never empty.
+        Empty labels like [""] cause syntax errors.
+        """
+        if text is None: return fallback
+        s = str(text)
+        if not s.strip(): return "''" # Render empty strings as visible ''
+        
+        # Escape backslashes first, then handle quotes and newlines
+        s = s.replace('\\', '\\\\')
+        return s.replace('\n', ' ').replace('"', "'")
 
     def resolve_variable_link(text_fragment, target_node_id, variable_registry, lines, seen_edges, style="-->"):
         if not isinstance(text_fragment, str): return 
@@ -66,7 +74,7 @@ def render_mermaid(ast: Union[Any, Dict[str, Any]]) -> str:
             
             edge_key = f"{src_id}|{target_node_id}|{label}"
             if edge_key not in seen_edges:
-                display_label = clean_label(label) if label else ""
+                display_label = safe_get_label(label, "") if label else ""
                 arrow = f'-- "{display_label}" -->' if label else f'{style}'
                 lines.append(f'    {src_id} {arrow} {target_node_id}')
                 seen_edges.add(edge_key)
@@ -97,7 +105,7 @@ def render_mermaid(ast: Union[Any, Dict[str, Any]]) -> str:
 
                 edge_key = f"{src_id}|{target_node_id}|{label}"
                 if edge_key not in seen_edges:
-                    display_label = clean_label(label) if label else ""
+                    display_label = safe_get_label(label, "") if label else ""
                     arrow = f'-- "{display_label}" -->' if label else f'{style}'
                     lines.append(f'    {src_id} {arrow} {target_node_id}')
                     seen_edges.add(edge_key)
@@ -130,7 +138,7 @@ def render_mermaid(ast: Union[Any, Dict[str, Any]]) -> str:
     take_channels = get_val(mw, 'take_channels', [])
     for channel in take_channels:
         node_id = f"Var_{make_id(channel)}"
-        lines.append(f'    {node_id}(["{clean_label(channel)}"]):::data')
+        lines.append(f'    {node_id}(["{safe_get_label(channel)}"]):::data')
         variable_registry[channel] = node_id
 
     # --- 5. RECURSIVE BUILDER ---
@@ -143,11 +151,12 @@ def render_mermaid(ast: Union[Any, Dict[str, Any]]) -> str:
                 proc_name = get_val(stmt, 'process_name')
                 assign_to = get_val(stmt, 'assign_to')
                 proc_node_id = make_id(f"{subgraph_prefix}_proc_{proc_name}" if subgraph_prefix else f"proc_{proc_name}")
-
+                
+                label = safe_get_label(proc_name, "Process")
                 if proc_name in sub_workflow_names:
-                    lines.append(f'    {proc_node_id}[["{clean_label(proc_name)}"]]:::subworkflow')
+                    lines.append(f'    {proc_node_id}[["{label}"]]:::subworkflow')
                 else:
-                    lines.append(f'    {proc_node_id}["{clean_label(proc_name)}"]:::process')
+                    lines.append(f'    {proc_node_id}["{label}"]:::process')
                 
                 args = get_val(stmt, 'args', [])
                 for arg in args:
@@ -158,7 +167,7 @@ def render_mermaid(ast: Union[Any, Dict[str, Any]]) -> str:
                         val = str(get_val(arg, 'value'))
                         const_id = make_id(f"const_{val}_{proc_node_id}")
                         if const_id not in seen_edges:
-                            lines.append(f'    {const_id}("{clean_label(val)}"):::global')
+                            lines.append(f'    {const_id}("{safe_get_label(val)}"):::global')
                             lines.append(f'    {const_id} -.-> {proc_node_id}')
                             seen_edges.add(const_id)
                     elif isinstance(arg, str): 
@@ -166,7 +175,7 @@ def render_mermaid(ast: Union[Any, Dict[str, Any]]) -> str:
 
                 if assign_to:
                     var_node_id = f"Var_{make_id(assign_to)}_{proc_node_id}"
-                    lines.append(f'    {var_node_id}(("{clean_label(assign_to)}")):::data')
+                    lines.append(f'    {var_node_id}(("{safe_get_label(assign_to)}")):::data')
                     lines.append(f'    {proc_node_id} --> {var_node_id}')
                     variable_registry[assign_to] = var_node_id
                 
@@ -182,7 +191,7 @@ def render_mermaid(ast: Union[Any, Dict[str, Any]]) -> str:
                 op_name = "\\n".join(ops)
                 op_node_id = make_id(f"op_{start_var}_{len(seen_edges)}")
                 
-                lines.append(f'    {op_node_id}{{{{"{clean_label(op_name)}"}}}}:::operator')
+                lines.append(f'    {op_node_id}{{{{"{safe_get_label(op_name, "op")}"}}}}:::operator')
 
                 if start_var:
                     resolve_variable_link(start_var, op_node_id, variable_registry, lines, seen_edges)
@@ -198,13 +207,13 @@ def render_mermaid(ast: Union[Any, Dict[str, Any]]) -> str:
 
                 if set_var:
                     var_node_id = f"Var_{make_id(set_var)}_{op_node_id}"
-                    lines.append(f'    {var_node_id}(("{clean_label(set_var)}")):::data')
+                    lines.append(f'    {var_node_id}(("{safe_get_label(set_var)}")):::data')
                     lines.append(f'    {op_node_id} --> {var_node_id}')
                     variable_registry[set_var] = var_node_id
 
             # CASE C: CONDITIONAL
             elif stype == 'conditional':
-                cond_str = clean_label(get_val(stmt, 'condition'))
+                cond_str = safe_get_label(get_val(stmt, 'condition'), "condition")
                 sub_id = f"sub_{hashlib.md5(cond_str.encode()).hexdigest()[:4]}"
                 lines.append(f'    subgraph {sub_id} ["if {cond_str}"]')
                 lines.append(f'    direction TB')
@@ -218,14 +227,15 @@ def render_mermaid(ast: Union[Any, Dict[str, Any]]) -> str:
                 value = str(get_val(stmt, 'value'))
                 assign_id = make_id(f"assign_{var_name}")
                 
+                safe_val = safe_get_label(value)
                 if "(" in value and ")" in value:
-                    lines.append(f'    {assign_id}[["{clean_label(value)}"]]:::process')
+                    lines.append(f'    {assign_id}[["{safe_val}"]]:::process')
                 else:
-                    lines.append(f'    {assign_id}["{clean_label(value)}"]:::operator')
+                    lines.append(f'    {assign_id}["{safe_val}"]:::operator')
                 
                 if var_name:
                     var_node_id = f"Var_{make_id(var_name)}"
-                    lines.append(f'    {var_node_id}(("{clean_label(var_name)}")):::data')
+                    lines.append(f'    {var_node_id}(("{safe_get_label(var_name)}")):::data')
                     lines.append(f'    {assign_id} --> {var_node_id}')
                     variable_registry[var_name] = var_node_id
                 
@@ -234,13 +244,15 @@ def render_mermaid(ast: Union[Any, Dict[str, Any]]) -> str:
     # --- 6. RENDER SUB-WORKFLOWS
     for sub in sub_workflows:
         sub_name = get_val(sub, 'name')
-        lines.append(f'    subgraph {make_id(sub_name)}_scope ["Workflow: {clean_label(sub_name)}"]')
+        # FIX: Use safe_get_label
+        lines.append(f'    subgraph {make_id(sub_name)}_scope ["Workflow: {safe_get_label(sub_name)}"]')
         lines.append('    direction TB')
         
         sub_inputs = get_val(sub, 'take_channels', [])
         for inp in sub_inputs:
             inp_id = f"Var_{make_id(inp)}_{make_id(sub_name)}"
-            lines.append(f'    {inp_id}(["{clean_label(inp)}"]):::data')
+            # FIX: Use safe_get_label
+            lines.append(f'    {inp_id}(["{safe_get_label(inp)}"]):::data')
             variable_registry[inp] = inp_id
             
         process_statements(get_val(sub, 'body', []), subgraph_prefix=sub_name)
