@@ -60,9 +60,25 @@ class ImportItem(BaseModel):
             cleaned.append(func)
         return cleaned
         
-class GlobalDef(BaseModel):
+class GlobalString(BaseModel):
+    type: Literal['string'] = 'string'
     name: str = Field(..., description="The variable name.")
-    value: str = Field(..., description="The value.")
+    value: str = Field(..., description="The string value.")
+
+# 2. For numeric values (e.g., threads = 4)
+class GlobalNumber(BaseModel):
+    type: Literal['number'] = 'number'
+    name: str = Field(..., description="The variable name.")
+    value: float | int = Field(..., description="The numeric value.")
+
+# 3. For variable references (e.g., input_file = params.input)
+class GlobalVar(BaseModel):
+    type: Literal['variable'] = 'variable'
+    name: str = Field(..., description="The variable name.")
+    value: str = Field(..., description="The name of the referenced variable.")
+
+# The Union acts as the router
+GlobalDef = Union[GlobalString, GlobalNumber, GlobalVar]
     
 # --- 2. LOGIC BUILDING BLOCKS (The "Atoms") ---
 
@@ -94,7 +110,7 @@ class ParametricOperator(BaseModel):
 
 # --- Category 3: Flexible Operators (Can have Args OR Closure) ---
 class FlexibleOperator(BaseModel):
-    operator: Literal['filter', 'unique', 'distinct', 'collect', 'cross', 'buffer']
+    operator: Literal['filter', 'unique', 'distinct', 'collect', 'buffer']
     
     args: List[str] = Field(
         default=[], 
@@ -120,7 +136,23 @@ class StructuralOperator(BaseModel):
     args: List[str] = Field(default=[], description="Usually empty for these operators.")
     closure_lines: List[str] = Field(default=[], max_length=0)
 
-ChainOperator = Union[LogicOperator, ParametricOperator, FlexibleOperator, StructuralOperator]
+# --- Category 5: Pairing Operators (MUST have (...) args, OPTIONAL closure) ---
+class HybridPairingOperator(BaseModel):
+    operator: Literal['cross']
+    
+    args: List[str] = Field(
+        ...,
+        min_length=1,
+        max_length=1,
+        description="Single channel argument inside parentheses, e.g. ['target']."
+    )
+    
+    closure_lines: List[str] = Field(
+        default=[],
+        description="Optional closure to define the matching key."
+    )
+
+ChainOperator = Union[LogicOperator, ParametricOperator, FlexibleOperator, StructuralOperator, HybridPairingOperator]
 
 class VarArg(BaseModel):
     type: Literal["variable"] = "variable"

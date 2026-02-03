@@ -9,7 +9,11 @@ include { {{ imp.functions | join('; ') }} } from '{{ imp.module_path }}'
 
 // --- GLOBALS ---
 {% for g in globals %}
+    {% if g.type == 'string' %}
+def {{ g.name }} = "{{ g.value }}"
+    {% else %}
 def {{ g.name }} = {{ g.value }}
+    {% endif %}
 {% endfor %}
 
 // --- INLINE PROCESSES (Custom Scripts) ---
