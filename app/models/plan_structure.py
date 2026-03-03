@@ -81,6 +81,11 @@ class ComponentDef(BaseModel):
                 )
         return self
 
+class ChainOperation(BaseModel):
+    operator: str = Field(..., description="The Nextflow operator name (e.g., cross, map, branch, mix).")
+    args: List[str] = Field(default=[], description="Arguments inside the parentheses. Example: ['host']")
+    closure: List[str] = Field(default=[], description="Lines of code inside the curly braces. Example: ['extractKey(it)'] or ['with_host: it[1][1]', 'without_host: true']")
+
 class OperatorMacro(BaseModel):
     macro_type: Literal[
         "COLLECT_ALL", 
@@ -95,7 +100,8 @@ class OperatorMacro(BaseModel):
         "COMBINE_CHANNELS",
         "FLAT_MAP_DATA",
         "SPLIT_DATA",
-        "REDUCE_DATA"
+        "REDUCE_DATA",
+        "CUSTOM_CHAIN"
     ] = Field(
         ..., 
         description="The type of logic operation to perform."
@@ -110,11 +116,15 @@ class OperatorMacro(BaseModel):
     )
     mapping_rules: Optional[List[str]] = Field(
         default=[], 
-        description="Rules for how to structure the output. Used mainly for MULTI_MAP_SPLIT, BRANCH_SPLIT, MAP_DATA, FLAT_MAP_DATA, or SPLIT_DATA."
+        description="Rules for how to structure the output."
     )
     condition_rules: Optional[List[str]] = Field(
         default=[],
         description="Simple condition strings used for FILTER_DATA or BRANCH_SPLIT."
+    )
+    custom_operations: Optional[List[ChainOperation]] = Field(
+        default=[], 
+        description="Used ONLY for CUSTOM_CHAIN to define a sequence of chained operators."
     )
 
 class LogicStep(BaseModel):
@@ -152,86 +162,61 @@ class PipelinePlan(BaseModel):
             "examples": [
                 {
                     "strategy_selector": "ADAPTED_MATCH",
-                    "used_template_id": "draft_genome_template",
-                    "workflow_name": "module_draft_genome",
+                    "used_template_id": "denovo_template",
+                    "workflow_name": "module_denovo",
                     "components": [
                         {
-                            "process_alias": "step_4AN_genes__prokka",
+                            "process_alias": "step_1PP_hostdepl__bowtie",
                             "source_type": "RAG_COMPONENT",
-                            "component_id": "step_4AN_genes__prokka",
-                            "input_type": "Fasta",
-                            "output_type": "GFF"
+                            "component_id": "step_1PP_hostdepl__bowtie",
+                            "input_type": "FastQ",
+                            "output_type": "FastQ"
+                        },
+                        {
+                            "process_alias": "step_2AS_denovo__spades",
+                            "source_type": "RAG_COMPONENT",
+                            "component_id": "step_2AS_denovo__spades",
+                            "input_type": "FastQ",
+                            "output_type": "Fasta"
                         }
                     ],
                     "workflow_logic": [
                         {
                             "step_type": "MACRO",
-                            "description": "Cross consensus and referenceGB with custom shape for Prokka",
+                            "description": "Cross trimmed reads with host, map shape, and branch",
                             "macro_details": {
-                                "macro_type": "CROSS_SYNC",
-                                "input_channels": ["consensus", "referenceGB"],
-                                "output_variable": "consensusKingdomReference",
-                                "mapping_rules": ["[ it[0][0], it[0][1], PROKKA_KINGDOM, it[1][1], it[1][2], it[1][3] ]"],
-                                "condition_rules": []
+                                "macro_type": "CUSTOM_CHAIN",
+                                "input_channels": ["trimmedReads"],
+                                "output_variable": "branchedTrimmed",
+                                "custom_operations": [
+                                    {"operator": "cross", "args": ["host"], "closure": ["extractKey(it)"]},
+                                    {"operator": "map", "args": [], "closure": ["[ it[0][0], it[0][1], it[1][1] ]"]},
+                                    {"operator": "branch", "args": [], "closure": ["with_host: it[1][1]", "without_host: true"]}
+                                ]
                             }
                         },
                         {
                             "step_type": "PROCESS_RUN",
-                            "description": "Run prokka annotation",
-                            "code_snippet": "step_4AN_genes__prokka(consensusKingdomReference)"
+                            "description": "Run bowtie depletion",
+                            "code_snippet": "step_1PP_hostdepl__bowtie(branchedTrimmed.with_host)"
                         },
                         {
                             "step_type": "MACRO",
-                            "description": "Branch outputs to keep only valid non-empty files",
+                            "description": "Mix unmapped reads with depleted reads and map to tuple",
                             "macro_details": {
-                                "macro_type": "BRANCH_SPLIT",
-                                "input_channels": ["step_4AN_genes__prokka.out.gff"],
-                                "output_variable": "branched_gff",
-                                "mapping_rules": ["valid", "empty"],
-                                "condition_rules": ["it[1].size() > 0", "true"]
-                            }
-                        }
-                    ],
-                    "global_params": {}
-                },
-                {
-                    "strategy_selector": "CUSTOM_BUILD",
-                    "used_template_id": None,
-                    "workflow_name": "advanced_cartesian_pipeline",
-                    "components": [],
-                    "workflow_logic": [
-                        {
-                            "step_type": "MACRO",
-                            "description": "Split multi-fasta into individual records",
-                            "macro_details": {
-                                "macro_type": "SPLIT_DATA",
-                                "input_channels": ["raw_fasta"],
-                                "output_variable": "split_fasta_ch",
-                                "mapping_rules": ["splitFasta", "record: [id: it.id, seqString: it.seq]"],
-                                "condition_rules": []
+                                "macro_type": "CUSTOM_CHAIN",
+                                "input_channels": ["branchedTrimmed.without_host"],
+                                "output_variable": "denovoInput",
+                                "custom_operations": [
+                                    {"operator": "mix", "args": ["depleted"], "closure": []},
+                                    {"operator": "map", "args": [], "closure": ["it[0,1]"]}
+                                ]
                             }
                         },
                         {
-                            "step_type": "MACRO",
-                            "description": "Create Cartesian product of fasta records and all databases",
-                            "macro_details": {
-                                "macro_type": "COMBINE_CHANNELS",
-                                "input_channels": ["split_fasta_ch", "reference_dbs"],
-                                "output_variable": "combined_search_ch",
-                                "mapping_rules": [],
-                                "condition_rules": []
-                            }
-                        },
-                        {
-                            "step_type": "MACRO",
-                            "description": "Map to extract exactly what the next process needs",
-                            "macro_details": {
-                                "macro_type": "MAP_DATA",
-                                "input_channels": ["combined_search_ch"],
-                                "output_variable": "mapped_search_ch",
-                                "mapping_rules": ["[ it[0].id, it[0].seqString, it[1].db_path ]"],
-                                "condition_rules": []
-                            }
+                            "step_type": "PROCESS_RUN",
+                            "description": "Run Spades assembly",
+                            "code_snippet": "step_2AS_denovo__spades(denovoInput)"
                         }
                     ],
                     "global_params": {}

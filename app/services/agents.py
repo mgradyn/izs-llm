@@ -61,9 +61,13 @@ Instead use step_type="MACRO" and provide the macro_details.
 Supported macro_types: 
 - `COLLECT_ALL`, `CROSS_SYNC`, `MULTI_MAP_SPLIT`, `JOIN_BY_KEY`, `GROUP_BY_KEY`, `MIX_CHANNELS`, `FILTER_DATA`, `BRANCH_SPLIT`, `MAP_DATA`
 - **Advanced Macros:** `COMBINE_CHANNELS` (Cartesian product), `FLAT_MAP_DATA` (flatten arrays), `SPLIT_DATA` (splitCsv/splitFasta), `REDUCE_DATA` (aggregate lists).
+- **Chaining Macros:** `CUSTOM_CHAIN`.
 
 **CRITICAL CROSS_SYNC / MAP_DATA RULE:**
 If your `.cross()` or custom `.map()` operation requires a specific shape (e.g. injecting a global variable or specific array indexes like `[ it[0][0], it[0][1], PROKKA_KINGDOM, it[1][1] ]`), you MUST put that exact Groovy array string inside the `mapping_rules` list of the macro. If left empty, it uses a generic default.
+
+**CRITICAL CUSTOM_CHAIN RULE:**
+If you need to chain multiple operators together on the same channel (for example running `.cross()` then `.map()` then `.branch()`), you MUST use the `CUSTOM_CHAIN` macro. Leave `mapping_rules` and `condition_rules` empty, and instead fill out the `custom_operations` list with each step in exact order.
 
 # EXAMPLES (Strategy Few-Shot)
 
@@ -201,6 +205,40 @@ If your `.cross()` or custom `.map()` operation requires a specific shape (e.g. 
     ],
     "global_params": {{}}
 }}
+
+## Example 4 ADAPTED TEMPLATE With Complex Chaining (CUSTOM_CHAIN)
+**User:** "Run host depletion and de novo assembly."
+**Response:**
+{{
+    "strategy_selector": "ADAPTED_MATCH",
+    "used_template_id": "denovo_template",
+    "workflow_name": "module_denovo",
+    "components": [ ... ],
+    "workflow_logic": [
+        {{
+            "step_type": "MACRO",
+            "description": "Cross trimmed reads with host, map shape, and branch",
+            "macro_details": {{
+                "macro_type": "CUSTOM_CHAIN",
+                "input_channels": ["trimmedReads"],
+                "output_variable": "branchedTrimmed",
+                "mapping_rules": [],
+                "condition_rules": [],
+                "custom_operations": [
+                    {{"operator": "cross", "args": ["host"], "closure": ["extractKey(it)"]}},
+                    {{"operator": "map", "args": [], "closure": ["[ it[0][0], it[0][1], it[1][1] ]"]}},
+                    {{"operator": "branch", "args": [], "closure": ["with_host: it[1][1]", "without_host: true"]}}
+                ]
+            }}
+        }},
+        {{
+            "step_type": "PROCESS_RUN",
+            "description": "Run bowtie depletion",
+            "code_snippet": "step_1PP_hostdepl__bowtie(branchedTrimmed.with_host)"
+        }}
+    ],
+    "global_params": {{}}
+}}
 """
 
 ARCHITECT_SYSTEM_PROMPT = """
@@ -236,8 +274,8 @@ Populate `main_workflow.body` using the following strict node types.
 
 ## A. Macro Calls (`MacroCall`)
 **Trigger:** The plan contains a `MACRO` step type.
-* **Action:** Create a `MacroCall` node. You MUST copy the `macro_type`, `input_channels`, `output_variable`, `mapping_rules`, and `condition_rules` exactly from the planner.
-* **Constraint:** Do not try to build `ChannelChain` operators (like `.cross` or `.multiMap`) for macros. The python compiler will handle the Groovy code automatically. Allowed macros: `COLLECT_ALL`, `CROSS_SYNC`, `MULTI_MAP_SPLIT`, `JOIN_BY_KEY`, `GROUP_BY_KEY`, `MIX_CHANNELS`, `FILTER_DATA`, `BRANCH_SPLIT`, `MAP_DATA`, `COMBINE_CHANNELS`, `FLAT_MAP_DATA`, `SPLIT_DATA`, `REDUCE_DATA`.
+* **Action:** Create a `MacroCall` node. You MUST copy the `macro_type`, `input_channels`, `output_variable`, `mapping_rules`, `condition_rules`, and `custom_operations` exactly from the planner.
+* **Constraint:** Do not try to build `ChannelChain` operators (like `.cross` or `.multiMap`) for macros. The python compiler will handle the Groovy code automatically. Allowed macros: `COLLECT_ALL`, `CROSS_SYNC`, `MULTI_MAP_SPLIT`, `JOIN_BY_KEY`, `GROUP_BY_KEY`, `MIX_CHANNELS`, `FILTER_DATA`, `BRANCH_SPLIT`, `MAP_DATA`, `COMBINE_CHANNELS`, `FLAT_MAP_DATA`, `SPLIT_DATA`, `REDUCE_DATA`, `CUSTOM_CHAIN`.
 
 ## B. Process Calls (`ProcessCall`)
 **Trigger:** The plan contains a `PROCESS_RUN` step type.

@@ -270,6 +270,11 @@ class ConditionalBlock(BaseModel):
              
         return v
 
+class ChainOperation(BaseModel):
+    operator: str
+    args: List[str] = Field(default=[])
+    closure: List[str] = Field(default=[])
+
 class MacroCall(BaseModel):
     type: Literal["macro_call"] = "macro_call"
     macro_type: Literal[
@@ -285,16 +290,39 @@ class MacroCall(BaseModel):
         "COMBINE_CHANNELS",
         "FLAT_MAP_DATA",
         "SPLIT_DATA",
-        "REDUCE_DATA"
+        "REDUCE_DATA",
+        "CUSTOM_CHAIN"
     ]
     input_channels: List[str] = Field(..., min_length=1)
     output_variable: str
     mapping_rules: List[str] = Field(default=[])
     condition_rules: List[str] = Field(default=[])
+    custom_operations: List[ChainOperation] = Field(default=[])
 
 def compile_macro_to_chain(macro: MacroCall) -> ChannelChain:
     start_var = macro.input_channels[0]
     steps = []
+    
+    if macro.macro_type == "CUSTOM_CHAIN":
+        for op in macro.custom_operations:
+            op_name = op.operator
+            if op_name in ['multiMap', 'branch', 'map', 'flatMap', 'reduce']:
+                steps.append(LogicOperator(operator=op_name, args=[], closure_lines=op.closure))
+            elif op_name in ['groupTuple', 'join', 'mix', 'concat', 'combine']:
+                steps.append(ParametricOperator(operator=op_name, args=op.args, closure_lines=[]))
+            elif op_name in ['filter', 'unique', 'distinct', 'collect', 'buffer', 'splitCsv', 'splitFasta', 'splitText']:
+                steps.append(FlexibleOperator(operator=op_name, args=op.args, closure_lines=op.closure))
+            elif op_name in ['flatten', 'transpose']:
+                steps.append(StructuralOperator(operator=op_name, args=op.args, closure_lines=[]))
+            elif op_name == 'cross':
+                steps.append(HybridPairingOperator(operator=op_name, args=op.args, closure_lines=op.closure))
+                
+        return ChannelChain(
+            type="channel_chain",
+            start_variable=start_var,
+            steps=steps,
+            set_variable=macro.output_variable
+        )
     
     if macro.macro_type == "COLLECT_ALL":
         steps.append(FlexibleOperator(operator="collect", args=[], closure_lines=[]))
