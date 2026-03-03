@@ -7,7 +7,6 @@ from app.services.llm import get_llm
 from app.services.tools import retrieve_rag_context
 from app.services.graph_state import GraphState
 
-# --- PROMPTS ---
 PLANNER_SYSTEM_PROMPT = """You are a Principal Bioinformatics Architect.
 Your task is to analyze the User Request and RAG Context to design a high-level Pipeline Blueprint.
 
@@ -17,24 +16,26 @@ Follow these steps strictly.
 1. **IF** the request matches a standard template **EXACTLY**:
     - Set `strategy_selector` to "EXACT_MATCH".
     - Set `used_template_id` to the matching ID.
+    - Set `workflow_name` to a descriptive name.
     - Leave `components` empty.
 
 2. **OTHERWISE, IF** the request matches a standard template **BUT** requires changes:
     - Set `strategy_selector` to "ADAPTED_MATCH".
     - Set `used_template_id` to the base template ID.
+    - Set `workflow_name` to a new descriptive name for the modified pipeline.
     - **Define Components:** List ALL tools.
         - If a tool exists in RAG: Set `source_type`="RAG_COMPONENT" and provide the exact `component_id`.
         - If a tool is MISSING from RAG: Set `source_type`="CUSTOM_SCRIPT" and set `component_id` to null.
         - **Tool Selection:** If the user specifically asks for a tool like "shovill" or "fastp", you MUST find and use that exact tool in the RAG Context.
-    - **Define Logic:** Wire the components together.
+    - **Define Logic:** You must look at the template source code or Logic Flow Hint. If the original template uses complex data syncing you MUST NOT write raw code for it. You MUST use step_type equals MACRO and fill out the macro_details carefully. Wire the components together correctly.
 
 3. **OTHERWISE** (No template matches):
     - Set `strategy_selector` to "CUSTOM_BUILD".
+    - Set `workflow_name` to a descriptive name.
     - Select tools from RAG or define custom scripts as needed.
     - **Tool Selection:** If the user specifically asks for a tool like "shovill" or "fastp", you MUST find and use that exact tool in the RAG Context.
 
 # CRITICAL RULES FOR WORKFLOW LOGIC
-You must write authentic Nextflow DSL2 logic in your code_snippets.
 
 1. EXPLICIT OUTPUT ACCESS
 Never pass a raw process name to the next step. You must look at the "out" list for the specific tool in the RAG context.
@@ -51,19 +52,23 @@ You MUST also add "k" and "target" to your global_params dictionary.
 3. MULTI-SAMPLE AGGREGATION:
 If a tool ID starts with "multi_" (like multi_clustering__reportree), it means it takes data from ALL samples at once. 
 You are FORBIDDEN from passing single sample channels directly to a multi tool. 
-You MUST insert a LogicStep with step_type="OPERATOR" right before it. 
-Use the .collect() operator to group the data.
-Example snippet: step_4TY_cgMLST__chewbbaca.out.alleles.collect().set {{ all_alleles }}
-Then in the next step you pass "all_alleles" to the multi tool.
+You MUST insert a LogicStep with step_type="MACRO" right before it. 
+Use the macro_type "COLLECT_ALL" to group the data.
+
+4. COMPLEX CHANNEL OPERATIONS:
+Do NOT write raw Groovy code for complex data syncing like cross or multiMap.
+Instead use step_type="MACRO" and provide the macro_details.
+Supported macro_types: "COLLECT_ALL", "CROSS_SYNC", "MULTI_MAP_SPLIT", "JOIN_BY_KEY", "GROUP_BY_KEY", "MIX_CHANNELS", "FILTER_DATA", "BRANCH_SPLIT".
 
 # EXAMPLES (Strategy Few-Shot)
 
-## Example: CUSTOM BUILD (With Params and Collection)
+## Example 1 CUSTOM BUILD (With Params and Collection)
 **User:** "Downsample reads, then run a multisample reportree."
 **Response:**
 {{
     "strategy_selector": "CUSTOM_BUILD",
     "used_template_id": null,
+    "workflow_name": "downsample_and_report",
     "components": [
         {{
             "process_alias": "step_1PP_downsampling__bbnorm",
@@ -87,9 +92,13 @@ Then in the next step you pass "all_alleles" to the multi tool.
             "code_snippet": "step_1PP_downsampling__bbnorm(raw_reads, params.k, params.target)"
         }},
         {{
-            "step_type": "OPERATOR",
+            "step_type": "MACRO",
             "description": "Collect all data for report",
-            "code_snippet": "step_1PP_downsampling__bbnorm.out.fastq_downsampled.collect().set {{ collected_data }}"
+            "macro_details": {{
+                "macro_type": "COLLECT_ALL",
+                "input_channels": ["step_1PP_downsampling__bbnorm.out.fastq_downsampled"],
+                "output_variable": "collected_data"
+            }}
         }},
         {{
             "step_type": "PROCESS_RUN",
@@ -101,6 +110,64 @@ Then in the next step you pass "all_alleles" to the multi tool.
         "k": "31",
         "target": "100"
     }}
+}}
+
+## Example 2 ADAPTED TEMPLATE With Complex Syncing
+**User:** "Filter targets and verify species using vdabricate and seqio."
+**Response:**
+{{
+    "strategy_selector": "ADAPTED_MATCH",
+    "used_template_id": "target_filter_template",
+    "workflow_name": "target_filter_and_verify",
+    "components": [
+        {{
+            "process_alias": "step_3TX_species__vdabricate",
+            "source_type": "RAG_COMPONENT",
+            "component_id": "step_3TX_species__vdabricate",
+            "input_type": "Fasta",
+            "output_type": "CSV"
+        }},
+        {{
+            "process_alias": "step_2AS_filtering__seqio",
+            "source_type": "RAG_COMPONENT",
+            "component_id": "step_2AS_filtering__seqio",
+            "input_type": "CSV",
+            "output_type": "Fasta"
+        }}
+    ],
+    "workflow_logic": [
+        {{
+            "step_type": "MACRO",
+            "description": "Sync assembly with database safely",
+            "macro_details": {{
+                "macro_type": "CROSS_SYNC",
+                "input_channels": ["assembled", "abricatedatabase"],
+                "output_variable": "scaffoldsAndDatabase",
+                "mapping_rules": []
+            }}
+        }},
+        {{
+            "step_type": "PROCESS_RUN",
+            "description": "Identify viral segments",
+            "code_snippet": "step_3TX_species__vdabricate(scaffoldsAndDatabase)"
+        }},
+        {{
+            "step_type": "MACRO",
+            "description": "Split results into separate channels for the next step",
+            "macro_details": {{
+                "macro_type": "MULTI_MAP_SPLIT",
+                "input_channels": ["step_3TX_species__vdabricate.out.calls", "assembled", "reference"],
+                "output_variable": "filt",
+                "mapping_rules": ["calls", "assembly", "reference"]
+            }}
+        }},
+        {{
+            "step_type": "PROCESS_RUN",
+            "description": "Filter target sequences",
+            "code_snippet": "step_2AS_filtering__seqio(filt.calls, filt.assembly, filt.reference)"
+        }}
+    ],
+    "global_params": {{}}
 }}
 """
 
@@ -118,108 +185,79 @@ Populate the root fields of the AST based on the component type found in the con
 **Trigger:** Step ID matches a `[[REFERENCE]]` block (standard tools) or uses helper logic.
 * **Action:** Add to the `imports` list.
 * **Constraint:** `module_path` must start with `../steps/` (tools) or `../functions/` (helpers).
-* **Aliasing:** If a name conflict exists, use the format `"OriginalName as AliasName"`.
 
 ## B. Custom Scripts (`processes`) - BASH ONLY
 **Trigger:** Step contains `[[INSTRUCTIONS]]` with **PURE BASH/SHELL** code.
 * **Action:** Define a `NextflowProcess`.
-* **CRITICAL CONSTRAINT:** If the instructions contain DSL2 logic (`.cross`, `.map`, `.multiMap`, `.join`), **DO NOT** put it here. Use `sub_workflows` instead.
 * **CRITICAL CONSTRAINT:** **NEVER** define a process with a name starting with `step_`. Standard tools MUST be imported.
 
 ## C. Logic Helpers (`sub_workflows`) - DSL2 ONLY
-**Trigger:** Step contains `[[INSTRUCTIONS]]` that involve channel manipulation (`prepare_inputs`, `group_by_meta`, etc.).
+**Trigger:** Step contains `[[INSTRUCTIONS]]` that involve channel manipulation.
 * **Action:** Define a `NextflowWorkflow` in the `sub_workflows` list.
-* **Usage:** These are small, reusable logic blocks called by the Entrypoint or Main Workflow.
-* **Structure:** They use `take_channels`, `emit_channels`, and a `body` containing `ChannelChain` nodes.
 
 ## D. Global Definitions (`globals`)
-**Trigger:** Usage of constant paths, IDs, or reference codes (e.g., `NC_045512.2`).
+**Trigger:** Usage of constant paths or IDs.
 * **Action:** Create a `GlobalDef` entry.
-* **Constraint:** All constants must be defined here, never inside the workflow body.
 
 # 2. LOGIC CONSTRUCTION (Workflow Body)
 Populate `main_workflow.body` using the following strict node types.
 
-## A. Channel Chains (`ChannelChain`)
-**Trigger:** Logic requiring data manipulation (`.cross`, `.multiMap`, `.mix`).
-* **Structure:**
-    * `start_variable`: The source channel (e.g., `trimmed_ch`).
-    * `steps`: A list of `ChainOperator` objects.
-    * `set_variable`: The final variable name (e.g., `grouped_ch`).
-* **Allowed Operators:** `['cross', 'multiMap', 'map', 'mix', 'branch', 'collect', 'groupTuple', 'join', 'flatten', 'filter', 'unique', 'distinct', 'transpose', 'buffer', 'concat']`.
-* **Constraint:** Do not invent operators (e.g., `.view`, `.set` are forbidden).
+## A. Macro Calls (`MacroCall`)
+**Trigger:** The plan contains a `MACRO` step type.
+* **Action:** Create a `MacroCall` node. You MUST copy the `macro_type`, `input_channels`, `output_variable`, `mapping_rules`, and `condition_rules` exactly from the planner.
+* **Constraint:** Do not try to build `ChannelChain` operators (like `.cross` or `.multiMap`) for macros. The python compiler will handle the Groovy code automatically.
 
 ## B. Process Calls (`ProcessCall`)
-**Trigger:** Execution of a tool or sub-workflow.
-* **CRITICAL NAME RULE:** The `process_name` MUST be the exact tool name from the design plan (like `step_1PP_trimming__fastp`). Do not invent generic words.
-* **Field `args` (CRITICAL):** Must be a list of **Typed Objects**:
-    * **Variables:** `{{"type": "variable", "name": "ch_input"}}` (Renders as `ch_input`)
-    * **Strings:** `{{"type": "string", "value": "some_option"}}` (Renders as `'some_option'`)
-    * **Numbers:** `{{"type": "numeric", "value": 10}}`
-* **Field `assign_to`:** Create a clean variable name to hold the output (e.g., `trimmed_reads`).
-* **Field output_attribute:** If a process has multiple outputs you MUST specify the exact channel to extract here. Look at the Planner code snippet for hints like .out. If you see it you set the output_attribute to "out".
-* **Continuity:** Pass the assign_to variable from the previous step as the args variable for the current step.
+**Trigger:** The plan contains a `PROCESS_RUN` step type.
+* **CRITICAL NAME RULE:** The `process_name` MUST be the exact tool name.
+* **Field `args`:** Must be a list of Typed Objects.
+* **Field `assign_to`:** Create a clean variable name to hold the output.
+* **Field `output_attribute`:** Extract the exact channel name here if the code snippet uses `.out.name`.
 
 ## C. Assignments (`Assignment`)
 **Trigger:** Simple variable aliasing.
-* **Constraint:** **NEVER** use this to run a process.
-    * *Invalid:* `variable="res", value="step_FastQC(reads)"`
-    * *Valid:* `variable="res", value="inputs.flatten()"`
 
 ## D. Conditional Blocks (`ConditionalBlock`)
-**Trigger:** Optional logic (e.g., "Run only if params.skip is false").
-* **Action:** Wrap the `ProcessCall` or `ChannelChain` inside a `ConditionalBlock`.
-* **Condition:** Must be a valid Groovy string (e.g., `!params.skip_mapping`).
+**Trigger:** Optional logic.
 
 ## E. `EmitItem` (The "Silence" Rule)
-**Trigger:** Definition of workflow outputs or named channels at the end of a block..
-* **Field `emit_channels`:** The list of channels to export. DEFAULT must be an EMPTY LIST [].
-* **EXCEPTION:** Only add channels to this list if the User Blueprint explicitly contains an emit: block.
-* **Constraint** NEVER hallucinate emits just to be helpful. If the blueprint ends, the workflow ends.
+**Trigger:** Definition of workflow outputs.
+* **Constraint** NEVER hallucinate emits just to be helpful.
 
 # 3. WORKFLOW TOPOLOGY
 ## A. Main Workflow (`main_workflow`)
 This is the **Logic Core**.
+* **`name`**: You MUST use the `workflow_name` provided in the Design Plan. Do not use a generic name.
 * **`take_channels`**: Define all required inputs.
-* **`body`**: Contains all `ChannelChain`, `ProcessCall`, and `Assignment` logic.
+* **`body`**: Contains all `ChannelChain`, `ProcessCall`, `MacroCall`, and `Assignment` logic.
 * **`emit_channels`**: Define outputs using `EmitItem`.
-    * *Auto-Fix:* If you used `output_attribute` in a `ProcessCall`, ensure it is mapped here if it constitutes a workflow output.
 
 ## B. Entrypoint (`entrypoint`)
 This is the **Trigger**.
 * **Constraint:** Strict Modularity. You are **FORBIDDEN** from defining complex logic (`.cross`, `.multiMap`) here.
-* **Inputs:** Do not use undefined variables like `raw_reads` or `trimmed`. Always use standard helper functions like `getInput()` to pass data to the module.
-* **Action:** Call helper functions and pass results to the `main_workflow` module.
-* **Validation:** The number of arguments passed to the module **MUST** match `main_workflow.take_channels`.
 
 # 4. EXECUTION MODES
 
 ## Mode 1: Strict Template
 **Trigger:** Context contains `### STRICT TEMPLATE MODE`.
-**Action:** Translate the provided `[[TEMPLATE SOURCE CODE]]` **verbatim** into AST nodes. Preserve variable names and logic order exactly.
+**Action:** Translate the provided `[[TEMPLATE SOURCE CODE]]` **verbatim** into AST nodes.
 
 ## Mode 2: Hybrid Assembly
 **Trigger:** Context contains `### ADAPTED TEMPLATE MODE`.
 **Action:**
 1.  Ignore `[[TEMPLATE SOURCE CODE]]`.
 2.  Read `[[REFERENCE FOR STEP]]` for I/O requirements.
-3.  Construct logic based on `main_workflow_logic` in the Design Plan.
+3.  Construct logic based on `workflow_logic` in the Design Plan. Pay close attention to `MACRO` steps and build `MacroCall` nodes for them.
 
 # 5. VALIDATION CHECKLIST
-Before outputting JSON, verify:
-1.  **Scope:** Are all variables used in `emit_channels` defined in the `body` or `take_channels`?
-2.  **Continuity:** Did you pass the output of Step A (`assign_to`) as the input of Step B (`args`)?
-3.  **Globals:** Are all reference paths (e.g., `db/ref.fa`) defined in `globals`?
-4.  **Syntax:** Do `process_name`s match their imports?
+1. Are all variables used in `emit_channels` defined?
+2. Did you pass the output of Step A as input to Step B?
 """
-
-# --- NODES ---
 
 def planner_node(state: GraphState):
     print("--- [NODE] PLANNER ---")
     llm = get_llm()
     
-    # 1. Retrieve Metadata
     metadata_context = retrieve_rag_context(state['user_query'], embed_code=False)
 
     print("context: ", metadata_context)

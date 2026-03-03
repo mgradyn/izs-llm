@@ -3,10 +3,6 @@ import re
 from typing import Any, Dict, Literal, List, Optional, Union
 
 def repair_lazy_calls(statements: List[Any]) -> List[Any]:
-    """
-    Recursively scans for assignments that look like process calls 
-    and converts them to ProcessCall nodes. Handles nested conditionals.
-    """
     if not isinstance(statements, list): return statements
 
     cleaned = []
@@ -23,7 +19,6 @@ def repair_lazy_calls(statements: List[Any]) -> List[Any]:
                 
                 match = re.match(r'^([a-zA-Z0-9_]+)\s*\((.*)\)(\.[a-zA-Z0-9_]+)?$', val)
                 
-                # Check known tool prefixes
                 if match and any(x in val for x in ["step_", "prepare_", "module_", "get", "multi_"]):
                     proc_name = match.group(1)
                     raw_args = match.group(2)
@@ -34,12 +29,12 @@ def repair_lazy_calls(statements: List[Any]) -> List[Any]:
                     new_stmt = {
                         "type": "process_call",
                         "process_name": proc_name,
-                        "args": args_list, # Pydantic will parse these strings into Objects later
+                        "args": args_list,
                         "assign_to": var,
                         "output_attribute": suffix[1:] if suffix else None
                     }
                     cleaned.append(new_stmt)
-                    continue # Skip appending the original stmt
+                    continue 
         
         cleaned.append(stmt)
     
@@ -56,7 +51,7 @@ class ImportItem(BaseModel):
             if ' as ' in func:
                 parts = func.split(' as ')
                 if len(parts) != 2 or not parts[0].strip() or not parts[1].strip():
-                    raise ValueError(f"Invalid alias format: '{func}'. Use 'OriginalName as AliasName'")
+                    raise ValueError(f"Invalid alias format '{func}'. Use 'OriginalName as AliasName'")
             cleaned.append(func)
         return cleaned
         
@@ -82,62 +77,32 @@ class GlobalString(BaseModel):
     name: str = Field(..., description="The variable name.")
     value: str = Field(..., description="The string value.")
 
-# 2. For numeric values (e.g., threads = 4)
 class GlobalNumber(BaseModel):
     type: Literal['number'] = 'number'
     name: str = Field(..., description="The variable name.")
-    value: float | int = Field(..., description="The numeric value.")
+    value: Union[float, int] = Field(..., description="The numeric value.")
 
-# 3. For variable references (e.g., input_file = params.input)
 class GlobalVar(BaseModel):
     type: Literal['variable'] = 'variable'
     name: str = Field(..., description="The variable name.")
     value: str = Field(..., description="The name of the referenced variable.")
 
-# The Union acts as the router
 GlobalDef = Union[GlobalString, GlobalNumber, GlobalVar]
-    
-# --- 2. LOGIC BUILDING BLOCKS (The "Atoms") ---
 
-# --- Category 1: Logic Operators (MUST have a closure block { ... }) ---
 class LogicOperator(BaseModel):
     operator: Literal['multiMap', 'branch', 'map']
-
-    closure_lines: List[str] = Field(
-        ..., 
-        description="The lines of code inside the closure block { ... }. "
-                    "Example: ['trimmed: it', 'ref: it.id']"
-    )
-    
+    closure_lines: List[str] = Field(..., description="The lines of code inside the closure block.")
     args: List[str] = Field(default=[], max_length=0, description="Must be empty for this operator.")
 
-# --- Category 2: Parametric Operators (MUST have (...) args, NO closure) ---
 class ParametricOperator(BaseModel):
     operator: Literal['groupTuple', 'join', 'mix', 'concat']
-    
-    args: List[str] = Field(
-        ..., 
-        min_length=1,
-        description="Arguments inside parentheses (...). "
-                    "For groupTuple use named args like ['by: 0', 'size: 3']. "
-                    "For join/mix use channel names."
-    )
-    
+    args: List[str] = Field(..., min_length=1, description="Arguments inside parentheses.")
     closure_lines: List[str] = Field(default=[], max_length=0, description="Must be empty for this operator.")
 
-# --- Category 3: Flexible Operators (Can have Args OR Closure) ---
 class FlexibleOperator(BaseModel):
     operator: Literal['filter', 'unique', 'distinct', 'collect', 'buffer']
-    
-    args: List[str] = Field(
-        default=[], 
-        description="Optional arguments (e.g. 'flat: false' for collect)."
-    )
-    
-    closure_lines: List[str] = Field(
-        default=[], 
-        description="Optional closure block. Use this for mapping logic or filter conditions."
-    )
+    args: List[str] = Field(default=[], description="Optional arguments.")
+    closure_lines: List[str] = Field(default=[], description="Optional closure block.")
 
     @model_validator(mode='after')
     def validate_has_content(self):
@@ -146,28 +111,15 @@ class FlexibleOperator(BaseModel):
                 raise ValueError(f"Operator '{self.operator}' requires either arguments or a closure block.")
         return self
 
-# --- Category 4: Structural Operators (Pure topology, usually empty) ---
 class StructuralOperator(BaseModel):
     operator: Literal['flatten', 'transpose']
-    
     args: List[str] = Field(default=[], description="Usually empty for these operators.")
     closure_lines: List[str] = Field(default=[], max_length=0)
 
-# --- Category 5: Pairing Operators (MUST have (...) args, OPTIONAL closure) ---
 class HybridPairingOperator(BaseModel):
     operator: Literal['cross']
-    
-    args: List[str] = Field(
-        ...,
-        min_length=1,
-        max_length=1,
-        description="Single channel argument inside parentheses, e.g. ['target']."
-    )
-    
-    closure_lines: List[str] = Field(
-        default=[],
-        description="Optional closure to define the matching key."
-    )
+    args: List[str] = Field(..., min_length=1, max_length=1, description="Single channel argument.")
+    closure_lines: List[str] = Field(default=[], description="Optional closure to define the matching key.")
 
 ChainOperator = Union[LogicOperator, ParametricOperator, FlexibleOperator, StructuralOperator, HybridPairingOperator]
 
@@ -177,7 +129,7 @@ class VarArg(BaseModel):
 
 class StringArg(BaseModel):
     type: Literal["string"] = "string"
-    value: str = Field(..., description="The string value. Do NOT add quotes; renderer will add them.")
+    value: str = Field(..., description="The string value.")
 
 class NumericArg(BaseModel):
     type: Literal["numeric"] = "numeric"
@@ -185,25 +137,13 @@ class NumericArg(BaseModel):
 
 class ChannelChain(BaseModel):
     type: Literal["channel_chain"] = "channel_chain"
-    
-    start_variable: str = Field(
-        ..., 
-        description="The source of the channel. Can be a variable ('trimmed'), a function call ('getReads()'), or a Channel factory ('Channel.fromPath(...)')."
-    )
-    
+    start_variable: str = Field(..., description="The source of the channel.")
     steps: List[ChainOperator] = Field(..., min_length=1)
-    
-    set_variable: Optional[str] = Field(
-        None, 
-        description="Variable to set at the end. LEAVE EMPTY if this chain flows into a process input."
-    )
+    set_variable: Optional[str] = Field(None, description="Variable to set at the end.")
 
     @field_validator('start_variable')
     def validate_source_syntax(cls, v):
         v = v.strip()
-        
-        
-        # 1. Channel Factories (Strict Allow List)
         if v.startswith("Channel."):
             valid_factories = {
                 "Channel.fromPath", "Channel.fromFilePairs", "Channel.of", 
@@ -212,28 +152,22 @@ class ChannelChain(BaseModel):
             }
             factory = v.split('(')[0].strip()
             if factory not in valid_factories:
-                raise ValueError(f"Unknown Channel factory: '{factory}'. Supported: {valid_factories}")
+                raise ValueError(f"Unknown Channel factory '{factory}'. Supported {valid_factories}")
             return v
             
-        # 2. Variable Names (simple identifiers) or Param access
-        # Matches: "trimmed", "params.reads", "step1_out"
         if re.match(r'^[a-zA-Z_][\w]*(\.[a-zA-Z_][\w]*)*$', v):
             return v
             
-        # 3. Function Calls
-        # Matches: "getReads()", "collectFile(name: 'x')"
         if re.match(r'^[a-zA-Z_][\w]*\(.*\)$', v):
             return v
             
-        raise ValueError(f"Invalid start_variable format: '{v}'. Must be a variable, param, or Channel.* factory.")
+        raise ValueError(f"Invalid start_variable format '{v}'. Must be a variable or factory.")
     
     @model_validator(mode='after')
     def validate_logic_flow(self):
-        # Prevent self-assignment which confuses DAGs
         if self.set_variable and self.start_variable == self.set_variable:
             raise ValueError(
                 f"Self-assignment detected for '{self.set_variable}'. "
-                f"Nextflow allows this, but it creates ambiguous DAGs. "
                 f"Please use a new variable name for the output."
             )
         return self
@@ -243,51 +177,30 @@ ProcessArgument = Union[VarArg, StringArg, NumericArg]
 class ArgumentParser(BaseModel):
     @classmethod
     def parse(cls, v: Any) -> ProcessArgument:
-        # If it's already a valid dict structure, let it pass
         if isinstance(v, dict) and 'type' in v:
             return v
         
-        # If it's a raw string, we infer the type
         if isinstance(v, str):
             v = v.strip()
-            # Check for quotes = String
             if (v.startswith("'") and v.endswith("'")) or (v.startswith('"') and v.endswith('"')):
                 return {"type": "string", "value": v[1:-1]}
-            # Check for numeric
             if v.isdigit() or v.lower() in ['true', 'false', 'null']:
-                # Let Pydantic cast it later, or handle strict bools here
                 val = True if v.lower() == 'true' else False if v.lower() == 'false' else None
                 if val is None and v.lower() != 'null': val = int(v) 
                 return {"type": "numeric", "value": val if val is not None else 0}
-            # Default = Variable
             return {"type": "variable", "name": v}
         
         return v
 
 class ProcessCall(BaseModel):
     type: Literal["process_call"] = "process_call"
-    
-    process_name: str = Field(..., description="Name of process. MUST match an Import or Inline Process.")
-
-    args: List[ProcessArgument] = Field(
-        default=[], 
-        description="List of inputs. Select 'variable' for channels, 'string' for text options."
-    )
-    
-    # DSL2 Output Handling:
-    # 1. 'assign_to' captures the WHOLE process object or the default channel.
-    assign_to: Optional[str] = Field(None, description="Clean variable name to capture the result (e.g., 'trimmed_reads').")    
-    # 2. 'output_attribute' handles the '.out.channelName' pattern.
-    output_attribute: Optional[str] = Field(
-        None, 
-        description="CRITICAL: If the Planner's code snippet uses '.out.something', you MUST extract that exact name here (e.g., 'trimmed'). Leave null only if there is no '.out'."
-    )
+    process_name: str = Field(..., description="Name of process.")
+    args: List[ProcessArgument] = Field(default=[], description="List of inputs.")
+    assign_to: Optional[str] = Field(None, description="Clean variable name to capture the result.")    
+    output_attribute: Optional[str] = Field(None, description="Extract exact name here.")
 
     @field_validator('args', mode='before')
     def allow_lazy_args(cls, v):
-        """
-        Auto-converts ["reads", "'strict'"] -> [{"type": "variable"...}, ...]
-        """
         if isinstance(v, list):
             return [ArgumentParser.parse(item) for item in v]
         return v
@@ -297,45 +210,26 @@ class ProcessCall(BaseModel):
         name = self.process_name
         arguments = self.args
         
-        # --- RULE 1: Standard Step Arguments ---
-        # "step_" implies a data processing tool, which always needs input data.
         if name.startswith("step_") and not arguments:
              raise ValueError(
-                f"LOGIC ERROR: Process '{name}' has NO arguments.\n"
-                f"Nextflow processes function like pipes; they require input channels.\n"
-                f"FIX: Check the previous step's output variable and pass it here."
+                f"LOGIC ERROR Process '{name}' has NO arguments. "
+                f"FIX Check the previous output variable and pass it here."
             )
 
-        # --- RULE 2: Output Access Syntax ---
-        # You cannot ask for an 'output_attribute' if you haven't assigned the result to something.
-        # INCORRECT AST: assign_to=None, output_attribute='bam'
-        # (This would mean generating code like "step().out.bam", which is valid but rarely what users mean in this AST structure)
-        
-        # Actually, in Nextflow DSL2:
-        # valid: bam_ch = ALIGN.out.bam
-        # valid: ALIGN(reads)
-        
-        # If the user wants to access a specific output, they MUST assign it to a variable.
         if self.output_attribute and not self.assign_to:
              raise ValueError(
-                 f"INVALID AST: You specified 'output_attribute' ('{self.output_attribute}') but no 'assign_to' variable.\n"
-                 f"Nextflow DSL2 requires a variable to hold the output.\n"
-                 f"Example intent: 'bam_ch = {name}(...).out.{self.output_attribute}'\n"
-                 f"FIX: Add an 'assign_to' variable name."
+                 f"INVALID AST You specified output_attribute '{self.output_attribute}' but no assign_to variable. "
+                 f"FIX Add an assign_to variable name."
              )
              
         return self
 
     @model_validator(mode='after')
     def validate_naming_conventions(self):
-        """
-        Enforce clean variable naming for 'assign_to' to avoid Groovy syntax errors.
-        """
         if self.assign_to:
-            # Must start with letter, only alphanumeric + underscores
             if not re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', self.assign_to):
                  raise ValueError(
-                     f"INVALID VARIABLE NAME: '{self.assign_to}'.\n"
+                     f"INVALID VARIABLE NAME '{self.assign_to}'. "
                      f"Groovy variable names must start with a letter and contain only alphanumerics or underscores."
                  )
         return self
@@ -348,15 +242,14 @@ class Assignment(BaseModel):
     @field_validator('value')
     def forbid_hidden_logic(cls, v):
         if "step_" in v and "(" in v:
-            raise ValueError(f"Use 'ProcessCall' node type for step execution '{v}', not Assignment.")
+            raise ValueError(f"Use ProcessCall node type for step execution '{v}' not Assignment.")
         if ".map" in v or ".cross" in v:
-            raise ValueError(f"Use 'ChannelChain' node type for logic '{v}', not Assignment.")
+            raise ValueError(f"Use ChannelChain node type for logic '{v}' not Assignment.")
         return v
 
 class ConditionalBlock(BaseModel):
     type: Literal["conditional"] = "conditional"
-    condition: str = Field(..., description="The condition string, e.g. '!params.skip_mapping'")
-    # Recursive definition: A block contains statements, which can be calls, chains, or nested conditionals
+    condition: str = Field(..., description="The condition string.")
     body: List[Union[ProcessCall, ChannelChain, Assignment, 'ConditionalBlock']] = Field(..., description="Logic to execute if true")
 
     @field_validator('condition')
@@ -365,113 +258,141 @@ class ConditionalBlock(BaseModel):
         if not v:
             raise ValueError("Condition string cannot be empty.")
             
-        # Basic Heuristic Check for Groovy Syntax
-        # 1. Parentheses balance (simple check)
         if v.count('(') != v.count(')'):
-             raise ValueError(f"SYNTAX ERROR: Unbalanced parentheses in condition: '{v}'")
+             raise ValueError(f"SYNTAX ERROR Unbalanced parentheses in condition '{v}'")
              
-        # 2. Block commonly misused characters that break strict Nextflow
-        # e.g., using single '=' for comparison (common beginner mistake)
-        # We try to catch "if (x = 5)" which is assignment, not comparison "=="
-        # This regex looks for = surrounded by spaces/vars, but not ==, !=, >=, <=
         import re
-        # This is a heuristic; might flag valid complex cases, but safe for 99% of pipelines
         if re.search(r'(?<!=)[^!<>]=\s', v) or re.search(r'\s=[^=]', v):
-             # We warn, or strictly fail. For this AST, let's warn via error to prompt a fix.
-             # Exception: param assignment inside if? No, usually bad practice in workflow logic.
              raise ValueError(
-                 f"POSSIBLE SYNTAX ERROR: Condition '{v}' uses single '='.\n"
-                 f"Did you mean '==' for comparison?\n"
-                 f"Groovy requires '==' to compare values."
+                 f"POSSIBLE SYNTAX ERROR Condition '{v}' uses single equal sign. "
+                 f"Did you mean double equal sign for comparison."
              )
              
         return v
 
-# Union type for any valid statement in a workflow body
-Statement = Union[ProcessCall, ChannelChain, Assignment, ConditionalBlock]
+class MacroCall(BaseModel):
+    type: Literal["macro_call"] = "macro_call"
+    macro_type: Literal[
+        "COLLECT_ALL", 
+        "CROSS_SYNC", 
+        "MULTI_MAP_SPLIT", 
+        "JOIN_BY_KEY",
+        "GROUP_BY_KEY",
+        "MIX_CHANNELS",
+        "FILTER_DATA",
+        "BRANCH_SPLIT"
+    ]
+    input_channels: List[str] = Field(..., min_length=1)
+    output_variable: str
+    mapping_rules: List[str] = Field(default=[])
+    condition_rules: List[str] = Field(default=[])
+
+def compile_macro_to_chain(macro: MacroCall) -> ChannelChain:
+    start_var = macro.input_channels[0]
+    steps = []
+    
+    if macro.macro_type == "COLLECT_ALL":
+        steps.append(FlexibleOperator(operator="collect", args=[], closure_lines=[]))
+        
+    elif macro.macro_type == "CROSS_SYNC":
+        for ch in macro.input_channels[1:]:
+            steps.append(HybridPairingOperator(operator="cross", args=[ch], closure_lines=["extractKey(it)"]))
+            
+        if len(macro.input_channels) == 2:
+            steps.append(LogicOperator(operator="map", args=[], closure_lines=["[ it[0][0], it[0][1], it[1][1] ]"]))
+        elif len(macro.input_channels) == 3:
+            steps.append(LogicOperator(operator="map", args=[], closure_lines=["[ it[0][0][0], it[0][0][1], it[0][1][1], it[1][1] ]"]))
+        elif len(macro.input_channels) > 3:
+            steps.append(LogicOperator(operator="map", args=[], closure_lines=["it.flatten()"]))
+            
+    elif macro.macro_type == "MULTI_MAP_SPLIT":
+        lines = []
+        for i, rule in enumerate(macro.mapping_rules):
+            lines.append(f"{rule}: it[{i}]")
+        if not lines:
+            lines.append("out: it")
+        steps.append(LogicOperator(operator="multiMap", args=[], closure_lines=lines))
+        
+    elif macro.macro_type == "JOIN_BY_KEY":
+        for ch in macro.input_channels[1:]:
+            steps.append(ParametricOperator(operator="join", args=[ch], closure_lines=[]))
+            
+    elif macro.macro_type == "GROUP_BY_KEY":
+        steps.append(FlexibleOperator(operator="groupTuple", args=[], closure_lines=[]))
+        
+    elif macro.macro_type == "MIX_CHANNELS":
+        args = macro.input_channels[1:]
+        if not args:
+            args = ["Channel.empty()"]
+        steps.append(ParametricOperator(operator="mix", args=args, closure_lines=[]))
+        
+    elif macro.macro_type == "FILTER_DATA":
+        lines = macro.condition_rules if macro.condition_rules else ["it != null"]
+        steps.append(FlexibleOperator(operator="filter", args=[], closure_lines=lines))
+        
+    elif macro.macro_type == "BRANCH_SPLIT":
+        lines = []
+        for i, rule in enumerate(macro.mapping_rules):
+            cond = macro.condition_rules[i] if i < len(macro.condition_rules) else "true"
+            lines.append(f"{rule}: {cond}")
+        if not lines:
+            lines.append("keep_all: true")
+        steps.append(LogicOperator(operator="branch", args=[], closure_lines=lines))
+        
+    return ChannelChain(
+        type="channel_chain",
+        start_variable=start_var,
+        steps=steps,
+        set_variable=macro.output_variable
+    )
+
+Statement = Union[ProcessCall, ChannelChain, Assignment, ConditionalBlock, MacroCall]
 EntrypointStatement = Union[ProcessCall, Assignment, ConditionalBlock]
-ModuleStatement = Union[ProcessCall, ChannelChain, Assignment, ConditionalBlock]
+ModuleStatement = Union[ProcessCall, ChannelChain, Assignment, ConditionalBlock, MacroCall]
 
 class EmitItem(BaseModel):
-    export_name: str = Field(
-        ..., 
-        description="The public name exposed by the workflow (e.g., 'bam'). Must be a simple identifier (no dots)."
-    )
-    
-    internal_variable: Optional[str] = Field(
-        None, 
-        description="The internal source. Can be a variable ('bam_ch') or a process output path ('ALIGN.out.bam')."
-    )
+    export_name: str = Field(..., description="The public name exposed by the workflow.")
+    internal_variable: Optional[str] = Field(None, description="The internal source.")
 
     @field_validator('export_name')
     def validate_export_name(cls, v):
-        """
-        STRICT RULE: The export key must be a simple identifier.
-        Invalid: 'step.out'
-        Valid: 'out', 'bam', 'results'
-        """
-        # If the user tries to put a dot here, we will try to fix it in the model_validator below.
-        # But if it persists, this regex is the final guard.
         if not re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', v):
             raise ValueError(
-                f"SYNTAX ERROR: Invalid export name '{v}'.\n"
-                f"Workflow output keys must be simple identifiers (e.g., 'consensus').\n"
-                f"They CANNOT contain dots."
+                f"SYNTAX ERROR Invalid export name '{v}'. "
+                f"Workflow output keys must be simple identifiers."
             )
         return v
 
     @field_validator('internal_variable')
     def validate_internal_source(cls, v):
         if v is None: return v
-        
         v = v.strip()
         if not v: raise ValueError("Internal variable path cannot be empty.")
-
-        # Internal paths allow dots: 'PROCESS_NAME.out.CHANNEL'
         if not re.match(r'^[a-zA-Z_][\w\.]*$', v):
              raise ValueError(
-                 f"SYNTAX ERROR: Invalid internal variable path '{v}'.\n"
-                 f"Must be a valid variable or property path (e.g., 'fastqc_ch' or 'FASTQC.out.zip')."
+                 f"SYNTAX ERROR Invalid internal variable path '{v}'."
              )
         return v
 
     @model_validator(mode='before')
     def handle_implicit_shorthand(cls, values):
-        """
-        SMART FIX: Handles the common shorthand mistake.
-        Input:  { export_name: "step_A.out" }  (User tried to emit the whole object using dot notation)
-        Fix:    { export_name: "out", internal_variable: "step_A.out" }
-        """
         export = values.get('export_name', '')
         internal = values.get('internal_variable')
 
-        # If export has dots and internal is missing, we assume shorthand intent.
         if '.' in export and not internal:
             parts = export.split('.')
-            # The last part becomes the public name (e.g. 'out')
             new_export = parts[-1]
-            # The full string becomes the source
             values['export_name'] = new_export
             values['internal_variable'] = export
         
         return values
 
     def render(self):
-        """
-        Renders the Nextflow DSL2 emit statement.
-        """
-        # Case A: Explicit Renaming ( emit: bam = ALIGN.out.bam )
         if self.internal_variable and self.internal_variable != self.export_name:
             return f"{self.export_name} = {self.internal_variable}"
-        
-        # Case B: Direct Passthrough ( emit: results )
         return self.export_name
 
-        
-# --- 3. WORKFLOW DEFINITIONS ---
-
 class NextflowProcess(BaseModel):
-    """Raw Bash/Script Processes (step_* are NOT allowed here)"""
     name: str
     container: Optional[str] = None
     input_declarations: List[str] = Field(default=[])
@@ -480,35 +401,41 @@ class NextflowProcess(BaseModel):
 
     @field_validator('script_block')
     def validate_no_dsl(cls, v):
-        # Forbidden keywords that imply DSL2 logic inside a bash script
         forbidden = ['workflow', '.cross(', '.join(', '.multiMap', '.map{', '.mix(']
         for kw in forbidden:
             if kw in v:
                 raise ValueError(
-                    f"INVALID PROCESS CONTENT: Found DSL2 keyword '{kw}' inside a Process script.\n"
-                    f"Processes are for BASH/SHELL commands only.\n"
-                    f"If you need logic, define this as a 'sub_workflow', not a 'process'."
+                    f"INVALID PROCESS CONTENT Found DSL2 keyword '{kw}' inside a Process script."
                 )
         return v
     
     @field_validator('name')
     def validate_name(cls, v):
         if v.startswith("step_"):
-            raise ValueError(f"Process name '{v}' starts with 'step_'. Standard tools must be imported, not defined inline.")
+            raise ValueError(f"Process name '{v}' starts with 'step_'. Standard tools must be imported.")
         if v.isupper():
-             raise ValueError(f"Process '{v}' is UPPERCASE. It should likely be a Global Constant, not a Process.")
+             raise ValueError(f"Process '{v}' is UPPERCASE. It should likely be a Global Constant.")
         return v
 
 class NextflowWorkflow(BaseModel):
-    """Used for Main Workflow AND Sub-Workflows"""
-    name: str
+    name: str = Field(..., description="The name of the workflow.")
     take_channels: List[str] = Field(default=[])
     body: List[ModuleStatement]
     emit_channels: List[EmitItem] = Field(default=[])
 
     @model_validator(mode='after')
+    def compile_macros(self):
+        compiled_body = []
+        for stmt in self.body:
+            if hasattr(stmt, 'type') and stmt.type == 'macro_call':
+                compiled_body.append(compile_macro_to_chain(stmt))
+            else:
+                compiled_body.append(stmt)
+        self.body = compiled_body
+        return self
+
+    @model_validator(mode='after')
     def auto_fix_emits(self):
-        """Converts inline 'output_attribute' usage into proper 'emit' statements."""
         for stmt in self.body:
             if isinstance(stmt, ProcessCall):
                 if stmt.output_attribute and not stmt.assign_to:
@@ -523,23 +450,17 @@ class NextflowWorkflow(BaseModel):
 
     @model_validator(mode='after')
     def validate_and_prune_scope(self):
-        """
-        Ensures all emitted variables exist. 
-        Instead of crashing, it REMOVES invalid emits to ensure the AST remains parseable.
-        """
         defined = set(self.take_channels)
         
-        # 1. Harvest definitions from body
         for stmt in self.body:
             if isinstance(stmt, Assignment):
                 defined.add(stmt.variable)
             elif isinstance(stmt, ProcessCall):
                 if stmt.assign_to: defined.add(stmt.assign_to)
-                defined.add(stmt.process_name) # Process object itself is valid
+                defined.add(stmt.process_name) 
             elif isinstance(stmt, ChannelChain) and stmt.set_variable:
                 defined.add(stmt.set_variable)
 
-        # 2. Check Emits and Filter Invalid Ones
         valid_emits = []
         for emit in self.emit_channels:
             target = emit.internal_variable or emit.export_name
@@ -547,9 +468,6 @@ class NextflowWorkflow(BaseModel):
             
             if root in defined:
                 valid_emits.append(emit)
-            else:
-                # Silently drop invalid emits to prevent crashes
-                pass
         
         self.emit_channels = valid_emits
         return self
@@ -561,9 +479,7 @@ class NextflowWorkflow(BaseModel):
                 if isinstance(stmt, ProcessCall):
                     if stmt.process_name == self.name:
                         raise ValueError(
-                            f"VALIDATION ERROR. The workflow '{self.name}' is trying to call itself. "
-                            f"Nextflow sub-workflows cannot be recursive here. "
-                            f"If you need an assembly tool please import the correct 'step_...' process."
+                            f"VALIDATION ERROR The workflow '{self.name}' is trying to call itself. "
                         )
                 elif isinstance(stmt, ConditionalBlock):
                     check_body(stmt.body)
@@ -620,50 +536,25 @@ class NextflowWorkflow(BaseModel):
         return self
 
 class EntrypointWorkflow(BaseModel):
-    # Restrict type defined in entry point
-    body: List[EntrypointStatement] = Field(
-        ..., 
-        description="List of execution statements. NOTE: Complex logic (Chains, multiMap) is FORBIDDEN here. Logic must be inside the NamedWorkflow."
-    )
+    body: List[EntrypointStatement] = Field(..., description="List of execution statements.")
 
     @field_validator('body', mode='before')
     def fix_lazy_process_calls(cls, v):
-        # Re-use the logic from NextflowWorkflow
         return repair_lazy_calls(v)
 
     @model_validator(mode='after')
     def forbid_complex_logic(self):
         for stmt in self.body:
             if isinstance(stmt, ChannelChain):
-                ops = [s.operator for s in stmt.steps]
-                raise ValueError(
-                    f"ARCHITECTURE ERROR: Entrypoint contains complex logic {ops}. "
-                    f"Move this logic into a 'sub_workflow' and call it here."
-                )
+                raise ValueError("ARCHITECTURE ERROR Entrypoint contains complex logic.")
         return self
-
-# --- 4. MASTER AST ---
 
 class NextflowPipelineAST(BaseModel):
     imports: List[ImportItem] = Field(default_factory=list)
-    globals: List[GlobalDef] = Field(
-        default_factory=list, 
-        description="CRITICAL: Define ALL constants here. If you use e.g. 'referencePath' in logic, it MUST be defined here."
-    )
-
-    # 1. Bash Scripts
+    globals: List[GlobalDef] = Field(default_factory=list, description="Define ALL constants here.")
     processes: List[NextflowProcess] = Field(default=[])
-
-    # 2. Helper Workflows (e.g. prepare_inputs)
-    sub_workflows: List[NextflowWorkflow] = Field(
-        default=[], 
-        description="Helper workflows containing DSL logic (cross, map, etc). NOT processes."
-    )
-
-    # 3. Main Logic
+    sub_workflows: List[NextflowWorkflow] = Field(default=[], description="Helper workflows.")
     main_workflow: NextflowWorkflow
-
-    # 4. Entrypoint
     entrypoint: EntrypointWorkflow
 
     @model_validator(mode='before')
@@ -675,7 +566,6 @@ class NextflowPipelineAST(BaseModel):
         
         inputs = main_wf.get('take_channels', [])
         if not isinstance(inputs, list): inputs = []
-        sub_wf_names = {s.get('name') for s in sub_wfs if isinstance(s, dict) and 'name' in s}
 
         def clean_block(statements, parent_scope):
             if not isinstance(statements, list): return statements
@@ -708,7 +598,6 @@ class NextflowPipelineAST(BaseModel):
                     new_args = []
                     for i, arg in enumerate(args):
                         arg_val = str(arg.get('name') or arg.get('value') or "") if isinstance(arg, dict) else str(arg)
-                        import re
                         match_root = re.match(r'^([a-zA-Z_][a-zA-Z0-9_]*)', arg_val)
                         root_var = match_root.group(1) if match_root else arg_val
 
@@ -740,15 +629,13 @@ class NextflowPipelineAST(BaseModel):
         for p in self.processes:
             if not p.input_declarations and not p.output_declarations:
                 if 'prepare' in p.name.lower() or 'logic' in p.name.lower():
-                    raise ValueError(f"'{p.name}' looks like logic but is defined as a Process. Move to 'sub_workflows'.")
+                    raise ValueError(f"'{p.name}' looks like logic but is defined as a Process. Move to sub workflows.")
         return self
     
     @model_validator(mode='after')
     def ensure_entrypoint_connectivity(self):
         if not self.entrypoint.body:
-
             if not self.main_workflow.take_channels:
-                
                 call = ProcessCall(
                     type="process_call",
                     process_name=self.main_workflow.name,
@@ -756,7 +643,6 @@ class NextflowPipelineAST(BaseModel):
                     assign_to=None
                 )
                 self.entrypoint.body.append(call)
-        
         return self
     
     @model_validator(mode='after')
@@ -782,9 +668,7 @@ class NextflowPipelineAST(BaseModel):
                 if isinstance(stmt, ProcessCall):
                     if stmt.process_name not in allowed:
                         raise ValueError(
-                            f"VALIDATION ERROR. The process or function '{stmt.process_name}' is undefined. "
-                            f"You must add it to the imports list or define it as a sub_workflow. "
-                            f"If it is a standard tool please use the correct 'step_...' or 'multi_...' or 'module_...' name."
+                            f"VALIDATION ERROR The process or function '{stmt.process_name}' is undefined. "
                         )
                 elif isinstance(stmt, ConditionalBlock):
                     check_body(stmt.body)
@@ -798,7 +682,6 @@ class NextflowPipelineAST(BaseModel):
 
     @model_validator(mode='after')
     def enforce_entrypoint_variables(self):
-
         valid_globals = {g.name for g in self.globals}
         
         valid_functions = set()
@@ -824,14 +707,11 @@ class NextflowPipelineAST(BaseModel):
                         if base_var not in scope and base_var not in valid_functions and base_var not in implicit_nf_vars:
                             if base_var.startswith("get"):
                                 raise ValueError(
-                                    f"VALIDATION ERROR. You used '{base_var}()' in the entrypoint, but forgot to import it. "
-                                    f"You MUST add '{base_var}' to the 'imports' list with module_path '../functions/parameters.nf'."
+                                    f"VALIDATION ERROR You used '{base_var}()' in the entrypoint but forgot to import it. "
                                 )
                             else:
                                 raise ValueError(
-                                    f"VALIDATION ERROR. Variable '{base_var}' is not defined. "
-                                    f"You cannot pass undefined variables like '{base_var}'. "
-                                    f"Use an imported function like 'getInput()'."
+                                    f"VALIDATION ERROR Variable '{base_var}' is not defined. "
                                 )
                 
                 if stmt.assign_to:
@@ -870,8 +750,7 @@ class NextflowPipelineAST(BaseModel):
         for sw in self.sub_workflows:
             if sw.name not in called_processes:
                 raise ValueError(
-                    f"VALIDATION ERROR. The sub_workflow '{sw.name}' is defined but never used. "
-                    f"Either call it in the main workflow or do not define it."
+                    f"VALIDATION ERROR The sub workflow '{sw.name}' is defined but never used. "
                 )
                 
         def check_block_scope(statements, current_scope, wf_name):
@@ -890,7 +769,6 @@ class NextflowPipelineAST(BaseModel):
                                 if not (base.startswith("'") or base.startswith('"') or base.isdigit()):
                                     raise ValueError(
                                         f"VALIDATION ERROR in '{wf_name}'. Variable '{base}' is not defined. "
-                                        f"Add it to take_channels or define it first."
                                     )
                     if stmt.assign_to:
                         current_scope.add(stmt.assign_to)
@@ -900,7 +778,6 @@ class NextflowPipelineAST(BaseModel):
                     if base_start not in current_scope and base_start not in valid_globals and base_start not in valid_functions and base_start not in implicit_vars:
                         raise ValueError(
                             f"VALIDATION ERROR in '{wf_name}'. Channel source '{base_start}' is not defined. "
-                            f"Add it to take_channels."
                         )
                     if stmt.set_variable:
                         current_scope.add(stmt.set_variable)
@@ -920,8 +797,6 @@ class NextflowPipelineAST(BaseModel):
 
         return self
 
-
-# --- REBUILD MODELS FOR RECURSION ---
 ConditionalBlock.model_rebuild()
 NextflowProcess.model_rebuild()
 NextflowWorkflow.model_rebuild()
