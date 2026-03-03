@@ -90,17 +90,17 @@ class GlobalVar(BaseModel):
 GlobalDef = Union[GlobalString, GlobalNumber, GlobalVar]
 
 class LogicOperator(BaseModel):
-    operator: Literal['multiMap', 'branch', 'map']
+    operator: Literal['multiMap', 'branch', 'map', 'flatMap', 'reduce']
     closure_lines: List[str] = Field(..., description="The lines of code inside the closure block.")
     args: List[str] = Field(default=[], max_length=0, description="Must be empty for this operator.")
 
 class ParametricOperator(BaseModel):
-    operator: Literal['groupTuple', 'join', 'mix', 'concat']
+    operator: Literal['groupTuple', 'join', 'mix', 'concat', 'combine']
     args: List[str] = Field(..., min_length=1, description="Arguments inside parentheses.")
     closure_lines: List[str] = Field(default=[], max_length=0, description="Must be empty for this operator.")
 
 class FlexibleOperator(BaseModel):
-    operator: Literal['filter', 'unique', 'distinct', 'collect', 'buffer']
+    operator: Literal['filter', 'unique', 'distinct', 'collect', 'buffer', 'splitCsv', 'splitFasta', 'splitText']
     args: List[str] = Field(default=[], description="Optional arguments.")
     closure_lines: List[str] = Field(default=[], description="Optional closure block.")
 
@@ -280,7 +280,12 @@ class MacroCall(BaseModel):
         "GROUP_BY_KEY",
         "MIX_CHANNELS",
         "FILTER_DATA",
-        "BRANCH_SPLIT"
+        "BRANCH_SPLIT",
+        "MAP_DATA",
+        "COMBINE_CHANNELS",
+        "FLAT_MAP_DATA",
+        "SPLIT_DATA",
+        "REDUCE_DATA"
     ]
     input_channels: List[str] = Field(..., min_length=1)
     output_variable: str
@@ -297,8 +302,9 @@ def compile_macro_to_chain(macro: MacroCall) -> ChannelChain:
     elif macro.macro_type == "CROSS_SYNC":
         for ch in macro.input_channels[1:]:
             steps.append(HybridPairingOperator(operator="cross", args=[ch], closure_lines=["extractKey(it)"]))
-            
-        if len(macro.input_channels) == 2:
+        if macro.mapping_rules:
+            steps.append(LogicOperator(operator="map", args=[], closure_lines=macro.mapping_rules))
+        elif len(macro.input_channels) == 2:
             steps.append(LogicOperator(operator="map", args=[], closure_lines=["[ it[0][0], it[0][1], it[1][1] ]"]))
         elif len(macro.input_channels) == 3:
             steps.append(LogicOperator(operator="map", args=[], closure_lines=["[ it[0][0][0], it[0][0][1], it[0][1][1], it[1][1] ]"]))
@@ -339,6 +345,35 @@ def compile_macro_to_chain(macro: MacroCall) -> ChannelChain:
             lines.append("keep_all: true")
         steps.append(LogicOperator(operator="branch", args=[], closure_lines=lines))
         
+    elif macro.macro_type == "MAP_DATA":
+        lines = macro.mapping_rules if macro.mapping_rules else ["it"]
+        steps.append(LogicOperator(operator="map", args=[], closure_lines=lines))
+
+    elif macro.macro_type == "COMBINE_CHANNELS":
+        for ch in macro.input_channels[1:]:
+            steps.append(ParametricOperator(operator="combine", args=[ch], closure_lines=[]))
+            
+    elif macro.macro_type == "FLAT_MAP_DATA":
+        lines = macro.mapping_rules if macro.mapping_rules else ["it"]
+        steps.append(LogicOperator(operator="flatMap", args=[], closure_lines=lines))
+        
+    elif macro.macro_type == "REDUCE_DATA":
+        lines = macro.mapping_rules if macro.mapping_rules else ["a, b -> a + b"]
+        steps.append(LogicOperator(operator="reduce", args=[], closure_lines=lines))
+        
+    elif macro.macro_type == "SPLIT_DATA":
+        op = "splitCsv"
+        args = []
+        if macro.mapping_rules:
+            first_rule = macro.mapping_rules[0].lower()
+            if "fasta" in first_rule:
+                op = "splitFasta"
+            elif "text" in first_rule:
+                op = "splitText"
+            if len(macro.mapping_rules) > 1:
+                args = macro.mapping_rules[1:]
+        steps.append(FlexibleOperator(operator=op, args=args, closure_lines=[]))
+
     return ChannelChain(
         type="channel_chain",
         start_variable=start_var,

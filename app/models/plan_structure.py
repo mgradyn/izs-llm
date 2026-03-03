@@ -90,7 +90,12 @@ class OperatorMacro(BaseModel):
         "GROUP_BY_KEY",
         "MIX_CHANNELS",
         "FILTER_DATA",
-        "BRANCH_SPLIT"
+        "BRANCH_SPLIT",
+        "MAP_DATA",
+        "COMBINE_CHANNELS",
+        "FLAT_MAP_DATA",
+        "SPLIT_DATA",
+        "REDUCE_DATA"
     ] = Field(
         ..., 
         description="The type of logic operation to perform."
@@ -105,7 +110,7 @@ class OperatorMacro(BaseModel):
     )
     mapping_rules: Optional[List[str]] = Field(
         default=[], 
-        description="Rules for how to structure the output. Used mainly for MULTI_MAP_SPLIT and BRANCH_SPLIT to define keys."
+        description="Rules for how to structure the output. Used mainly for MULTI_MAP_SPLIT, BRANCH_SPLIT, MAP_DATA, FLAT_MAP_DATA, or SPLIT_DATA."
     )
     condition_rules: Optional[List[str]] = Field(
         default=[],
@@ -144,47 +149,93 @@ class PipelinePlan(BaseModel):
 
     model_config = ConfigDict(
         json_schema_extra={
-            "examples": [{
-                "strategy_selector": "ADAPTED_MATCH",
-                "used_template_id": "target_filter_template",
-                "workflow_name": "target_filter_and_verify",
-                "components": [
-                    {
-                        "process_alias": "step_3TX_species__vdabricate",
-                        "source_type": "RAG_COMPONENT",
-                        "component_id": "step_3TX_species__vdabricate",
-                        "input_type": "Fasta",
-                        "output_type": "CSV"
-                    }
-                ],
-                "workflow_logic": [
-                    {
-                        "step_type": "MACRO",
-                        "description": "Sync assembly with database safely",
-                        "macro_details": {
-                            "macro_type": "CROSS_SYNC",
-                            "input_channels": ["assembled", "abricatedatabase"],
-                            "output_variable": "scaffoldsAndDatabase",
-                            "mapping_rules": []
+            "examples": [
+                {
+                    "strategy_selector": "ADAPTED_MATCH",
+                    "used_template_id": "draft_genome_template",
+                    "workflow_name": "module_draft_genome",
+                    "components": [
+                        {
+                            "process_alias": "step_4AN_genes__prokka",
+                            "source_type": "RAG_COMPONENT",
+                            "component_id": "step_4AN_genes__prokka",
+                            "input_type": "Fasta",
+                            "output_type": "GFF"
                         }
-                    },
-                    {
-                        "step_type": "PROCESS_RUN",
-                        "description": "Identify viral segments",
-                        "code_snippet": "step_3TX_species__vdabricate(scaffoldsAndDatabase)"
-                    },
-                    {
-                        "step_type": "MACRO",
-                        "description": "Split results into separate channels for the next step",
-                        "macro_details": {
-                            "macro_type": "MULTI_MAP_SPLIT",
-                            "input_channels": ["step_3TX_species__vdabricate.out.calls", "assembled", "reference"],
-                            "output_variable": "filt",
-                            "mapping_rules": ["calls", "assembly", "reference"]
+                    ],
+                    "workflow_logic": [
+                        {
+                            "step_type": "MACRO",
+                            "description": "Cross consensus and referenceGB with custom shape for Prokka",
+                            "macro_details": {
+                                "macro_type": "CROSS_SYNC",
+                                "input_channels": ["consensus", "referenceGB"],
+                                "output_variable": "consensusKingdomReference",
+                                "mapping_rules": ["[ it[0][0], it[0][1], PROKKA_KINGDOM, it[1][1], it[1][2], it[1][3] ]"],
+                                "condition_rules": []
+                            }
+                        },
+                        {
+                            "step_type": "PROCESS_RUN",
+                            "description": "Run prokka annotation",
+                            "code_snippet": "step_4AN_genes__prokka(consensusKingdomReference)"
+                        },
+                        {
+                            "step_type": "MACRO",
+                            "description": "Branch outputs to keep only valid non-empty files",
+                            "macro_details": {
+                                "macro_type": "BRANCH_SPLIT",
+                                "input_channels": ["step_4AN_genes__prokka.out.gff"],
+                                "output_variable": "branched_gff",
+                                "mapping_rules": ["valid", "empty"],
+                                "condition_rules": ["it[1].size() > 0", "true"]
+                            }
                         }
-                    }
-                ],
-                "global_params": {}
-            }]
+                    ],
+                    "global_params": {}
+                },
+                {
+                    "strategy_selector": "CUSTOM_BUILD",
+                    "used_template_id": None,
+                    "workflow_name": "advanced_cartesian_pipeline",
+                    "components": [],
+                    "workflow_logic": [
+                        {
+                            "step_type": "MACRO",
+                            "description": "Split multi-fasta into individual records",
+                            "macro_details": {
+                                "macro_type": "SPLIT_DATA",
+                                "input_channels": ["raw_fasta"],
+                                "output_variable": "split_fasta_ch",
+                                "mapping_rules": ["splitFasta", "record: [id: it.id, seqString: it.seq]"],
+                                "condition_rules": []
+                            }
+                        },
+                        {
+                            "step_type": "MACRO",
+                            "description": "Create Cartesian product of fasta records and all databases",
+                            "macro_details": {
+                                "macro_type": "COMBINE_CHANNELS",
+                                "input_channels": ["split_fasta_ch", "reference_dbs"],
+                                "output_variable": "combined_search_ch",
+                                "mapping_rules": [],
+                                "condition_rules": []
+                            }
+                        },
+                        {
+                            "step_type": "MACRO",
+                            "description": "Map to extract exactly what the next process needs",
+                            "macro_details": {
+                                "macro_type": "MAP_DATA",
+                                "input_channels": ["combined_search_ch"],
+                                "output_variable": "mapped_search_ch",
+                                "mapping_rules": ["[ it[0].id, it[0].seqString, it[1].db_path ]"],
+                                "condition_rules": []
+                            }
+                        }
+                    ],
+                    "global_params": {}
+                }
+            ]
         }
     )

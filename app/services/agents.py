@@ -55,10 +55,15 @@ You are FORBIDDEN from passing single sample channels directly to a multi tool.
 You MUST insert a LogicStep with step_type="MACRO" right before it. 
 Use the macro_type "COLLECT_ALL" to group the data.
 
-4. COMPLEX CHANNEL OPERATIONS:
-Do NOT write raw Groovy code for complex data syncing like cross or multiMap.
+4. COMPLEX CHANNEL OPERATIONS (MACROS):
+Do NOT write raw Groovy code for complex data syncing like cross, multiMap, or combine.
 Instead use step_type="MACRO" and provide the macro_details.
-Supported macro_types: "COLLECT_ALL", "CROSS_SYNC", "MULTI_MAP_SPLIT", "JOIN_BY_KEY", "GROUP_BY_KEY", "MIX_CHANNELS", "FILTER_DATA", "BRANCH_SPLIT".
+Supported macro_types: 
+- `COLLECT_ALL`, `CROSS_SYNC`, `MULTI_MAP_SPLIT`, `JOIN_BY_KEY`, `GROUP_BY_KEY`, `MIX_CHANNELS`, `FILTER_DATA`, `BRANCH_SPLIT`, `MAP_DATA`
+- **Advanced Macros:** `COMBINE_CHANNELS` (Cartesian product), `FLAT_MAP_DATA` (flatten arrays), `SPLIT_DATA` (splitCsv/splitFasta), `REDUCE_DATA` (aggregate lists).
+
+**CRITICAL CROSS_SYNC / MAP_DATA RULE:**
+If your `.cross()` or custom `.map()` operation requires a specific shape (e.g. injecting a global variable or specific array indexes like `[ it[0][0], it[0][1], PROKKA_KINGDOM, it[1][1] ]`), you MUST put that exact Groovy array string inside the `mapping_rules` list of the macro. If left empty, it uses a generic default.
 
 # EXAMPLES (Strategy Few-Shot)
 
@@ -97,7 +102,9 @@ Supported macro_types: "COLLECT_ALL", "CROSS_SYNC", "MULTI_MAP_SPLIT", "JOIN_BY_
             "macro_details": {{
                 "macro_type": "COLLECT_ALL",
                 "input_channels": ["step_1PP_downsampling__bbnorm.out.fastq_downsampled"],
-                "output_variable": "collected_data"
+                "output_variable": "collected_data",
+                "mapping_rules": [],
+                "condition_rules": []
             }}
         }},
         {{
@@ -112,59 +119,84 @@ Supported macro_types: "COLLECT_ALL", "CROSS_SYNC", "MULTI_MAP_SPLIT", "JOIN_BY_
     }}
 }}
 
-## Example 2 ADAPTED TEMPLATE With Complex Syncing
-**User:** "Filter targets and verify species using vdabricate and seqio."
+## Example 2 ADAPTED TEMPLATE With Complex Custom Syncing
+**User:** "Cross consensus with references and map with kingdom."
 **Response:**
 {{
     "strategy_selector": "ADAPTED_MATCH",
-    "used_template_id": "target_filter_template",
-    "workflow_name": "target_filter_and_verify",
+    "used_template_id": "draft_genome_template",
+    "workflow_name": "module_draft_genome",
     "components": [
         {{
-            "process_alias": "step_3TX_species__vdabricate",
+            "process_alias": "step_4AN_genes__prokka",
             "source_type": "RAG_COMPONENT",
-            "component_id": "step_3TX_species__vdabricate",
+            "component_id": "step_4AN_genes__prokka",
             "input_type": "Fasta",
-            "output_type": "CSV"
-        }},
-        {{
-            "process_alias": "step_2AS_filtering__seqio",
-            "source_type": "RAG_COMPONENT",
-            "component_id": "step_2AS_filtering__seqio",
-            "input_type": "CSV",
-            "output_type": "Fasta"
+            "output_type": "GFF"
         }}
     ],
     "workflow_logic": [
         {{
             "step_type": "MACRO",
-            "description": "Sync assembly with database safely",
+            "description": "Cross consensus and referenceGB with custom shape for Prokka",
             "macro_details": {{
                 "macro_type": "CROSS_SYNC",
-                "input_channels": ["assembled", "abricatedatabase"],
-                "output_variable": "scaffoldsAndDatabase",
-                "mapping_rules": []
+                "input_channels": ["consensus", "referenceGB"],
+                "output_variable": "consensusKingdomReference",
+                "mapping_rules": ["[ it[0][0], it[0][1], PROKKA_KINGDOM, it[1][1], it[1][2], it[1][3] ]"],
+                "condition_rules": []
             }}
         }},
         {{
             "step_type": "PROCESS_RUN",
-            "description": "Identify viral segments",
-            "code_snippet": "step_3TX_species__vdabricate(scaffoldsAndDatabase)"
+            "description": "Run prokka annotation",
+            "code_snippet": "step_4AN_genes__prokka(consensusKingdomReference)"
+        }}
+    ],
+    "global_params": {{}}
+}}
+
+## Example 3 ADVANCED MACROS (Split, Combine, Map)
+**User:** "Split fasta and run against all databases."
+**Response:**
+{{
+    "strategy_selector": "CUSTOM_BUILD",
+    "used_template_id": null,
+    "workflow_name": "advanced_cartesian_pipeline",
+    "components": [],
+    "workflow_logic": [
+        {{
+            "step_type": "MACRO",
+            "description": "Split multi-fasta into individual records",
+            "macro_details": {{
+                "macro_type": "SPLIT_DATA",
+                "input_channels": ["raw_fasta"],
+                "output_variable": "split_fasta_ch",
+                "mapping_rules": ["splitFasta", "record: [id: it.id, seqString: it.seq]"],
+                "condition_rules": []
+            }}
         }},
         {{
             "step_type": "MACRO",
-            "description": "Split results into separate channels for the next step",
+            "description": "Create Cartesian product of fasta records and all databases",
             "macro_details": {{
-                "macro_type": "MULTI_MAP_SPLIT",
-                "input_channels": ["step_3TX_species__vdabricate.out.calls", "assembled", "reference"],
-                "output_variable": "filt",
-                "mapping_rules": ["calls", "assembly", "reference"]
+                "macro_type": "COMBINE_CHANNELS",
+                "input_channels": ["split_fasta_ch", "reference_dbs"],
+                "output_variable": "combined_search_ch",
+                "mapping_rules": [],
+                "condition_rules": []
             }}
         }},
         {{
-            "step_type": "PROCESS_RUN",
-            "description": "Filter target sequences",
-            "code_snippet": "step_2AS_filtering__seqio(filt.calls, filt.assembly, filt.reference)"
+            "step_type": "MACRO",
+            "description": "Map to extract exactly what the next process needs",
+            "macro_details": {{
+                "macro_type": "MAP_DATA",
+                "input_channels": ["combined_search_ch"],
+                "output_variable": "mapped_search_ch",
+                "mapping_rules": ["[ it[0].id, it[0].seqString, it[1].db_path ]"],
+                "condition_rules": []
+            }}
         }}
     ],
     "global_params": {{}}
@@ -205,7 +237,7 @@ Populate `main_workflow.body` using the following strict node types.
 ## A. Macro Calls (`MacroCall`)
 **Trigger:** The plan contains a `MACRO` step type.
 * **Action:** Create a `MacroCall` node. You MUST copy the `macro_type`, `input_channels`, `output_variable`, `mapping_rules`, and `condition_rules` exactly from the planner.
-* **Constraint:** Do not try to build `ChannelChain` operators (like `.cross` or `.multiMap`) for macros. The python compiler will handle the Groovy code automatically.
+* **Constraint:** Do not try to build `ChannelChain` operators (like `.cross` or `.multiMap`) for macros. The python compiler will handle the Groovy code automatically. Allowed macros: `COLLECT_ALL`, `CROSS_SYNC`, `MULTI_MAP_SPLIT`, `JOIN_BY_KEY`, `GROUP_BY_KEY`, `MIX_CHANNELS`, `FILTER_DATA`, `BRANCH_SPLIT`, `MAP_DATA`, `COMBINE_CHANNELS`, `FLAT_MAP_DATA`, `SPLIT_DATA`, `REDUCE_DATA`.
 
 ## B. Process Calls (`ProcessCall`)
 **Trigger:** The plan contains a `PROCESS_RUN` step type.
