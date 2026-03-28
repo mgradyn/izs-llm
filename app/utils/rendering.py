@@ -1,75 +1,60 @@
-NF_TEMPLATE_AST = """
-nextflow.enable.dsl=2
+NF_TEMPLATE_AST = """nextflow.enable.dsl=2
 
 // --- IMPORTS ---
 {% for imp in imports %}
-include { {{ imp.functions | join('; ') }} } from '{{ imp.module_path }}'
+{%- set funcs = imp.functions | join(', ') %}
+include { {{ funcs }} } from '{{ imp.module_path }}'
 {% endfor %}
 
 // --- GLOBALS ---
 {% for g in globals %}
-{% if g.type == 'string' %}
-def {{ g.name }} = "{{ g.value }}"
-{% else %}
-def {{ g.name }} = {{ g.value }}
-{% endif %}
+{{ g.type }} {{ g.name }} = {{ g.value }}
 {% endfor %}
 
 // --- INLINE PROCESSES ---
-{% for proc in inline_processes %}
-process {{ proc.name }} {
-{% if proc.container %}    container "{{ proc.container }}"{% endif %}
-    tag "${md?.cmp}/${md?.ds}/${md?.dt}"
-{% if proc.input_declarations %}
-    input:
-{% for inp in proc.input_declarations %}        {{ inp }}
-{% endfor %}
-{% endif %}
-{% if proc.output_declarations %}
-    output:
-{% for out in proc.output_declarations %}        {{ out }}
-{% endfor %}
-{% endif %}
-
+{% for p in inline_processes %}
+process {{ p.name }} {
+    {% if p.container %}container '{{ p.container }}'{% endif %}
+    
+    {% if p.input_declarations %}input:{% endif %}
+    {% for ind in p.input_declarations %}
+    {{ ind }}
+    {% endfor %}
+    
+    {% if p.output_declarations %}output:{% endif %}
+    {% for outd in p.output_declarations %}
+    {{ outd }}
+    {% endfor %}
+    
     script:
-'''
-{{ proc.script_block | safe }}
-'''
+    \"\"\"
+{{ p.script_block }}
+    \"\"\"
 }
 {% endfor %}
 
-// --- WORKFLOW MACRO ---
-{% macro render_workflow(wf_obj) %}
-workflow {{ wf_obj.name }} {
-{% if wf_obj.take_channels %}
+// --- SUB WORKFLOWS ---
+{% for sw in sub_workflows %}
+workflow {{ sw.name }} {
+    {% if sw.take_channels %}
     take:
-{% for channel in wf_obj.take_channels %}
-        {{ channel }}
-{% endfor %}
-{% endif %}
-
+        {% for ch in sw.take_channels %}
+        {{ ch }}
+        {% endfor %}
+    {% endif %}
     main:
-    {{ wf_obj.body_code | safe }}
-
-{% if wf_obj.emit_channels %}
+{{ sw.body_code | indent(8, true) }}
+    {% if sw.emit_channels %}
     emit:
-{% for emit in wf_obj.emit_channels %}
-        {{ emit }}
-{% endfor %}
-{% endif %}
+        {% for em in sw.emit_channels %}
+        {{ em }}
+        {% endfor %}
+    {% endif %}
 }
-{% endmacro %}
-
-// --- HELPER SUB-WORKFLOWS ---
-{% for sub in sub_workflows %}
-{{ render_workflow(sub) }}
 {% endfor %}
 
-// --- MAIN WORKFLOW MODULE ---
-{{ render_workflow(main_workflow) }}
-
-// --- ENTRYPOINT WORKFLOW ---
+// --- ENTRYPOINT ---
 workflow {
-    {{ entrypoint.body_code | safe }}
+{{ entrypoint.body_code | indent(4, true) }}
 }
 """

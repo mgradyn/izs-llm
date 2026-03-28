@@ -36,3 +36,46 @@ def renderer_node(state: GraphState):
     return {
         "nextflow_code": nf_code
     }
+
+def render_mermaid_from_json(data) -> str:
+    lines = ["flowchart TD"]
+    
+    subgraphs = {}
+    unassigned = []
+    
+    for node in data.nodes:
+        if node.subgraph:
+            sg = node.subgraph.strip()
+            if sg not in subgraphs: 
+                subgraphs[sg] = []
+            subgraphs[sg].append(node)
+        else:
+            unassigned.append(node)
+
+    def draw_node(n):
+        label = n.label 
+        if n.shape == 'input': return f'    {n.id}(["{label}"])'
+        elif n.shape == 'operator': return f'    {n.id}{{"{label}"}}'
+        elif n.shape == 'output': return f'    {n.id}[("{label}")]'
+        elif n.shape == 'global': return f'    {n.id}("{label}")'
+        else: return f'    {n.id}["{label}"]' 
+
+    for sg_name, nodes in subgraphs.items():
+        clean_sg = sg_name.replace(" ", "_").replace(".", "_")
+        
+        lines.append(f'    subgraph sg_{clean_sg} ["{sg_name}"]')
+        
+        for n in nodes:
+            lines.append(draw_node(n))
+        lines.append("    end")
+
+    for n in unassigned:
+        lines.append(draw_node(n))
+
+    for e in data.edges:
+        if e.label and e.label.strip():
+            lines.append(f'    {e.source} -->|"{e.label}"| {e.target}')
+        else:
+            lines.append(f'    {e.source} --> {e.target}')
+
+    return "\n".join(lines)

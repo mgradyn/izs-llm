@@ -19,9 +19,9 @@ def _inject_component(comp_id, found_ids, context_blocks, store: BaseStore, embe
 
     block = f"""
 --- COMPONENT: {comp_id} ---
-TOOL: {comp_data.get('tool')}
-DESCRIPTION: {comp_data.get('description')}
-CONTAINER: {comp_data.get('container')}
+TOOL: {comp_data.get('tool', 'Unknown')}
+DESCRIPTION: {comp_data.get('description', 'No description')}
+CONTAINER: {comp_data.get('container', 'None')}
 INPUTS: {', '.join(comp_data.get('input_types', []))}
 OUTPUTS: {', '.join(comp_data.get('out', []))}
 """
@@ -49,205 +49,147 @@ def _inject_template(template_id, found_ids, context_blocks, store: BaseStore, e
     context_blocks.append(block)
 
 def retrieve_rag_context(user_query, store: BaseStore, embed_code=False):
-    """Retrieves similar documents from Vector Store."""
+    """Retrieves context using a Hybrid Approach: Keyword/Metadata Matching + FAISS Semantic Search."""
     if not data_loader.vector_store:
         return "Vector Store not loaded."
     
-    docs = data_loader.vector_store.similarity_search(user_query, k=10)
-
-    print(docs)
-
     found_ids = set()
     context_blocks = []
+    query_lower = user_query.lower()
+    
+    # ==========================================
+    # 1. HYBRID KEYWORD & METADATA SEARCH
+    # ==========================================
+    ignore_words = {
+        'step', 'mapping', 'module', 'genes', 'denovo', 'assembly', 'tool', 
+        'pipeline', 'workflow', 'build', 'create', 'make', 'run', 'using',
+        'file', 'data', 'reads', 'fastq', 'fasta', 'generate', 'process',
+        'custom', 'script', 'and', 'plus', 'with'
+    }
+
+    # --- SCAN TEMPLATES ---
+    try:
+        for tmpl in store.search(("templates",)):
+            tmpl_id = tmpl.key.lower()
+            tmpl_data = tmpl.value
+            
+            tmpl_name = str(tmpl_data.get('name', tmpl_data.get('template_name', ''))).lower()
+            keywords = [str(k).lower() for k in tmpl_data.get('keywords', [])]
+            
+            match_found = False
+            
+            clean_id = tmpl_id.replace("module_", "").replace("_", " ")
+            if clean_id and clean_id in query_lower:
+                match_found = True
+                
+            for kw in keywords:
+                if kw and len(kw) > 3 and kw in query_lower:
+                    match_found = True
+                    break
+                    
+            if match_found:
+                context_blocks.append(f"### PIPELINE BLUEPRINT (Keyword Match): {tmpl.key}")
+                _inject_template(tmpl.key, found_ids, context_blocks, store, embed_code=True)
+                
+                for flow_step in tmpl_data.get('logic_flow', []):
+                    if 'step' in flow_step: 
+                        _inject_component(flow_step['step'], found_ids, context_blocks, store, embed_code)
+                    for sub_key in ['parallel_execution', 'branches', 'options']:
+                        if sub_key in flow_step:
+                            for item in flow_step[sub_key]:
+                                if 'step' in item: _inject_component(item['step'], found_ids, context_blocks, store, embed_code)
+                                if 'next' in item:
+                                    for sub_item in item['next']:
+                                        if 'step' in sub_item: _inject_component(sub_item['step'], found_ids, context_blocks, store, embed_code)
+    except Exception as e:
+        print(f"Template hybrid search error: {e}")
+
+    # --- SCAN COMPONENTS ---
+    try:
+        for comp in store.search(("components",)):
+            comp_id = comp.key.lower()
+            comp_data = comp.value
+            
+            tool_name = str(comp_data.get('tool', '')).lower()
+            seq_types = [str(s).lower() for s in comp_data.get('compatible_seq_types', [])]
+            
+            match_found = False
+            
+            # Check 1: Suffix/ID Name (e.g., step_4TY_lineage__westnile -> westnile)
+            if '__' in comp_id:
+                suffix = comp_id.split('__')[-1]
+                suffix_words = suffix.split('_')
+                for sw in suffix_words:
+                    if sw and len(sw) > 3 and sw in query_lower and sw not in ignore_words:
+                        match_found = True
+                        break
+
+            # Check 2: Break down complex tool names (e.g., "Snippy + Custom Script")
+            if not match_found and tool_name:
+                tool_words = re.split(r'[^a-z0-9]', tool_name)
+                for word in tool_words:
+                    if len(word) > 3 and word in query_lower and word not in ignore_words:
+                        match_found = True
+                        break
+
+            # Check 3: Compatible Sequence Types (e.g., "west_nile_virus" -> "west nile virus")
+            if not match_found:
+                for st in seq_types:
+                    clean_st = st.replace('_', ' ')
+                    if clean_st and len(clean_st) > 3 and clean_st in query_lower:
+                        match_found = True
+                        break
+                        
+            # Check 4: Specific structural words in ID if mentioned (e.g., "lineage")
+            if not match_found:
+                if "lineage" in query_lower and "lineage" in comp_id:
+                    match_found = True
+                    
+            if match_found:
+                _inject_component(comp.key, found_ids, context_blocks, store, embed_code)
+    except Exception as e:
+        print(f"Component hybrid search error: {e}")
+
+
+    # ==========================================
+    # 2. SEMANTIC SEARCH (FAISS)
+    # ==========================================
+    docs = data_loader.vector_store.similarity_search(user_query, k=20)
     
     for doc in docs:
         meta = doc.metadata
         item_id = meta.get('id')
         item_type = meta.get('type')
 
-        # Deduplicate at document level
         if item_id in found_ids:
             continue
 
-        # --- PATH 1: TEMPLATE (Pipeline Blueprint) ---
         if item_type == 'template':
             tmpl_item = store.get(("templates",), item_id)
             if tmpl_item:
                 tmpl = tmpl_item.value
-                context_blocks.append(f"### PIPELINE BLUEPRINT: {item_id}\n{doc.page_content}")
+                context_blocks.append(f"### PIPELINE BLUEPRINT (Semantic Match): {item_id}\n{doc.page_content}")
                 _inject_template(tmpl['id'], found_ids, context_blocks, store, embed_code=True)
 
-            found_ids.add(item_id)
+                found_ids.add(item_id)
 
-            # Recursive Expansion: Fetch all children components
-            for flow_step in tmpl.get('logic_flow', []):
+                # Recursive Expansion
+                for flow_step in tmpl.get('logic_flow', []):
+                    if 'step' in flow_step:
+                        _inject_component(flow_step['step'], found_ids, context_blocks, store, embed_code)
+                    for sub_key in ['parallel_execution', 'branches', 'options']:
+                        if sub_key in flow_step:
+                            for item in flow_step[sub_key]:
+                                if 'step' in item:
+                                    _inject_component(item['step'], found_ids, context_blocks, store, embed_code)
+                                if 'next' in item:
+                                    for sub_item in item['next']:
+                                        if 'step' in sub_item:
+                                            _inject_component(sub_item['step'], found_ids, context_blocks, store, embed_code)
 
-                # Direct Steps
-                if 'step' in flow_step:
-                    _inject_component(flow_step['step'], found_ids, context_blocks, store, embed_code)
-
-                # Complex Logic (Parallel/Branching/Next)
-                for sub_key in ['parallel_execution', 'branches', 'options']:
-                    if sub_key in flow_step:
-                        for item in flow_step[sub_key]:
-                            if 'step' in item:
-                                _inject_component(item['step'], found_ids, context_blocks, store, embed_code)
-
-                            # Handle 'next' chaining
-                            if 'next' in item:
-                                for sub_item in item['next']:
-                                    if 'step' in sub_item:
-                                        _inject_component(sub_item['step'], found_ids, context_blocks, store, embed_code)
-
-        # --- PATH 2: COMPONENT (Direct Hit) ---
         elif item_type == 'component':
-            # Always embed code for direct hits too
             _inject_component(item_id, found_ids, context_blocks, store, embed_code)
 
     final_context = "\n".join(context_blocks) + "\n\n"
 
     return final_context
-
-def hydrator_node(state: GraphState, store: BaseStore):
-    print("--- [NODE] HYDRATOR (Context Assembly) ---")
-
-    if state.get("error"):
-        return {"error": state["error"]}
-    
-    # Extract the plan 
-    plan = state['design_plan']
-
-    context_parts = []
-    detected_helpers = set()
-
-    # Extract Plan Fields
-    strategy = plan.get('strategy_selector', 'CUSTOM_BUILD')
-    used_template_id = plan.get('used_template_id')
-    components = plan.get('components', [])
-    workflow_logic = plan.get('workflow_logic', [])
-
-    # Access Store
-    RES_ITEM = store.get(("resources",), "helper_functions")
-    RES_LIST = RES_ITEM.value.get("list", []) if RES_ITEM else []
-    HELPER_NAMES = {r['name'] for r in RES_LIST}
-
-    # ==========================================
-    # PATH A: STRICT TEMPLATE MODE
-    # ==========================================
-    if strategy == "EXACT_MATCH" and used_template_id:
-        tmpl_id = used_template_id
-        tmpl_item = store.get(("templates",), tmpl_id)
-        template_def = tmpl_item.value if tmpl_item else None
-
-        context_parts.append(f"### STRICT TEMPLATE MODE: {tmpl_id}")
-        if template_def:
-            context_parts.append(f"Description: {template_def.get('description')}")
-            
-            # 1. Get Template Source
-            code_item = store.get(("code",), tmpl_id)
-            tmpl_code = code_item.value.get("content") if code_item else None
-            if tmpl_code:
-                context_parts.append(f"[[TEMPLATE SOURCE CODE: {tmpl_id}]]")
-                context_parts.append("INSTRUCTION: Use the logic in this workflow block exactly.")
-                context_parts.append(f"```groovy\n{tmpl_code.strip()}\n```")
-                context_parts.append(f"[[END TEMPLATE SOURCE]]")
-                
-                for h in HELPER_NAMES:
-                    if h in tmpl_code: detected_helpers.add(h)
-            
-            # 2. Get Dependencies (Reference Tools inside the template)
-            for step in template_def.get('logic_flow', []):
-                if 'step' in step:
-                    comp_id = step['step']
-                    c_item = store.get(("code",), comp_id)
-                    code = c_item.value.get("content") if c_item else None
-                    if code:
-                        context_parts.append(f"[[REFERENCE FOR STEP: {comp_id}]]")
-                        context_parts.append(f"```groovy\n{code.strip()}\n```")
-                        context_parts.append(f"[[END REFERENCE]]")
-                        
-                        for h in HELPER_NAMES:
-                            if h in code: detected_helpers.add(h)
-
-    # ==========================================
-    # PATH B: CUSTOM ASSEMBLY MODE
-    # ==========================================
-    else:
-        # 1. Handle Template Inheritance (Adapted Mode)
-        if strategy == "ADAPTED_MATCH" and used_template_id:
-            context_parts.append(f"### ADAPTED TEMPLATE MODE: Based on {used_template_id}")
-            t_item = store.get(("code",), used_template_id)
-            tmpl_code = t_item.value.get("content") if t_item else None
-
-            if tmpl_code:
-                allowed_ids = {used_template_id}
-                
-                for comp in components:
-                    if comp.get('component_id'): 
-                        allowed_ids.add(comp.get('component_id'))
-                    if comp.get('process_alias'):
-                        allowed_ids.add(comp.get('process_alias'))
-                
-                filtered_code = filter_template_logic(tmpl_code, allowed_ids)
-
-                context_parts.append(f"[[TEMPLATE SOURCE CODE: {used_template_id}]]")
-                context_parts.append("INFO: Some steps in this template have been commented out because they are not in your Design Plan.")
-                context_parts.append("INSTRUCTION: Reuse the logic that remains, but FILL THE GAPS using your new components.")
-                context_parts.append(f"```groovy\n{filtered_code.strip()}\n```")
-                
-                for h in HELPER_NAMES:
-                    if h in tmpl_code: detected_helpers.add(h)        
-        else:
-            context_parts.append("### CUSTOM BUILD MODE")
-
-        for comp in components:
-            step_alias = comp.get('process_alias')
-            source_type = comp.get('source_type')
-            
-            if source_type == "RAG_COMPONENT":
-                comp_id = comp.get('component_id')
-
-                if comp_id == used_template_id and strategy == "ADAPTED_MATCH":
-                    continue
-
-                code_item = store.get(("code",), comp_id)
-                source_code = code_item.value.get("content") if code_item else None
-                
-                if source_code:
-                    context_parts.append(f"[[REFERENCE FOR STEP: {step_alias}]]")
-                    context_parts.append(f"Component ID: {comp_id}")
-                    context_parts.append(f"```groovy\n{source_code.strip()}\n```")
-                    context_parts.append(f"[[END REFERENCE: {step_alias}]]")
-                    for h in HELPER_NAMES:
-                        if h in source_code: detected_helpers.add(h)
-            
-            elif source_type == "CUSTOM_SCRIPT":
-
-                # We provide instructions so the Agent 2 can write the script.
-                description = comp.get('source_description', 'No description provided.')
-                
-                context_parts.append(f"[[INSTRUCTIONS FOR STEP: {step_alias}]]")
-                context_parts.append("INSTRUCTION: Create a new Nextflow code for this logic.")
-                context_parts.append(f"Requirement: {description}")
-                context_parts.append(f"[[END INSTRUCTIONS: {step_alias}]]")
-                pass
-
-    # ==========================================
-    # RESOURCE INJECTION
-    # ==========================================
-    plan_str = json.dumps(plan)
-    if "cross" in plan_str or "multiMap" in plan_str:
-        detected_helpers.add("extractKey")
-    
-    if detected_helpers:
-        context_parts.append("\n### AVAILABLE HELPER FUNCTIONS")
-        for h_name in detected_helpers:
-            res_def = next((r for r in RES_LIST if r['name'] == h_name), None)
-            if res_def:
-                context_parts.append(f"- {h_name}: {res_def.get('description')}")
-                context_parts.append(f"  Usage: `{res_def.get('usage')}`")
-    full_context = "\n\n".join(context_parts)
-
-    print(f"technical_context: {full_context}")
-
-    return {"technical_context": full_context}

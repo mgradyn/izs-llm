@@ -8,8 +8,9 @@ from app.models.ast_structure import NextflowPipelineAST
 from app.services.llm import get_llm
 from app.services.tools import retrieve_rag_context
 from app.services.graph_state import GraphState
+from app.services.renderer import render_mermaid_from_json
 from app.models.consultant_structure import ConsultantOutput
-from app.models.diagram_structure import MermaidOutput
+from app.models.diagram_structure import DiagramData
 from app.core.loader import data_loader
 from langgraph.store.base import BaseStore
 
@@ -27,49 +28,80 @@ Your job is to talk with the user and design a Nextflow DSL2 pipeline step by st
 4. Keep `status` as "CHATTING" while discussing.
 5. When the user approves the pipeline change `status` to "APPROVED".
 
+# POST-GENERATION REVISIONS (CRITICAL)
+If the user provides feedback on a pipeline you ALREADY generated (e.g., "Actually, change iVar to Bowtie", or "Add FastQC"):
+1. Acknowledge the change.
+2. If you need to discuss it more, set status to "CHATTING".
+3. If you immediately understand the change and are ready to rebuild, set status to "APPROVED" and output the entirely updated `draft_plan` and `selected_module_ids`.
+
 # WHEN APPROVED
 When you set status to "APPROVED", you MUST fill out the following fields based on the RAG context:
 1. `draft_plan`: A highly detailed text instruction manual for the Architect Agent. Explain how data channels connect.
 2. `strategy_selector`: Choose "EXACT_MATCH" if using a template exactly, "ADAPTED_MATCH" if modifying a template, or "CUSTOM_BUILD" if building from scratch.
-3. `used_template_id`: The exact ID of the template used (if any).
-4. `selected_module_ids`: A list of the exact IDs of the individual tools needed from the RAG context (e.g., ["step_1PP_filtering__bowtie"]).
+
+# ANTI-HALLUCINATION RULES FOR IDs
+You MUST extract the exact ID strings from the RAG context for `used_template_id` and `selected_module_ids`. 
+- DO NOT invent names.
+- DO NOT use shorthand (e.g., use `step_4TY_lineage__pangolin`, NOT `pangolin`).
+- If a tool is not in the RAG context, DO NOT include a fake ID for it.
 """
 
 ARCHITECT_SYSTEM_PROMPT = """You are the Principal Nextflow Developer.
-Your task is to write a strict Nextflow DSL2 pipeline based on the Consultant plan.
+Your task is to write a strict Nextflow DSL2 pipeline based on the Consultant's plan.
 
 # GOAL
 You must output a JSON object matching the NextflowPipelineAST schema.
-Write RAW NEXTFLOW GROOVY CODE for the `body_code` fields.
+Instead of building complex JSON logic trees, you will write RAW NEXTFLOW GROOVY CODE for the `body_code` fields.
 
-# STRICT DSL2 RULES
-1. Never use DSL1 syntax. Do not use the `<<` operator for channels.
-2. Every sub-workflow must have explicit `take:` and `emit:` blocks if they receive or output channels.
-3. Use `include { PROCESS_NAME } from 'module_path'` to import tools.
-4. Data often flows in tuples like `tuple val(meta), path(reads)`. If you use operators like `.map` or `.branch`, you must handle the meta map correctly (e.g. `.map { meta, reads -> [ meta, reads ] }`).
-5. Connect tools using the exact named outputs from the modules (e.g. `ch_trimmed = TOOL(ch_raw).reads`).
-6. Do not wrap the `body_code` strings in markdown backticks. Just write the raw text.
+# STRICT DSL2 & FORMATTING RULES
+1. **IMPORTS ARE CRITICAL** You MUST import every `step_...` or `multi_...` tool you use. 
+   - NEVER use nf-core paths. 
+   - Use local paths based on the prefix `../steps/<name>`, `../multi/<name>`, or `../functions/<name>.nf`.
+2. **NO WORKFLOW WRAPPERS** In the `body_code` for workflows and the entrypoint, DO NOT write `workflow {{ ... }}` or `main`. The rendering engine does this automatically. Just write the inner logic.
+3. **NO LOGIC IN PROCESSES** The `inline_processes` list is ONLY for raw bash scripts. Do not put Nextflow logic inside an inline process. Use `sub_workflows` for logic.
+4. **CHANNELS & TUPLES** Nextflow data often flows in tuples. If you use operators like `.multiMap`, handle the meta map correctly.
 
 # STRUCTURE EXPECTATIONS
-- imports: List the tools to include.
-- globals: Define standard params.
-- inline_processes: Only use this for custom bash scripts not found in the imports.
-- sub_workflows: Reusable logic blocks. Write the DSL2 logic in `body_code`.
-- main_workflow: The primary execution block. Write the DSL2 logic in `body_code`.
-- entrypoint: The trigger block. Keep it simple and just invoke the main_workflow.
+- `imports` List the tools to include with their correct local paths.
+- `globals` Define standard params and variables used in the pipeline.
+- `inline_processes` Custom bash scripts not found in the RAG context.
+- `sub_workflows` Reusable logic blocks. Write the DSL2 logic inside `body_code`.
+- `entrypoint` The main unnamed workflow execution block. Write your primary DSL2 logic directly inside `body_code`.
 """
 
-DIAGRAM_SYSTEM_PROMPT = """You are a Technical Documentation Expert.
-Your ONLY job is to read a final Nextflow DSL2 script and create a Mermaid flowchart diagram.
+DIAGRAM_SYSTEM_PROMPT = """You are a Principal Bioinformatics Architect and Technical Documentation Expert.
+Your ONLY job is to read a final Nextflow DSL2 script and map its structural data flow into a precise JSON graph object containing `nodes` and `edges`.
 
-# RULES
-1. Output ONLY valid Mermaid code starting with `flowchart TD`.
-2. DO NOT add markdown backticks around your output.
-3. Look at the `workflow` blocks and `process` calls in the provided text.
-4. Draw a rectangular box `[]` for every process or sub-workflow called.
-5. Draw arrows `-->` showing how the data channels flow between them.
-6. Use the exact channel names from the code to label the arrows (e.g. `A -- ch_reads --> B`).
-7. Do not invent steps or tools that are not in the code.
+# GRAPH MAPPING RULES
+
+## 1. NODE EXTRACTION & SHAPES
+You must map EVERY component of the Nextflow script and strictly categorize them into one of these 5 shapes:
+* `input`: Use this for starting channels (e.g., `Channel.fromPath(...)`) and for inputs defined in the `take` blocks of sub-workflows.
+* `process`: Use this for tool executions (e.g., `step_fastqc(...)`).
+* `operator`: Use this for Nextflow channel operators. You MUST create a node for operators like `.map`, `.cross`, `.multiMap`, `.mix`, `.join`, and `.branch`.
+* `output`: Use this for final emitted channels (e.g., inside `emit` blocks).
+* `global`: Use this for static global variables or constants defined at the top of the script.
+
+## 2. NODE IDs & LABELS (CRITICAL)
+* **`id`**: MUST be purely alphanumeric with underscores (e.g., `step_1`, `op_multimap`). **DO NOT use dots, dashes, or spaces in the ID.** * *Wrong:* `step.fastqc`
+    * *Right:* `step_fastqc`
+* **`label`**: The actual human-readable text. It is okay to use dots or parentheses here (e.g., `.cross`, `reads`, `getSingleInput()`).
+
+## 3. SCOPE & SUBGRAPHS
+Nextflow groups logic into `workflow` blocks. You must map this hierarchy using the `subgraph` field:
+* If a node is inside a named sub-workflow (e.g., `workflow module_westnile {{ ... }}`), its `subgraph` field must be the workflow name (e.g., `"module_westnile"`).
+* If a node is inside the unnamed main entrypoint (`workflow {{ ... }}`), its `subgraph` field must be `"entrypoint"`.
+* If a node is defined outside any workflow (like a global variable), leave `subgraph` as `null`.
+
+## 4. EDGES & DATA FLOW (CRITICAL CONNECTIVITY)
+You must map how the data flows from `source` to `target`.
+* **Connecting Sub-workflows (NO OPAQUE CALLS):** DO NOT create a single process node for a sub-workflow call (e.g., `module_segmented(...)`). Instead, trace the data. Connect the upstream nodes in the entrypoint DIRECTLY to the `input` nodes defined in the `take` block of the sub-workflow.
+* **No Floating Nodes:** Every node you create MUST be connected to at least one edge.
+* **Edge Labels:** You MUST label the edge with the exact data passing through it.
+    * If passing a channel: label it with the channel name (e.g., `"ch_ready"`).
+    * If unpacking a tuple: list the contents (e.g., `"val(meta), path(reads)"`).
+    * If accessing a process output property: label the specific property (e.g., `"out.consensus"`, `"out.bam"`).
+    * If splitting data (like after a `.multiMap`), draw separate edges for each split and label them (e.g., `"reads: it[0]"`).
 """
 
 # ==========================================
@@ -81,7 +113,6 @@ def consultant_node(state: GraphState, store: BaseStore):
     llm = get_llm()
     
     current_messages = state.get("messages", [])
-
     latest_query = state.get('user_query', '')
     if current_messages:
         latest_query = current_messages[-1].content
@@ -89,8 +120,19 @@ def consultant_node(state: GraphState, store: BaseStore):
     metadata_context = retrieve_rag_context(latest_query, store, embed_code=False)
     print(f"[Consultant] RAG Context Retrieved: {len(metadata_context)} chars")
 
+    current_plan = state.get("design_plan", "No plan generated yet.")
+    current_modules = state.get("selected_module_ids", [])
+    
+    revision_context = f"""
+    # CURRENT PIPELINE STATE
+    If you are making a revision, here is the current approved state of the pipeline:
+    - Current Modules: {current_modules}
+    - Current Plan: {current_plan}
+    """
+    # --------------------------------
+
     prompt = ChatPromptTemplate.from_messages([
-        ("system", CONSULTANT_SYSTEM_PROMPT + "\n\nAVAILABLE RAG CONTEXT (Tools & Templates):\n{context}"),
+        ("system", CONSULTANT_SYSTEM_PROMPT + "\n\nAVAILABLE RAG CONTEXT (Tools & Templates):\n{context}\n\n" + revision_context),
         MessagesPlaceholder(variable_name="messages")
     ])
 
@@ -104,16 +146,54 @@ def consultant_node(state: GraphState, store: BaseStore):
         })
         
         print(f"[Consultant] Status: {result.status}")
-        
-        return {
+
+        if result.status == "APPROVED":
+            
+            # 1. Verify Template ID against the Store
+            if result.used_template_id:
+                tmpl_item = store.get(("templates",), result.used_template_id)
+                if not tmpl_item:
+                    print(f"⚠️ Consultant Hallucinated Template ID: '{result.used_template_id}'. Stripping from plan.")
+                    result.used_template_id = None
+                
+            # 2. Verify Component IDs against the Store
+            verified_modules = []
+            for mod_id in result.selected_module_ids:
+                comp_item = store.get(("components",), mod_id)
+                if comp_item:
+                    verified_modules.append(mod_id)
+                else:
+                    # Check if they accidentally put a template ID in the module list
+                    tmpl_fallback = store.get(("templates",), mod_id)
+                    if tmpl_fallback:
+                        pass 
+                    else:
+                        print(f"⚠️ Consultant Hallucinated Module ID: '{mod_id}'. Stripping from plan.")
+            
+            result.selected_module_ids = verified_modules
+
+        # Detect a "Hard Reset" from the LLM (user asked to start over completely)
+        is_hard_reset = (result.status == "CHATTING" and result.draft_plan == "" and len(result.selected_module_ids) == 0)
+
+        # Prepare the baseline state updates
+        state_updates = {
             "messages": [AIMessage(content=result.response_to_user)],
             "consultant_status": result.status,
-            "design_plan": result.draft_plan if result.status == "APPROVED" else state.get("design_plan"),
+            "design_plan": result.draft_plan if (result.status == "APPROVED" or is_hard_reset) else state.get("design_plan"),
             "strategy_selector": result.strategy_selector if result.status == "APPROVED" else state.get("strategy_selector", "CUSTOM_BUILD"),
-            "used_template_id": result.used_template_id if result.status == "APPROVED" else state.get("used_template_id"),
-            "selected_module_ids": result.selected_module_ids if result.status == "APPROVED" else state.get("selected_module_ids", []),
+            "used_template_id": result.used_template_id if (result.status == "APPROVED" or is_hard_reset) else state.get("used_template_id"),
+            "selected_module_ids": result.selected_module_ids if (result.status == "APPROVED" or is_hard_reset) else state.get("selected_module_ids", []),
             "error": None
         }
+
+        # POST-GENERATION REVISION TRIGGER
+        # Wipe the old execution data so the frontend knows we are rebuilding or resetting
+        if result.status == "CHATTING" or (result.status == "APPROVED" and state.get("nextflow_code")):
+            state_updates["nextflow_code"] = None
+            state_updates["mermaid_code"] = None
+            state_updates["ast_json"] = None
+
+        return state_updates
         
     except Exception as e:
         print(f"💥 Consultant Node Failed: {str(e)}")
@@ -121,7 +201,7 @@ def consultant_node(state: GraphState, store: BaseStore):
 
 
 def architect_node(state: GraphState):
-    print("--- [NODE] ARCHITECT (Code Generator) ---")
+    print("--- [NODE] ARCHITECT (Hybrid Code Generator) ---")
     if state.get("error"): return {"error": state['error']}
     
     llm = get_llm()
@@ -129,7 +209,7 @@ def architect_node(state: GraphState):
 
     prompt = ChatPromptTemplate.from_messages([
         ("system", ARCHITECT_SYSTEM_PROMPT),
-        ("human", "APPROVED PLAN:\n{plan}\n\nTECHNICAL CONTEXT (Available Tools):\n{tech_context}")
+        ("human", "APPROVED PLAN:\n{plan}\n\nTECHNICAL CONTEXT (Available Tools & Code):\n{tech_context}")
     ])
         
     messages = prompt.invoke({
@@ -139,13 +219,13 @@ def architect_node(state: GraphState):
 
     try:
         result = architect_agent.invoke(messages)
-        print("[Architect] Successfully generated AST blocks.")
+        print("[Architect] Successfully generated Hybrid AST.")
         return {
             "ast_json": result.model_dump(),
             "validation_error": None
         }
     except Exception as e:
-        print(f"Architect Node Failed: {str(e)}")
+        print(f"⚠️ Architect Validation Failed: {str(e)}")
         return {
             "validation_error": str(e),
             "retries": state.get("retries", 0) + 1
@@ -153,36 +233,43 @@ def architect_node(state: GraphState):
     
 
 def diagram_node(state: GraphState):
-    print("--- [NODE] DIAGRAM AGENT (Mermaid Sync) ---")
+    print("--- [NODE] DIAGRAM AGENT (JSON -> Python Compiler) ---")
     if state.get("error"): return {"error": state['error']}
     
     final_code = state.get("nextflow_code", "")
-    
     if not final_code:
-        print("[Diagram] Warning: No Nextflow code found. Skipping diagram.")
+        print("[Diagram] Warning: No Nextflow code found.")
         return {"mermaid_code": "flowchart TD\n    Empty[No code generated]"}
 
     llm = get_llm()
-    diagram_agent = llm.with_structured_output(MermaidOutput)
+    diagram_agent = llm.with_structured_output(DiagramData, method="json_schema", include_raw=False)
 
     prompt = ChatPromptTemplate.from_messages([
         ("system", DIAGRAM_SYSTEM_PROMPT),
-        ("human", "Generate a Mermaid diagram for this final Nextflow code:\n\n{code}")
+        ("human", "Map this Nextflow code into a JSON Node/Edge Graph:\n\n{code}")
     ])
         
     messages = prompt.invoke({"code": final_code}).to_messages()
 
-    try:
-        result = diagram_agent.invoke(messages)
-        print("[Diagram] Successfully generated Mermaid map.")
-        return {
-            "mermaid_code": result.mermaid_code
-        }
-    except Exception as e:
-        print(f"Diagram Node Failed: {str(e)}")
-        return {
-            "mermaid_code": "flowchart TD\n    Error[Diagram generation failed]"
-        }
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            result = diagram_agent.invoke(messages)
+            
+            if not result or not result.nodes:
+                raise ValueError("LLM returned empty graph data.")
+
+            mermaid_string = render_mermaid_from_json(result)
+            
+            print(f"[Diagram] Successfully compiled Mermaid graph on attempt {attempt + 1}.")
+            return {"mermaid_code": mermaid_string}
+            
+        except Exception as e:
+            print(f"⚠️ Diagram Data Error (Attempt {attempt + 1}): {str(e)}")
+            messages.append(AIMessage(content="I generated an invalid JSON graph structure."))
+            messages.append(HumanMessage(content=f"Validation Error: {str(e)}\nFix the data and try again."))
+    
+    return {"mermaid_code": "flowchart TD\n    Error[\"Diagram generation failed after 3 attempts. See logs for details.\"]"}
     
 def filter_template_logic(code: str, allowed_components: set) -> str:
     lines = code.split('\n')
@@ -219,7 +306,9 @@ def hydrator_node(state: GraphState, store: BaseStore):
 
     # Access Data from Store
     RES_ITEM = store.get(("resources",), "helper_functions")
+
     RES_LIST = RES_ITEM.value.get("list", []) if RES_ITEM else []
+
     helper_names = [r['name'] for r in RES_LIST]
 
     # ==========================================
@@ -235,7 +324,12 @@ def hydrator_node(state: GraphState, store: BaseStore):
             context_parts.append(f"Description: {template_def.get('description')}")
             
             code_item = store.get(("code",), tmpl_id)
+
+            # print("code_item", code_item)
+
             tmpl_code = code_item.value.get("content") if code_item else None
+
+            # print("tmpl_code", tmpl_code)
             
             if tmpl_code:
                 context_parts.append(f"[[TEMPLATE SOURCE CODE: {tmpl_id}]]")
@@ -315,6 +409,6 @@ def hydrator_node(state: GraphState, store: BaseStore):
                 context_parts.append(f"  Usage: `{res_def.get('usage')}`")
                 
     full_context = "\n\n".join(context_parts)
-    print(f"technical_context: {full_context[:200]}...")
+    # print(f"technical_context: {full_context}")
 
     return {"technical_context": full_context}

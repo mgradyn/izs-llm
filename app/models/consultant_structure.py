@@ -19,9 +19,9 @@ class ConsultantOutput(BaseModel):
     )
     used_template_id: Optional[str] = Field(
         default=None, 
-        description="If using a template, provide its exact ID here."
+        description="CRITICAL: MUST be the EXACT template ID from the RAG context (e.g., 'module_covid_emergency'). DO NOT invent or guess names."
     )
     selected_module_ids: List[str] = Field(
         default=[], 
-        description="If APPROVED, list the exact 'id' strings from the RAG context for every individual tool you need."
+        description="CRITICAL: MUST be a list of EXACT component IDs from the RAG context (e.g., ['step_2AS_mapping__ivar']). Do not use shorthand like 'ivar'."
     )

@@ -31,6 +31,38 @@ def delete_messages_node(state: GraphState):
     
     return {"messages": delete_actions} if delete_actions else {}
 
+def delete_messages_node(state: GraphState):
+    messages = state.get("messages", [])
+    
+    if len(messages) <= 30:
+        return {}
+        
+    messages_to_keep = set()
+    
+    for i, msg in enumerate(messages):
+        if isinstance(msg, SystemMessage):
+            messages_to_keep.add(msg.id)
+        elif i < 3: 
+            messages_to_keep.add(msg.id)
+            
+    for msg in messages:
+        if isinstance(msg, AIMessage) and msg.content:
+            text_content = str(msg.content).lower()
+            if "approved" in text_content or "pipeline" in text_content:
+                messages_to_keep.add(msg.id)
+                
+    for msg in messages[-4:]:
+        messages_to_keep.add(msg.id)
+        
+    delete_actions = []
+    for msg in messages:
+        if msg.id not in messages_to_keep:
+            delete_actions.append(RemoveMessage(id=msg.id))
+            
+    if delete_actions:
+        return {"messages": delete_actions}
+    return {}
+
 def build_consultant_subgraph():
     sub = StateGraph(GraphState)
     sub.add_node("consultant", consultant_node)
