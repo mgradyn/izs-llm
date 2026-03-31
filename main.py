@@ -2,7 +2,7 @@ import uvicorn
 import os
 
 if __name__ == "__main__":
-    # Get port from Rahti environment or default to 8080
+    # Get port from environment or default to 8080
     port = int(os.getenv("PORT", 8080))
     
     # Run the server

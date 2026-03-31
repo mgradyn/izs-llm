@@ -18,6 +18,7 @@ class ChatResponse(BaseModel):
     reply: str
     nextflow_code: Optional[str] = None
     mermaid_code: Optional[str] = None
+    ast_json: Optional[Dict[str, Any]] = None
     error: Optional[str] = None
 
 # --- 2. LIFESPAN (Startup/Shutdown Logic) ---
@@ -79,11 +80,16 @@ async def chat_with_agent(request: ChatRequest):
 
         # Get the AI reply from the messages list
         messages = result.get("messages", [])
-        ai_reply = messages[-1].content if messages else "No response generated."
+        ai_reply = "No response generated."
+        for msg in reversed(messages):
+            if msg.type == "ai" and msg.content:
+                ai_reply = msg.content
+                break
         
         # Get the status and final codes
         status = result.get("consultant_status", "CHATTING")
         nf_code = result.get("nextflow_code")
+        ast_json = result.get("ast_json")
         mermaid = result.get("mermaid_code")
         
         return ChatResponse(
@@ -91,6 +97,7 @@ async def chat_with_agent(request: ChatRequest):
             reply=ai_reply,
             nextflow_code=nf_code,
             mermaid_code=mermaid,
+            ast_json=ast_json,
             error=None
         )
 

@@ -2,7 +2,7 @@ NF_TEMPLATE_AST = """nextflow.enable.dsl=2
 
 // --- IMPORTS ---
 {% for imp in imports %}
-{%- set funcs = imp.functions | join(', ') %}
+{%- set funcs = imp.functions | join('; ') %}
 include { {{ funcs }} } from '{{ imp.module_path }}'
 {% endfor %}
 

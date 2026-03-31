@@ -24,7 +24,7 @@ def repair_node(state: GraphState):
     return {"messages": [HumanMessage(content=repair_instruction)]}
 
 def should_repair(state: GraphState):
-    MAX_RETRIES = 5
+    MAX_RETRIES = 8
     error = state.get("validation_error")
     retries = state.get("retries", 0)
 

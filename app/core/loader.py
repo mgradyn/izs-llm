@@ -45,9 +45,12 @@ class DataLoader:
                
         if os.path.exists(settings.CATALOG_RESOURCES):
             with open(settings.CATALOG_RESOURCES, 'r') as f:
-                self.res_list = json.load(f).get('resources', {}).get('helper_functions', [])
+                raw_resources = json.load(f).get('resources', {})
+                self.res_list = raw_resources.get('helper_functions', [])
+                self.containers_list = raw_resources.get('containers', [])
                 if store:
                     store.put(("resources",), "helper_functions", {"list": self.res_list})
+                    store.put(("resources",), "containers", {"list": self.containers_list})
 
     def _load_vector_store(self):
         print(f"Loading Embeddings {settings.EMBEDDING_MODEL} (CPU)...")

@@ -92,7 +92,7 @@ def build_execution_subgraph():
         {
             "success": "renderer",
             "repair": "repair",
-            "fail": END
+            "fail": "renderer"
         }
     )
     

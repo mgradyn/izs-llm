@@ -1,4 +1,5 @@
 from jinja2 import Template
+from langchain_core.messages import AIMessage
 from app.services.graph_state import GraphState
 from app.utils.rendering import NF_TEMPLATE_AST
 
@@ -9,6 +10,16 @@ def render_nextflow_code(ast) -> str:
         data = ast.dict()
     else:
         data = ast
+
+    # Ensure keys are present to prevent Jinja2 crashes on incomplete generated data
+    data.setdefault('imports', [])
+    data.setdefault('globals', [])
+    data.setdefault('inline_processes', [])
+    data.setdefault('sub_workflows', [])
+    if 'entrypoint' not in data:
+        data['entrypoint'] = {'body_code': '// Missing entrypoint in generated AST'}
+    elif not isinstance(data['entrypoint'], dict):
+        data['entrypoint'] = {'body_code': str(data['entrypoint'])}
 
     # Render Template
     t = Template(NF_TEMPLATE_AST)
@@ -26,16 +37,28 @@ def renderer_node(state: GraphState):
     if state.get("error"): return {}
 
     raw_ast = state.get('ast_json', {})
+    messages_update = []
     
     try:
         nf_code = render_nextflow_code(raw_ast)
+        
+        # Inject simple warning comment at the bottom if validation error persisted
+        validation_error = state.get('validation_error')
+        if validation_error:
+            warning = f"// ⚠️ WARNING: Pipeline generation failed strict DSL2 validation.\n// The code above is potentially broken or incomplete and was output as a best-effort draft.\n\n"
+            nf_code = warning + nf_code
+            messages_update.append(AIMessage(content="⚠️ **Generation Warning**: I reached the maximum number of attempts trying to generate a perfectly valid pipeline. I have output the current draft as a **best effort**, but please note that the generated code **might have errors or missing components** based on the strict DSL2 rules."))
+            
     except Exception as e:
         print(f"💥 NEXTFLOW RENDERER CRASH: {e}")
         return {"error": f"Nextflow Code Generation Failed: {str(e)}"}
 
-    return {
+    result = {
         "nextflow_code": nf_code
     }
+    if messages_update:
+        result["messages"] = messages_update
+    return result
 
 def render_mermaid_from_json(data) -> str:
     lines = ["flowchart TD"]
