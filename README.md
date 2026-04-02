@@ -153,6 +153,12 @@ The data source for truth in the agentic system.
 - **RAG noise reduction**: tighter FAISS thresholds (`k=10`, `max_L2=1.2`, `margin=0.25`), keyword component cap reduced from 15 to 8, excluded debug/test templates (`module_variant_lineage_FIXED`, `_MINIMAL`, etc.).
 - **Centralized RAG tuning**: all retrieval parameters extracted to `app/core/config.py` — one file to adjust thresholds without touching retrieval logic.
 
+### Deterministic Mermaid Diagrams
+- Replaced LLM-based diagram generation with a deterministic renderer from the AST JSON
+- `render_mermaid_from_ast()` parses sub-workflows, entrypoint, globals, and tracks data flow
+- Same pipeline always produces identical Mermaid output (no more random variation)
+- Saves one LLM API call per request
+
 ### Consultant Improvements
 - **Approval detection**: consultant prompt updated to recognize approval phrases ("yes", "ok", "proceed", etc.) and set APPROVED immediately instead of asking follow-up questions.
 
