@@ -8,12 +8,10 @@ from app.models.ast_structure import NextflowPipelineAST
 from app.services.llm import get_llm
 from app.services.tools import retrieve_rag_context
 from app.services.graph_state import GraphState
-from app.services.renderer import render_mermaid_from_json
 from app.models.consultant_structure import ConsultantOutput
-from app.models.diagram_structure import DiagramData
 from app.core.loader import data_loader
 from langgraph.store.base import BaseStore
-from app.services.prompt_loader import load_consultant_prompt, load_architect_prompt, load_diagram_prompt
+from app.services.prompt_loader import load_consultant_prompt, load_architect_prompt
 
 # ==========================================
 # 1. SYSTEM PROMPTS
@@ -26,7 +24,6 @@ from app.services.prompt_loader import load_consultant_prompt, load_architect_pr
 #   - prompts/diagram.md
 CONSULTANT_SYSTEM_PROMPT = load_consultant_prompt()
 ARCHITECT_SYSTEM_PROMPT = load_architect_prompt()
-DIAGRAM_SYSTEM_PROMPT = load_diagram_prompt()
 
 
 # ==========================================
@@ -180,43 +177,22 @@ def architect_node(state: GraphState):
     
 
 def diagram_node(state: GraphState):
-    print("--- [NODE] DIAGRAM AGENT (JSON -> Python Compiler) ---")
+    print("--- [NODE] DIAGRAM (Deterministic AST -> Mermaid) ---")
     if state.get("error"): return {"error": state['error']}
-    
-    final_code = state.get("nextflow_code", "")
-    if not final_code:
-        print("[Diagram] Warning: No Nextflow code found.")
-        return {"mermaid_code": "flowchart TD\n    Empty[No code generated]"}
 
-    llm = get_llm()
-    diagram_agent = llm.with_structured_output(DiagramData, method="json_schema", include_raw=False)
+    ast_json = state.get("ast_json", {})
+    if not ast_json:
+        print("[Diagram] Warning: No AST found.")
+        return {"mermaid_code": "flowchart TD\n    Empty[No AST generated]"}
 
-    prompt = ChatPromptTemplate.from_messages([
-        ("system", DIAGRAM_SYSTEM_PROMPT),
-        ("human", "Map this Nextflow code into a JSON Node/Edge Graph:\n\n{code}")
-    ])
-        
-    messages = prompt.invoke({"code": final_code}).to_messages()
-
-    max_retries = 3
-    for attempt in range(max_retries):
-        try:
-            result = diagram_agent.invoke(messages)
-            
-            if not result or not result.nodes:
-                raise ValueError("LLM returned empty graph data.")
-
-            mermaid_string = render_mermaid_from_json(result)
-            
-            print(f"[Diagram] Successfully compiled Mermaid graph on attempt {attempt + 1}.")
-            return {"mermaid_code": mermaid_string}
-            
-        except Exception as e:
-            print(f"⚠️ Diagram Data Error (Attempt {attempt + 1}): {str(e)}")
-            messages.append(AIMessage(content="I generated an invalid JSON graph structure."))
-            messages.append(HumanMessage(content=f"Validation Error: {str(e)}\nFix the data and try again."))
-    
-    return {"mermaid_code": "flowchart TD\n    Error[\"Diagram generation failed after 3 attempts. See logs for details.\"]"}
+    try:
+        from app.services.renderer import render_mermaid_from_ast
+        mermaid_string = render_mermaid_from_ast(ast_json)
+        print(f"[Diagram] Mermaid generated from AST ({len(mermaid_string)} chars)")
+        return {"mermaid_code": mermaid_string}
+    except Exception as e:
+        print(f"[Diagram] Error: {e}")
+        return {"mermaid_code": f'flowchart TD\n    Error["Diagram error: {str(e)[:100]}"]'}
     
 def filter_template_logic(code: str, allowed_components: set) -> str:
     lines = code.split('\n')
