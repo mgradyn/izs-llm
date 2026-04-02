@@ -1,6 +1,7 @@
 import json
 import re
 from app.core.loader import data_loader
+from app.core.config import settings
 from app.services.graph_state import GraphState
 from collections import defaultdict
 
@@ -31,8 +32,8 @@ TOOL: {comp_data.get('tool', 'Unknown')}
 DOMAIN: {comp_data.get('domain', 'Unknown')}
 DESCRIPTION: {comp_data.get('description', 'No description')}
 CONTAINER: {comp_data.get('container', 'None')}
-INPUTS: {', '.join(comp_data.get('input_types', []))}
-OUTPUTS: {', '.join(comp_data.get('out', []))}
+INPUTS ({len(comp_data.get('input_channels', comp_data.get('input_types', [])))} channels): {', '.join(comp_data.get('input_channels', comp_data.get('input_types', [])))}
+OUTPUTS: {', '.join(comp_data.get('output_channels', comp_data.get('out', [])))}
 """
 
     if embed_code:
@@ -67,6 +68,8 @@ OUTPUTS: {', '.join(tmpl_data.get('outputs', []))}
         block += f"\n**SOURCE CODE ({template_id}.nf):**\n```groovy\n{code_snippet}\n```\n"
 
     context_blocks.append(block)
+
+EXCLUDED_TEMPLATES = settings.RAG_EXCLUDED_TEMPLATES
 
 def retrieve_rag_context(user_query, store: BaseStore, embed_code=False):
     """
@@ -338,7 +341,7 @@ def retrieve_rag_context(user_query, store: BaseStore, embed_code=False):
             if score > 0:
                 template_scores[tmpl.key] = score
                 
-        sorted_tmpls = [k for k, v in sorted(template_scores.items(), key=lambda x: x[1], reverse=True) if v >= 5][:2]
+        sorted_tmpls = [k for k, v in sorted(template_scores.items(), key=lambda x: x[1], reverse=True) if v >= settings.RAG_KEYWORD_TEMPLATE_MIN_SCORE and k not in EXCLUDED_TEMPLATES][:settings.RAG_MAX_KEYWORD_TEMPLATES]
         for tmpl_key in sorted_tmpls:
             if tmpl_key not in found_ids:
                 context_blocks.append(f"### PIPELINE BLUEPRINT: {tmpl_key}")
@@ -422,9 +425,9 @@ def retrieve_rag_context(user_query, store: BaseStore, embed_code=False):
         # Dynamic thresholding: keep only components scoring ≥20% of top match
         if component_scores:
             max_score = max(component_scores.values())
-            threshold = max_score * 0.20
-            
-            smart_comps = [k for k, v in sorted(component_scores.items(), key=lambda x: x[1], reverse=True) if v >= threshold][:15]
+            threshold = max_score * settings.RAG_KEYWORD_COMPONENT_THRESHOLD
+
+            smart_comps = [k for k, v in sorted(component_scores.items(), key=lambda x: x[1], reverse=True) if v >= threshold][:settings.RAG_MAX_KEYWORD_COMPONENTS]
             for comp_key in smart_comps:
                 if comp_key not in found_ids:
                     _inject_component(comp_key, found_ids, context_blocks, store, embed_code)
@@ -454,7 +457,7 @@ def retrieve_rag_context(user_query, store: BaseStore, embed_code=False):
                 if h_score > 0:
                     resource_scores[i] = (h_score, helper)
             
-            top_resources = sorted(resource_scores.values(), key=lambda x: x[0], reverse=True)[:5]
+            top_resources = sorted(resource_scores.values(), key=lambda x: x[0], reverse=True)[:settings.RAG_MAX_HELPER_FUNCTIONS]
             for _, helper in top_resources:
                 if helper.get('name') not in found_ids:
                     context_blocks.append(
@@ -507,21 +510,21 @@ def retrieve_rag_context(user_query, store: BaseStore, embed_code=False):
         if len(semantic_query.replace(" ", "")) < 3:
             semantic_query = clean_query
             
-        docs_and_scores = data_loader.vector_store.similarity_search_with_score(semantic_query, k=20)
+        docs_and_scores = data_loader.vector_store.similarity_search_with_score(semantic_query, k=settings.RAG_FAISS_K)
         
         # Relative distance cutoffs: drop results that are too far from the best match
         if docs_and_scores:
             best_l2 = docs_and_scores[0][1]
             
             for doc, l2_dist in docs_and_scores:
-                if l2_dist > 1.4 or l2_dist > (best_l2 + 0.35): 
+                if l2_dist > settings.RAG_FAISS_MAX_L2_DISTANCE or l2_dist > (best_l2 + settings.RAG_FAISS_RELATIVE_MARGIN):
                     continue
                     
                 meta = doc.metadata
                 item_id = meta.get('id')
                 item_type = meta.get('type')
 
-                if item_id in found_ids:
+                if item_id in found_ids or item_id in EXCLUDED_TEMPLATES:
                     continue
 
                 if item_type == 'template':

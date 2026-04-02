@@ -141,6 +141,150 @@ The data source for truth in the agentic system.
 
 ---
 
+## Changes from base branch
+
+### Anti-Hallucination System
+- **AST Pydantic validators**: sub-workflow names with `module_` prefix are validated against the real framework filesystem. Invented names are blocked and trigger the repair loop with actionable error messages.
+- **Framework component validator**: all `step_*`/`module_*` references in generated code are checked against the `.nf` files in `NGSMANAGER_DIR`. If a component doesn't exist, the pipeline is rejected before rendering.
+- **Architect prompt rewrite**: explicit rules against single-process wrappers and invented `module_` names. Custom sub-workflows must use `wf_` prefix.
+
+### Catalog & RAG Improvements
+- **Regenerated catalog with input arity**: `generate_catalog.py` now extracts `input_channels` from every step's `take:` block. The whitelist and RAG context show `takes: assembly, genus_species` so the LLM knows how many arguments to pass.
+- **RAG noise reduction**: tighter FAISS thresholds (`k=10`, `max_L2=1.2`, `margin=0.25`), keyword component cap reduced from 15 to 8, excluded debug/test templates (`module_variant_lineage_FIXED`, `_MINIMAL`, etc.).
+- **Centralized RAG tuning**: all retrieval parameters extracted to `app/core/config.py` — one file to adjust thresholds without touching retrieval logic.
+
+### Consultant Improvements
+- **Approval detection**: consultant prompt updated to recognize approval phrases ("yes", "ok", "proceed", etc.) and set APPROVED immediately instead of asking follow-up questions.
+
+### Configuration & DevOps
+- **Environment-based config**: `NGSMANAGER_DIR` and `MISTRAL_API_KEY` via `.env` / env vars. No hardcoded user paths in codebase.
+- **`.env.example`**: template for required environment variables.
+- **`main.py` loads `.env`** automatically via `python-dotenv`.
+- **`.gitignore` cleanup**: added `__pycache__/`, `.DS_Store`, generated reports, Nextflow work dirs.
+
+### Testing & Validation
+- **`test_e2e.py`**: end-to-end test script that prompts the LLM and validates generated Nextflow code against the real framework with `nextflow run -preview`. Distinguishes code errors from missing-data errors.
+- **`test_e2e_params.config`**: Nextflow config with dummy params for all framework tools, enabling `-preview` validation without real data.
+- **Improved `evaluate_llm.py`**: better auto-approve message for consistent test results.
+
+### Validation Results (E2E)
+- **12/13 scenarios pass (92%)**
+- **0 hallucinations** across all tests
+- **4/4 negative tests correctly rejected** (BWA, Canu, Pangolin on bacteria, de novo with iVar)
+
+---
+
+## Setup
+
+### Prerequisites
+
+- Python 3.11+
+- Nextflow 23+ (for pipeline validation)
+- [cohesive-ngsmanager](https://github.com/genpat-it/cohesive-ngsmanager) cloned as a sibling directory
+
+### Installation
+
+```bash
+git clone <this-repo> izs-llm
+cd izs-llm
+python -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+```
+
+### Configuration
+
+Copy the example env and fill in your values:
+
+```bash
+cp .env.example .env
+```
+
+`.env` contents:
+```
+MISTRAL_API_KEY=your_mistral_api_key
+NGSMANAGER_DIR=/path/to/cohesive-ngsmanager-cli/cohesive-ngsmanager
+```
+
+The `NGSMANAGER_DIR` defaults to `../cohesive-ngsmanager-cli/cohesive-ngsmanager` (sibling directory).
+
+### Catalog Sync
+
+When the framework changes, regenerate the catalog:
+
+```bash
+python generate_catalog.py
+python rebuild_faiss_index.py
+```
+
+This parses all steps/modules/helpers from the framework and rebuilds the RAG knowledge base.
+
+### Run the Server
+
+```bash
+python main.py
+```
+
+The API starts on `http://localhost:8080`. Health check: `GET /health`.
+
+### Docker
+
+```bash
+docker compose up --build
+```
+
+---
+
+## Testing & Validation
+
+### Unit Evaluation (`evaluate_llm.py`)
+
+Tests the LLM on 13 scenarios (L1-L4) checking component selection, syntax, and rejection of impossible requests:
+
+```bash
+python evaluate_llm.py --output report.md
+python evaluate_llm.py --levels 3 4          # Only complex + negative tests
+```
+
+### End-to-End Validation (`test_e2e.py`)
+
+Full pipeline: prompt -> LLM generates code -> Nextflow validates it against the real framework:
+
+```bash
+python test_e2e.py --output e2e_report.md
+python test_e2e.py --levels 1 2              # Only simple + medium
+python test_e2e.py --prompt "I want to trim reads with fastp"  # Custom prompt
+```
+
+Requires `NGSMANAGER_DIR` to be set and Nextflow installed.
+
+### Pipeline Syntax Validation (`validate_pipeline.py`)
+
+Validate a single pipeline file or prompt:
+
+```bash
+python validate_pipeline.py --file my_pipeline.nf
+python validate_pipeline.py --prompt "I want to do MLST" --verbose
+python validate_pipeline.py --file my_pipeline.nf --stub  # Stub run
+```
+
+---
+
+## RAG Tuning
+
+All retrieval parameters are in `app/core/config.py`:
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `RAG_MAX_KEYWORD_COMPONENTS` | 8 | Max components from keyword scan |
+| `RAG_MAX_KEYWORD_TEMPLATES` | 2 | Max templates from keyword scan |
+| `RAG_FAISS_K` | 10 | FAISS nearest neighbors |
+| `RAG_FAISS_MAX_L2_DISTANCE` | 1.2 | Max absolute L2 distance |
+| `RAG_FAISS_RELATIVE_MARGIN` | 0.25 | Max distance above best match |
+| `RAG_EXCLUDED_TEMPLATES` | (set) | Debug/test templates to skip |
+
+---
+
 ## 🛠️ Usage Flow
 
 1. **User asks:** *"I want to do viral host depletion using bowtie, then assembly."*
