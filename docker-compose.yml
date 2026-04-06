@@ -5,15 +5,17 @@ services:
     restart: always
     environment:
       - MISTRAL_API_KEY=${MISTRAL_API_KEY}
+      - NGSMANAGER_DIR=/app/ngsmanager
+    volumes:
+      - ./fake_folder:/app/ngsmanager
 
-  # The HTTPS Server
   caddy:
     image: caddy:latest
     container_name: caddy_test
     restart: always
     ports:
-      - "8081:80" # HTTP
-      - "8443:443" # HTTPS
+      - "8081:80"
+      - "8443:443"
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile
       - caddy_data_test:/data
