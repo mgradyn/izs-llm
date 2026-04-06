@@ -1,3 +1,3 @@
-izs-llm.me {
+:80 {
     reverse_proxy api:8080
 }
