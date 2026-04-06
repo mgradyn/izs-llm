@@ -1,7 +1,3 @@
-altizs.app {
+:8081 {
     reverse_proxy api:8080
-}
-
-www.altizs.app {
-    redir https://altizs.app{uri} permanent
 }
