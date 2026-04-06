@@ -1,8 +1,7 @@
-{
-    auto_https off
+altizs.app {
+    reverse_proxy api:8080
 }
 
-test.izs-llm.me:443 {
-    tls internal
-    reverse_proxy api:8080
+www.altizs.app {
+    redir https://altizs.app{uri} permanent
 }
