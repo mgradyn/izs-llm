@@ -1,3 +1,8 @@
-test.izs-llm.me:8444 {
+{
+    auto_https off
+}
+
+test.izs-llm.me:443 {
+    tls internal
     reverse_proxy api:8080
 }
