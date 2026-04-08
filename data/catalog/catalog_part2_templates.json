@@ -40,9 +40,9 @@
       "file_path": "modules/module_covid_emergency.nf",
       "description": "Pipeline module using: step_2AS_mapping__ivar, step_4TY_lineage__pangolin.",
       "keywords": [
-        "covid emergency",
         "pangolin",
-        "ivar"
+        "ivar",
+        "covid emergency"
       ],
       "steps_used": [
         "step_2AS_mapping__ivar",
@@ -58,9 +58,9 @@
       "file_path": "modules/module_denovo.nf",
       "description": "Pipeline module using: step_1PP_hostdepl__bowtie, step_2AS_denovo__spades.",
       "keywords": [
+        "denovo",
         "spades",
-        "bowtie",
-        "denovo"
+        "bowtie"
       ],
       "steps_used": [
         "step_1PP_hostdepl__bowtie",
@@ -80,11 +80,11 @@
       "file_path": "modules/module_draft_genome.nf",
       "description": "Pipeline module using: step_2AS_mapping__bowtie, step_2AS_mapping__ivar, step_4AN_genes__prokka, step_4TY_lineage__pangolin.",
       "keywords": [
-        "ivar",
-        "draft genome",
         "pangolin",
+        "ivar",
+        "prokka",
         "bowtie",
-        "prokka"
+        "draft genome"
       ],
       "steps_used": [
         "step_2AS_mapping__bowtie",
@@ -104,9 +104,9 @@
       "file_path": "modules/module_enterotoxin_saureus_finder.nf",
       "description": "Pipeline module using: step_2AS_denovo__unicycler, step_4AN_AMR__blast.",
       "keywords": [
-        "enterotoxin saureus finder",
+        "unicycler",
         "blast",
-        "unicycler"
+        "enterotoxin saureus finder"
       ],
       "steps_used": [
         "step_2AS_denovo__unicycler",
@@ -206,8 +206,8 @@
       "file_path": "modules/module_plasmids.nf",
       "description": "Pipeline module using: step_4TY_plasmid__mobsuite.",
       "keywords": [
-        "mobsuite",
-        "plasmids"
+        "plasmids",
+        "mobsuite"
       ],
       "steps_used": [
         "step_4TY_plasmid__mobsuite"
@@ -258,11 +258,11 @@
       "file_path": "modules/module_reads_processing.nf",
       "description": "Pipeline module using: step_0SQ_rawreads__fastq, step_1PP_trimming__trimmomatic, step_1PP_trimming__fastp, step_3TX_class__kraken.",
       "keywords": [
-        "trimmomatic",
         "kraken",
-        "fastp",
         "fastq",
-        "reads processing"
+        "trimmomatic",
+        "reads processing",
+        "fastp"
       ],
       "steps_used": [
         "step_0SQ_rawreads__fastq",
@@ -295,9 +295,9 @@
       "file_path": "modules/module_scaffolds_filtering.nf",
       "description": "Pipeline module using: step_2AS_filtering__seqio, step_3TX_species__vdabricate.",
       "keywords": [
-        "vdabricate",
         "scaffolds filtering",
-        "seqio"
+        "seqio",
+        "vdabricate"
       ],
       "steps_used": [
         "step_2AS_filtering__seqio",
@@ -315,8 +315,8 @@
       "file_path": "modules/module_segmented.nf",
       "description": "Pipeline module using: step_2AS_mapping__ivar.",
       "keywords": [
-        "segmented",
-        "ivar"
+        "ivar",
+        "segmented"
       ],
       "steps_used": [
         "step_2AS_mapping__ivar"
@@ -355,40 +355,18 @@
       "output_channels": []
     },
     {
-      "id": "module_test_llm",
-      "file_path": "modules/module_test_llm.nf",
-      "description": "Pipeline module using: step_1PP_trimming__fastp.",
-      "keywords": [
-        "test llm",
-        "fastp"
-      ],
-      "steps_used": [
-        "step_1PP_trimming__fastp"
-      ],
-      "input_channels": [
-        "rawReads"
-      ],
-      "output_channels": [
-        "no_reads",
-        "trimmed_with_data",
-        "insufficient_number_of_reads",
-        "assembly_result",
-        "qc_result"
-      ]
-    },
-    {
       "id": "module_typing_bacteria",
       "file_path": "modules/module_typing_bacteria.nf",
       "description": "Pipeline module using: step_2AS_mapping__bowtie, step_4AN_genes__prokka, step_4AN_AMR__abricate, step_4AN_AMR__staramr, step_4TY_cgMLST__chewbbaca, step_4TY_MLST__mlst, step_4TY_flaA__flaA.",
       "keywords": [
+        "flaa",
+        "staramr",
         "abricate",
         "mlst",
-        "flaa",
-        "typing bacteria",
-        "chewbbaca",
-        "bowtie",
         "prokka",
-        "staramr"
+        "bowtie",
+        "chewbbaca",
+        "typing bacteria"
       ],
       "steps_used": [
         "step_2AS_mapping__bowtie",
@@ -405,116 +383,6 @@
       ],
       "output_channels": [
         "genus_species"
-      ]
-    },
-    {
-      "id": "module_variant_lineage",
-      "file_path": "modules/module_variant_lineage.nf",
-      "description": "Pipeline module using: step_2AS_mapping__bowtie, step_4TY_lineage__pangolin, step_4AN_genes__prokka.",
-      "keywords": [
-        "bowtie",
-        "variant lineage",
-        "pangolin",
-        "prokka"
-      ],
-      "steps_used": [
-        "step_2AS_mapping__bowtie",
-        "step_4TY_lineage__pangolin",
-        "step_4AN_genes__prokka"
-      ],
-      "input_channels": [
-        "reads",
-        "reference",
-        "referenceGB"
-      ],
-      "output_channels": [
-        "lineage"
-      ]
-    },
-    {
-      "id": "module_variant_lineage_FIXED",
-      "file_path": "modules/module_variant_lineage_FIXED.nf",
-      "description": "Pipeline module using: step_2AS_mapping__ivar, step_4TY_lineage__pangolin.",
-      "keywords": [
-        "pangolin",
-        "ivar",
-        "variant lineage FIXED"
-      ],
-      "steps_used": [
-        "step_2AS_mapping__ivar",
-        "step_4TY_lineage__pangolin"
-      ],
-      "input_channels": [
-        "reads"
-      ],
-      "output_channels": []
-    },
-    {
-      "id": "module_variant_lineage_MINIMAL",
-      "file_path": "modules/module_variant_lineage_MINIMAL.nf",
-      "description": "Pipeline module using: step_2AS_mapping__bowtie, step_4TY_lineage__pangolin, step_4AN_genes__prokka.",
-      "keywords": [
-        "bowtie",
-        "pangolin",
-        "variant lineage MINIMAL",
-        "prokka"
-      ],
-      "steps_used": [
-        "step_2AS_mapping__bowtie",
-        "step_4TY_lineage__pangolin",
-        "step_4AN_genes__prokka"
-      ],
-      "input_channels": [
-        "reads",
-        "reference",
-        "referenceGB"
-      ],
-      "output_channels": []
-    },
-    {
-      "id": "module_variant_lineage_MINIMAL_FIX",
-      "file_path": "modules/module_variant_lineage_MINIMAL_FIX.nf",
-      "description": "Pipeline module using: step_2AS_mapping__bowtie, step_4TY_lineage__pangolin, step_4AN_genes__prokka.",
-      "keywords": [
-        "prokka",
-        "bowtie",
-        "pangolin",
-        "variant lineage MINIMAL FIX"
-      ],
-      "steps_used": [
-        "step_2AS_mapping__bowtie",
-        "step_4TY_lineage__pangolin",
-        "step_4AN_genes__prokka"
-      ],
-      "input_channels": [
-        "reads"
-      ],
-      "output_channels": [
-        "lineage"
-      ]
-    },
-    {
-      "id": "module_variant_lineage_ONE_LINE_FIX",
-      "file_path": "modules/module_variant_lineage_ONE_LINE_FIX.nf",
-      "description": "Pipeline module using: step_2AS_mapping__bowtie, step_4TY_lineage__pangolin, step_4AN_genes__prokka.",
-      "keywords": [
-        "bowtie",
-        "variant lineage ONE LINE FIX",
-        "pangolin",
-        "prokka"
-      ],
-      "steps_used": [
-        "step_2AS_mapping__bowtie",
-        "step_4TY_lineage__pangolin",
-        "step_4AN_genes__prokka"
-      ],
-      "input_channels": [
-        "reads",
-        "reference",
-        "referenceGB"
-      ],
-      "output_channels": [
-        "lineage"
       ]
     },
     {
@@ -552,8 +420,8 @@
       "file_path": "modules/module_vdraft_light.nf",
       "description": "Pipeline module using: step_1PP_hostdepl__bowtie, step_2AS_mapping__bowtie.",
       "keywords": [
-        "bowtie",
-        "vdraft light"
+        "vdraft light",
+        "bowtie"
       ],
       "steps_used": [
         "step_1PP_hostdepl__bowtie",
@@ -571,8 +439,8 @@
       "file_path": "modules/module_westnile.nf",
       "description": "Pipeline module using: step_2AS_mapping__ivar.",
       "keywords": [
-        "ivar",
-        "westnile"
+        "westnile",
+        "ivar"
       ],
       "steps_used": [
         "step_2AS_mapping__ivar"
@@ -587,8 +455,8 @@
       "file_path": "modules/module_wgs_bacteria.nf",
       "description": "Pipeline module using: step_2AS_denovo__shovill.",
       "keywords": [
-        "shovill",
-        "wgs bacteria"
+        "wgs bacteria",
+        "shovill"
       ],
       "steps_used": [
         "step_2AS_denovo__shovill"

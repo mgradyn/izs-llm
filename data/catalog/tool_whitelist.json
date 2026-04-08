@@ -423,13 +423,6 @@
       "outputs": [
         "plasmids"
       ]
-    },
-    {
-      "id": "step_TEST_custom__kmer",
-      "tool": "",
-      "domain": "",
-      "inputs": [],
-      "outputs": []
     }
   ],
   "modules": [
@@ -549,12 +542,6 @@
       "steps_used": []
     },
     {
-      "id": "module_test_llm",
-      "steps_used": [
-        "step_1PP_trimming__fastp"
-      ]
-    },
-    {
       "id": "module_typing_bacteria",
       "steps_used": [
         "step_2AS_mapping__bowtie",
@@ -564,45 +551,6 @@
         "step_4TY_cgMLST__chewbbaca",
         "step_4TY_MLST__mlst",
         "step_4TY_flaA__flaA"
-      ]
-    },
-    {
-      "id": "module_variant_lineage",
-      "steps_used": [
-        "step_2AS_mapping__bowtie",
-        "step_4TY_lineage__pangolin",
-        "step_4AN_genes__prokka"
-      ]
-    },
-    {
-      "id": "module_variant_lineage_FIXED",
-      "steps_used": [
-        "step_2AS_mapping__ivar",
-        "step_4TY_lineage__pangolin"
-      ]
-    },
-    {
-      "id": "module_variant_lineage_MINIMAL",
-      "steps_used": [
-        "step_2AS_mapping__bowtie",
-        "step_4TY_lineage__pangolin",
-        "step_4AN_genes__prokka"
-      ]
-    },
-    {
-      "id": "module_variant_lineage_MINIMAL_FIX",
-      "steps_used": [
-        "step_2AS_mapping__bowtie",
-        "step_4TY_lineage__pangolin",
-        "step_4AN_genes__prokka"
-      ]
-    },
-    {
-      "id": "module_variant_lineage_ONE_LINE_FIX",
-      "steps_used": [
-        "step_2AS_mapping__bowtie",
-        "step_4TY_lineage__pangolin",
-        "step_4AN_genes__prokka"
       ]
     },
     {

@@ -4,101 +4,6 @@
   },
   "helper_functions": [
     {
-      "name": "logHeader",
-      "file": "functions/common.nf",
-      "description": "Helper function from common.nf"
-    },
-    {
-      "name": "flattenPath",
-      "file": "functions/common.nf",
-      "description": "Helper function from common.nf"
-    },
-    {
-      "name": "parseMetadata",
-      "file": "functions/common.nf",
-      "description": "Helper function from common.nf"
-    },
-    {
-      "name": "parseMetadataFromFileName",
-      "file": "functions/common.nf",
-      "description": "Helper function from common.nf"
-    },
-    {
-      "name": "executionMetadata",
-      "file": "functions/common.nf",
-      "description": "Helper function from common.nf"
-    },
-    {
-      "name": "csv2map",
-      "file": "functions/common.nf",
-      "description": "Helper function from common.nf"
-    },
-    {
-      "name": "extractKey",
-      "file": "functions/common.nf",
-      "description": "Helper function from common.nf"
-    },
-    {
-      "name": "extractDsRef",
-      "file": "functions/common.nf",
-      "description": "Helper function from common.nf"
-    },
-    {
-      "name": "getBaseName",
-      "file": "functions/common.nf",
-      "description": "Helper function from common.nf"
-    },
-    {
-      "name": "getGB",
-      "file": "functions/common.nf",
-      "description": "Helper function from common.nf"
-    },
-    {
-      "name": "getEmpty",
-      "file": "functions/common.nf",
-      "description": "Helper function from common.nf"
-    },
-    {
-      "name": "parseRISCD",
-      "file": "functions/common.nf",
-      "description": "Helper function from common.nf"
-    },
-    {
-      "name": "taskMemory",
-      "file": "functions/common.nf",
-      "description": "Helper function from common.nf"
-    },
-    {
-      "name": "taskTime",
-      "file": "functions/common.nf",
-      "description": "Helper function from common.nf"
-    },
-    {
-      "name": "getRisCd",
-      "file": "functions/common.nf",
-      "description": "Helper function from common.nf"
-    },
-    {
-      "name": "stepInputs",
-      "file": "functions/common.nf",
-      "description": "Helper function from common.nf"
-    },
-    {
-      "name": "isFastqRiscd",
-      "file": "functions/common.nf",
-      "description": "Helper function from common.nf"
-    },
-    {
-      "name": "isFastaRiscd",
-      "file": "functions/common.nf",
-      "description": "Helper function from common.nf"
-    },
-    {
-      "name": "isSpeciesSupported",
-      "file": "functions/common.nf",
-      "description": "Helper function from common.nf"
-    },
-    {
       "name": "getSampleSheetMetadata",
       "file": "functions/sampletypes.nf",
       "description": "Helper function from sampletypes.nf"
@@ -402,6 +307,101 @@
       "name": "optWrap",
       "file": "functions/parameters.nf",
       "description": "Helper function from parameters.nf"
+    },
+    {
+      "name": "logHeader",
+      "file": "functions/common.nf",
+      "description": "Helper function from common.nf"
+    },
+    {
+      "name": "flattenPath",
+      "file": "functions/common.nf",
+      "description": "Helper function from common.nf"
+    },
+    {
+      "name": "parseMetadata",
+      "file": "functions/common.nf",
+      "description": "Helper function from common.nf"
+    },
+    {
+      "name": "parseMetadataFromFileName",
+      "file": "functions/common.nf",
+      "description": "Helper function from common.nf"
+    },
+    {
+      "name": "executionMetadata",
+      "file": "functions/common.nf",
+      "description": "Helper function from common.nf"
+    },
+    {
+      "name": "csv2map",
+      "file": "functions/common.nf",
+      "description": "Helper function from common.nf"
+    },
+    {
+      "name": "extractKey",
+      "file": "functions/common.nf",
+      "description": "Helper function from common.nf"
+    },
+    {
+      "name": "extractDsRef",
+      "file": "functions/common.nf",
+      "description": "Helper function from common.nf"
+    },
+    {
+      "name": "getBaseName",
+      "file": "functions/common.nf",
+      "description": "Helper function from common.nf"
+    },
+    {
+      "name": "getGB",
+      "file": "functions/common.nf",
+      "description": "Helper function from common.nf"
+    },
+    {
+      "name": "getEmpty",
+      "file": "functions/common.nf",
+      "description": "Helper function from common.nf"
+    },
+    {
+      "name": "parseRISCD",
+      "file": "functions/common.nf",
+      "description": "Helper function from common.nf"
+    },
+    {
+      "name": "taskMemory",
+      "file": "functions/common.nf",
+      "description": "Helper function from common.nf"
+    },
+    {
+      "name": "taskTime",
+      "file": "functions/common.nf",
+      "description": "Helper function from common.nf"
+    },
+    {
+      "name": "getRisCd",
+      "file": "functions/common.nf",
+      "description": "Helper function from common.nf"
+    },
+    {
+      "name": "stepInputs",
+      "file": "functions/common.nf",
+      "description": "Helper function from common.nf"
+    },
+    {
+      "name": "isFastqRiscd",
+      "file": "functions/common.nf",
+      "description": "Helper function from common.nf"
+    },
+    {
+      "name": "isFastaRiscd",
+      "file": "functions/common.nf",
+      "description": "Helper function from common.nf"
+    },
+    {
+      "name": "isSpeciesSupported",
+      "file": "functions/common.nf",
+      "description": "Helper function from common.nf"
     }
   ]
 }

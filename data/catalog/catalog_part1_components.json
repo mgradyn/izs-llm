@@ -2,8 +2,8 @@
   "metadata": {
     "version": "2.0",
     "generated_from": "../cohesive-ngsmanager-cli/cohesive-ngsmanager",
-    "total_steps": 43,
-    "total_modules": 33
+    "total_steps": 42,
+    "total_modules": 27
   },
   "components": [
     {
@@ -216,11 +216,11 @@
       "tool": "chopper",
       "description": "Chopper step for preprocessing. Outputs: trimmed.",
       "keywords": [
-        "trim",
-        "quality filter",
+        "adapter",
         "trimming",
         "chopper",
-        "adapter"
+        "trim",
+        "quality filter"
       ],
       "use_cases": [
         "Run chopper analysis",
@@ -245,11 +245,11 @@
       "tool": "fastp",
       "description": "Fastp step for preprocessing. Outputs: trimmed.",
       "keywords": [
+        "adapter",
+        "trimming",
         "trim",
         "fastp",
-        "quality filter",
-        "trimming",
-        "adapter"
+        "quality filter"
       ],
       "use_cases": [
         "Run fastp analysis",
@@ -275,11 +275,11 @@
       "tool": "trimmomatic",
       "description": "Trimmomatic step for preprocessing. Outputs: trimmed.",
       "keywords": [
+        "adapter",
+        "trimming",
         "trimmomatic",
         "trim",
-        "quality filter",
-        "trimming",
-        "adapter"
+        "quality filter"
       ],
       "use_cases": [
         "Run trimmomatic analysis",
@@ -303,10 +303,10 @@
       "tool": "flye",
       "description": "Flye step for assembly & mapping. Outputs: assembly.",
       "keywords": [
-        "assembly",
-        "de novo",
+        "assemble",
         "flye",
-        "assemble"
+        "de novo",
+        "assembly"
       ],
       "use_cases": [
         "Run flye analysis",
@@ -330,10 +330,10 @@
       "tool": "plasmidspades",
       "description": "Plasmidspades step for assembly & mapping. Outputs: assembled.",
       "keywords": [
-        "assembly",
-        "plasmidspades",
+        "assemble",
         "de novo",
-        "assemble"
+        "plasmidspades",
+        "assembly"
       ],
       "use_cases": [
         "Run plasmidspades analysis",
@@ -357,10 +357,10 @@
       "tool": "shovill",
       "description": "Shovill step for assembly & mapping. Outputs: assembly.",
       "keywords": [
-        "assembly",
-        "shovill",
+        "assemble",
         "de novo",
-        "assemble"
+        "assembly",
+        "shovill"
       ],
       "use_cases": [
         "Run shovill analysis",
@@ -385,9 +385,9 @@
       "description": "Spades step for assembly & mapping. Outputs: assembled.",
       "keywords": [
         "spades",
-        "assembly",
+        "assemble",
         "de novo",
-        "assemble"
+        "assembly"
       ],
       "use_cases": [
         "Run spades analysis",
@@ -411,10 +411,10 @@
       "tool": "unicycler",
       "description": "Unicycler step for assembly & mapping. Outputs: assembled.",
       "keywords": [
-        "assembly",
+        "unicycler",
         "assemble",
         "de novo",
-        "unicycler"
+        "assembly"
       ],
       "use_cases": [
         "Run unicycler analysis",
@@ -490,10 +490,10 @@
       "tool": "bowtie",
       "description": "Bowtie step for assembly & mapping. Outputs: consensus.",
       "keywords": [
-        "alignment",
-        "bowtie",
+        "map reads",
         "mapping",
-        "map reads"
+        "bowtie",
+        "alignment"
       ],
       "use_cases": [
         "Run bowtie analysis",
@@ -520,10 +520,10 @@
       "tool": "ivar",
       "description": "Ivar step for assembly & mapping. Outputs: consensus, coverage_depth.",
       "keywords": [
-        "alignment",
+        "map reads",
         "mapping",
         "ivar",
-        "map reads"
+        "alignment"
       ],
       "use_cases": [
         "Run ivar analysis",
@@ -551,10 +551,10 @@
       "tool": "medaka",
       "description": "Medaka step for assembly & mapping. Outputs: consensus.",
       "keywords": [
-        "medaka",
+        "map reads",
         "mapping",
-        "alignment",
-        "map reads"
+        "medaka",
+        "alignment"
       ],
       "use_cases": [
         "Run medaka analysis",
@@ -580,10 +580,10 @@
       "tool": "minimap2",
       "description": "Minimap2 step for assembly & mapping. Outputs: consensus.",
       "keywords": [
-        "alignment",
-        "mapping",
         "map reads",
-        "minimap2"
+        "mapping",
+        "minimap2",
+        "alignment"
       ],
       "use_cases": [
         "Run minimap2 analysis",
@@ -609,10 +609,10 @@
       "tool": "snippy",
       "description": "Snippy step for assembly & mapping.",
       "keywords": [
-        "alignment",
-        "snippy",
+        "map reads",
         "mapping",
-        "map reads"
+        "snippy",
+        "alignment"
       ],
       "use_cases": [
         "Run snippy analysis",
@@ -637,10 +637,10 @@
       "tool": "metaspades",
       "description": "Metaspades step for metagenomics. Outputs: assembled.",
       "keywords": [
-        "assembly",
         "metaspades",
+        "assemble",
         "de novo",
-        "assemble"
+        "assembly"
       ],
       "use_cases": [
         "Run metaspades analysis",
@@ -829,10 +829,10 @@
       "tool": "abricate",
       "description": "Abricate step for annotation & amr.",
       "keywords": [
-        "abricate",
-        "resistance genes",
         "antimicrobial resistance",
-        "amr"
+        "amr",
+        "abricate",
+        "resistance genes"
       ],
       "use_cases": [
         "Run abricate analysis",
@@ -853,10 +853,10 @@
       "tool": "filtering",
       "description": "Filtering step for annotation & amr.",
       "keywords": [
-        "amr",
-        "resistance genes",
+        "filtering",
         "antimicrobial resistance",
-        "filtering"
+        "amr",
+        "resistance genes"
       ],
       "use_cases": [
         "Run filtering analysis",
@@ -881,10 +881,10 @@
       "tool": "resfinder",
       "description": "Resfinder step for annotation & amr.",
       "keywords": [
-        "resistance genes",
-        "antimicrobial resistance",
         "resfinder",
-        "amr"
+        "antimicrobial resistance",
+        "amr",
+        "resistance genes"
       ],
       "use_cases": [
         "Run resfinder analysis",
@@ -909,10 +909,10 @@
       "tool": "staramr",
       "description": "Staramr step for annotation & amr.",
       "keywords": [
-        "resistance genes",
         "antimicrobial resistance",
         "staramr",
-        "amr"
+        "amr",
+        "resistance genes"
       ],
       "use_cases": [
         "Run staramr analysis",
@@ -1035,10 +1035,10 @@
       "tool": "pangolin",
       "description": "Pangolin step for typing.",
       "keywords": [
-        "clade",
-        "lineage",
         "pangolin",
-        "variant"
+        "variant",
+        "clade",
+        "lineage"
       ],
       "use_cases": [
         "Run pangolin analysis",
@@ -1061,10 +1061,10 @@
       "tool": "westnile",
       "description": "Westnile step for typing. Outputs: lineage.",
       "keywords": [
-        "clade",
-        "lineage",
+        "westnile",
         "variant",
-        "westnile"
+        "clade",
+        "lineage"
       ],
       "use_cases": [
         "Run westnile analysis",
@@ -1103,25 +1103,6 @@
         "plasmids"
       ],
       "compatible_seq_types": [
-        "ion",
-        "nanopore"
-      ]
-    },
-    {
-      "id": "step_TEST_custom__kmer",
-      "file_path": "steps/step_TEST_custom__kmer.nf",
-      "domain": "",
-      "tool": "",
-      "description": " step for .",
-      "keywords": [
-        ""
-      ],
-      "use_cases": [],
-      "container": "staphb/seqtk:latest",
-      "input_channels": [],
-      "output_channels": [],
-      "compatible_seq_types": [
-        "illumina_paired",
         "ion",
         "nanopore"
       ]
