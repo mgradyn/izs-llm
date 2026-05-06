@@ -273,13 +273,13 @@ NOISE_PATTERNS: list[ErrorPattern] = [
     # 4c. Missing required parameter
     {
         "pattern": re.compile(
-            r"[Mm]issing\s+(?:required\s+)?(?:param(?:eter)?)[:\s]+[-\s]*['\"]?(\w+)['\"]?"
+            r"ERROR\s*~\s*[Mm]issing\s+required\s+params?\s*\(([^)]+)\)"
         ),
-        "category": "missing_param",
-        "label": "Missing pipeline parameter (expected in -preview)",
-        "is_fatal": False,
-        "groups": ["param_name"],
-        "source": "Missing required parameter: --genome",
+        "category": "missing_params",
+        "label": "Missing required parameters",
+        "is_fatal": True,
+        "groups": ["param_list"],
+        "source": "ERROR ~ missing required params (cmp,riscd)",
     },
     # 4d. Param should be provided
     {
@@ -508,7 +508,11 @@ def parse_nextflow_output(stdout: str, stderr: str) -> dict:
       "nf_log_hint"     : bool,
     }
     """
-    combined = stderr + "\n" + stdout
+    ANSI_ESCAPE = re.compile(r"\x1B\[[0-?]*[ -/]*[@-~]")
+
+    def strip_ansi(text: str) -> str:
+        return ANSI_ESCAPE.sub("", text)
+    combined = strip_ansi(stderr or "") + "\n" + strip_ansi(stdout or "")
     fatal_errors: list[dict] = []
     noise_errors: list[dict] = []
     unmatched_errors: list[str] = []

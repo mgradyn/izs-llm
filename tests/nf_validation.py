@@ -16,16 +16,28 @@ from pathlib import Path
 
 PROJECT_DIR = Path(__file__).parent.parent
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-FRAMEWORK_DIR = Path(os.environ.get("NF_FRAMEWRK_DIR", PROJECT_DIR.parent / "cohesive-ngsmanager-cli" / "cohesive-ngsmanager"))
+FRAMEWORK_DIR = Path(os.environ.get("NF_FRAMEWORK_DIR", PROJECT_DIR.parent / "cohesive-ngsmanager-cli" / "cohesive-ngsmanager"))
 E2E_PARAMS_CONFIG = FRAMEWORK_DIR / "conf" / "e2e_params.config"
 
 from tests.error_patterns import parse_nextflow_output
 
+# def _format_parsed_errors(stdout: str, stderr: str) -> list[str]:
+#     parsed = parse_nextflow_output(stdout, stderr)
+#     if not parsed["fatal_errors"]:
+#         return []
+#     return [f"{e.get('label')}: {e.get('raw', '')}" for e in parsed["fatal_errors"]]
+
 def _format_parsed_errors(stdout: str, stderr: str) -> list[str]:
     parsed = parse_nextflow_output(stdout, stderr)
-    if not parsed["fatal_errors"]:
-        return []
-    return [f"{e.get('label')}: {e.get('raw', '')}" for e in parsed["fatal_errors"]]
+
+    if parsed["fatal_errors"]:
+        return [f"{e['label']}: {e['raw']}" for e in parsed["fatal_errors"]]
+
+    # fallback to unmatched errors
+    if parsed["unmatched_errors"]:
+        return parsed["unmatched_errors"]
+
+    return []
 
 def check_syntax(code: str) -> dict:
     """
