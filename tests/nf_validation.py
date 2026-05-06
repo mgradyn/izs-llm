@@ -11,6 +11,7 @@ If unset, validation is gracefully skipped.
 """
 import os
 import subprocess
+import uuid
 from pathlib import Path
 
 PROJECT_DIR = Path(__file__).parent.parent
@@ -40,7 +41,7 @@ def check_syntax(code: str) -> dict:
         }
 
     test_dir = FRAMEWORK_DIR / "pipelines"
-    test_file = test_dir / "_llm_test_pipeline.nf"
+    test_file = test_dir / f"_llm_test_pipeline_{uuid.uuid4().hex}.nf"
 
     try:
         test_dir.mkdir(parents=True, exist_ok=True)
@@ -90,7 +91,7 @@ def check_stub(code: str) -> dict:
         }
 
     test_dir = FRAMEWORK_DIR / "pipelines"
-    test_file = test_dir / "_llm_test_pipeline.nf"
+    test_file = test_dir / f"_llm_test_pipeline_{uuid.uuid4().hex}.nf"
     work_dir = FRAMEWORK_DIR / "_llm_test_work"
 
     try:
