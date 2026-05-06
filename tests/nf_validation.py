@@ -14,7 +14,7 @@ import subprocess
 from pathlib import Path
 
 PROJECT_DIR = Path(__file__).parent.parent
-FRAMEWORK_DIR = Path(os.environ.get("NF_FRAMEWORK_DIR", PROJECT_DIR / "nf_framework"))
+FRAMEWORK_DIR = Path(os.environ.get("NF_FRAMEWORK_DIR", PROJECT_DIR / "cohesive-ngsmanager-cli" / "cohesive-ngsmanager"))
 E2E_PARAMS_CONFIG = FRAMEWORK_DIR / "conf" / "e2e_params.config"
 
 from tests.error_patterns import parse_nextflow_output
