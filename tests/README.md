@@ -35,6 +35,22 @@ This dual-path approach means the test can isolate where a failure comes from:
 - **Guardrail problem (Rejection)**: Is the LLM mistakenly attempting to build a pipeline for an unsupported organism?
 - **Similarity/fidelity problem (Recreation)**: Is the LLM deviating from our lab's gold-standard module architecture?
 
+### Test Pipeline Diagram
+
+```mermaid
+flowchart TD
+  UserPrompt[Scenario Prompt] --> RAG[Context Retrieval]
+  RAG --> Consultant[Consultant Planner]
+  Consultant -->|APPROVED| Execution[Execution Subgraph]
+  Consultant -->|CHATTING/Reject| Reject[Guardrail Response]
+  Execution --> Validation[Nextflow Validation]
+  Execution --> Diagram[Diagram Generation]
+  Execution --> Judges[LLM Judges]
+  Validation --> Report[Report + CSV]
+  Diagram --> Report
+  Judges --> Report
+```
+
 ## 3) Test Categories (What Is Tested)
 
 These are the actual test modules and their purpose. They map directly to files in the `tests/` directory.
@@ -77,13 +93,13 @@ These are the actual test modules and their purpose. They map directly to files 
 
 The scenario set is intentionally layered from easy to hard. This layered approach helps pinpoint exactly where the LLM's capabilities break down.
 
-| Level | Focus                   | Why it exists                                              |
-| ----- | ----------------------- | ---------------------------------------------------------- |
-| 1     | Single-tool requests    | Baseline reliability: one tool, low ambiguity. Verifies basic syntax and simple tool retrieval. |
-| 2     | Template-level requests | Checks template matching and moderate domain understanding. Multiple steps in a standard flow. |
-| 3     | Complex multi-step      | Stress test for multi-step channel/data-flow logic and dynamic branching. |
-| 4     | Guardrails/rejection    | Safety and correctness for invalid requests. Tests domain knowledge (e.g., organism mismatches). |
-| 5     | Module recreation       | Fidelity to known reference modules. Tests whether the LLM can write code the way *our* lab writes it. |
+| Level | Focus                   | Why it exists                                                                                          |
+| ----- | ----------------------- | ------------------------------------------------------------------------------------------------------ |
+| 1     | Single-tool requests    | Baseline reliability: one tool, low ambiguity. Verifies basic syntax and simple tool retrieval.        |
+| 2     | Template-level requests | Checks template matching and moderate domain understanding. Multiple steps in a standard flow.         |
+| 3     | Complex multi-step      | Stress test for multi-step channel/data-flow logic and dynamic branching.                              |
+| 4     | Guardrails/rejection    | Safety and correctness for invalid requests. Tests domain knowledge (e.g., organism mismatches).       |
+| 5     | Module recreation       | Fidelity to known reference modules. Tests whether the LLM can write code the way _our_ lab writes it. |
 
 ## 5) Current Scenario Counts
 
@@ -118,6 +134,7 @@ Each category has deterministic checks first, then optional quality scoring.
 ### Step A: Deterministic checks
 
 Examples:
+
 - Expected status values (`APPROVED` or `CHATTING`)
 - Code exists and is non-trivial (length > X)
 - AST exists and is parseable JSON
@@ -133,25 +150,37 @@ From `nf_validation.py`, if the `NF_FRAMEWORK_DIR` points to a valid Nextflow en
 - Stub run check: `nextflow run <file> -stub`
 
 Why this score/check is used:
+
 - **Syntax** catches invalid DSL2 structure, missing brackets, invalid imports.
 - **Stub run** catches channel wiring/data-flow issues without running expensive real tools. It actually executes the Nextflow Directed Acyclic Graph (DAG) with empty mock files.
 
 ### Step C: LLM Judge
 
-This is the quality layer. Deterministic checks tell you if the run completed correctly; the judge tells you *how good* the result is. The judge evaluates scientific and engineering quality using structured output schemas.
+This is the quality layer. Deterministic checks tell you if the run completed correctly; the judge tells you _how good_ the result is. The judge evaluates scientific and engineering quality using structured output schemas.
 
 #### Which model is used
 
 `get_judge_llm()` configures a `ChatOpenAI` client using:
+
 - `base_url` from `JUDGE_BASE_URL`
 - model: `Qwen3-Coder-30B` (or equivalent strong coding model)
 - temperature: `0.0` (for deterministic judging behavior)
+
+### Additional Metrics, Repeats, and CSV Outputs
+
+- **EVAL_RUNS**: Set `EVAL_RUNS` (default `1`) to evaluate the same prompt set multiple times. The first run remains the authoritative pass/fail; additional runs are used only for success-rate and score averages.
+- **First-submission success**: Tracks whether the first run succeeded (ignores internal architect repair loops).
+- **Tool routing accuracy**: Precision/recall/F1 based on selected module IDs vs expected `component_ids`.
+- **Tool call selection**: Precision/recall/F1 based on tool calls observed in API responses vs expected tool-call names (when available).
+- **RAG retrieval**: Still reported as document-level recall and precision where applicable.
+- **CSV output**: The report writes a per-scenario CSV to `test_reports/test_report_<timestamp>.csv` plus `test_reports/test_report_latest.csv`, with a final SUM and AVERAGE row for easy aggregation.
 
 ## 7) Actual Judge Prompts and Rubrics
 
 To provide full transparency on what the score is based on, below are the **exact, literal system prompts** given to the LLM judge for each category.
 
 ### Consultant Judge (Faithfulness & Relevance)
+
 Evaluates if the AI stayed within the catalog and solved the user's biological problem.
 
 ```text
@@ -209,6 +238,7 @@ SCORE 1 — UNACCEPTABLE
 ```
 
 ### Architect Judge (Pipeline Syntax & Logic)
+
 Evaluates the generated Nextflow DSL2 code against the original design plan.
 
 ```text
@@ -268,6 +298,7 @@ SCORE 1 — UNACCEPTABLE
 ```
 
 ### Diagram Judge (Mermaid Syntax & Mapping)
+
 Evaluates the generated Mermaid.js flowchart against the generated Nextflow code.
 
 ```text
@@ -326,6 +357,7 @@ SCORE 1 — UNACCEPTABLE
 ```
 
 ### Rejection Judge (Guardrails & Safety)
+
 Evaluates if the AI correctly refused impossible requests and offered valid alternatives.
 
 ```text
@@ -390,6 +422,7 @@ SCORE 1 — UNACCEPTABLE
 ```
 
 ### Code Recreation Judge (Structural Similarity)
+
 Evaluates how well the AI recreated a known reference module.
 
 ```text
@@ -449,6 +482,7 @@ There are two notions of success in this framework:
 In some tests, low judge scores can mark a scenario as failed in the final Markdown report while the Pytest execution itself still passes (because the AI technically functioned without crashing, it just generated subpar output).
 
 Where judge thresholds are strict in logic:
+
 - Consultant quality: target >= 4 on faithfulness/relevance
 - Execution quality: target >= 4 for pipeline/diagram dimensions
 - Rejection quality: target >= 4 for rejection/alternative
@@ -459,11 +493,13 @@ Revision-flow tests in `test_recreation.py` are stricter and can hard-fail when 
 ## 9) Score Interpretation Intent
 
 This framework balances three needs:
+
 - **Safety**: invalid requests must be refused clearly.
 - **Scientific fit**: recommendations must match organism/platform/purpose.
 - **Engineering quality**: generated Nextflow must be valid and coherent.
 
 Score interpretation intent:
+
 - **5 (Excellent)**: Production-grade behavior. Can be deployed directly.
 - **4 (Good)**: Acceptable for operational use with minor caveats (e.g., slight verbosity, minor style deviations).
 - **3 (Acceptable)**: Usable but with notable risk/gaps. Might require user modification.
@@ -471,6 +507,7 @@ Score interpretation intent:
 - **1 (Unacceptable)**: Completely fails the task, hallucinates, or breaks syntax entirely.
 
 This makes score thresholds practical:
+
 - `>= 4` for quality-critical behavior.
 - `>= 3` acceptable for structural similarity in recreation where equivalent variants may naturally exist.
 
@@ -488,13 +525,13 @@ This makes score thresholds practical:
 
 ## 11) Environment Variables
 
-| Variable | Required | Purpose |
-| --- | --- | --- |
-| `MISTRAL_API_KEY` | Yes | API key for the primary agent LLM. |
-| `JUDGE_BASE_URL` | Yes (in preflight) | Endpoint for the Judge LLM (e.g., an OpenAI-compatible endpoint hosting Qwen). |
-| `JUDGE_API_KEY` | Optional | API key for the Judge LLM if required by the endpoint. |
-| `NF_FRAMEWORK_DIR` | Optional | Path to the local Nextflow environment. Enables Nextflow syntax and stub validation. If unset, these checks are skipped. |
-| `ONLY_NEW_SCENARIOS` | Optional | If set to `1` or `true`, limits testing to only the newly added scenarios in the scenario files. |
+| Variable             | Required           | Purpose                                                                                                                  |
+| -------------------- | ------------------ | ------------------------------------------------------------------------------------------------------------------------ |
+| `MISTRAL_API_KEY`    | Yes                | API key for the primary agent LLM.                                                                                       |
+| `JUDGE_BASE_URL`     | Yes (in preflight) | Endpoint for the Judge LLM (e.g., an OpenAI-compatible endpoint hosting Qwen).                                           |
+| `JUDGE_API_KEY`      | Optional           | API key for the Judge LLM if required by the endpoint.                                                                   |
+| `NF_FRAMEWORK_DIR`   | Optional           | Path to the local Nextflow environment. Enables Nextflow syntax and stub validation. If unset, these checks are skipped. |
+| `ONLY_NEW_SCENARIOS` | Optional           | If set to `1` or `true`, limits testing to only the newly added scenarios in the scenario files.                         |
 
 ## 12) Detailed Execution Instructions
 
@@ -508,12 +545,14 @@ pip install pytest httpx
 ### Running Tests
 
 **Run all tests (Warning: Can take a long time if judging is enabled)**
+
 ```bash
 pytest tests/ -v --tb=short
 ```
 
 **Run tests by specific category**
 This is the recommended workflow during development. Run tests for the specific subsystem you are modifying.
+
 ```bash
 # Test retrieval (fastest, no LLM execution)
 pytest tests/test_rag.py -v
@@ -531,6 +570,7 @@ pytest tests/test_recreation.py -v
 
 **Run a single scenario**
 You can use the `-k` flag to filter by scenario ID. This is extremely useful for debugging a specific failure.
+
 ```bash
 pytest tests/ -v -k "L3_04_trim_assemble_amr"
 pytest tests/test_consultant.py -v -k "L1_01"
@@ -538,6 +578,7 @@ pytest tests/test_consultant.py -v -k "L1_01"
 
 **Disable Warnings and Print Output**
 If you want to see the exact logs and generated code during the test run:
+
 ```bash
 pytest tests/ -v -s --disable-warnings
 ```
@@ -555,12 +596,13 @@ To add a new scenario to the suite, follow these steps:
    - `description`: A clear, short description.
    - `chat_messages`: A list of strings representing the human user's messages.
    - `expect_approved`: Boolean indicating if the consultant should eventually approve the plan.
-   - `expect_in_context`: List of component/template IDs that the RAG *must* retrieve.
+   - `expect_in_context`: List of component/template IDs that the RAG _must_ retrieve.
    - `expect_strategy`: E.g., `CUSTOM_BUILD` or `EXACT_MATCH`.
    - `design_plan`: The expected final design plan (used directly by `test_execution.py`).
    - `selected_module_ids`: The exact component IDs that should be in the final plan.
 
 Example:
+
 ```python
 {
     "id": "L1_09_new_tool",
@@ -588,10 +630,12 @@ Example:
 The test suite automatically generates comprehensive Markdown reports summarizing the run.
 
 Generated files:
+
 - `tests/test_reports/test_report_<timestamp>.md`
 - `tests/test_reports/test_report_latest.md` (Symlinked or copied for convenience)
 
 Report sections include:
+
 - **Global summary**: High-level pass/fail metrics across the whole suite.
 - **Level-by-level sectioning**: Breaks down performance by difficulty level.
 - **Per-scenario details**: For every scenario tested, outlines the specific inputs, outputs, and scores.
@@ -635,15 +679,19 @@ tests/
 ## 16) Troubleshooting Common Failures
 
 ### 1. Judge Fails to Parse Schema
+
 Sometimes the judge LLM might output text instead of strictly adhering to the JSON schema. The framework uses LangChain's structured output parsers, which generally handle this well, but if you see parsing errors, check if the `JUDGE_BASE_URL` model is strong enough (e.g., Qwen3-Coder-30B is recommended).
 
 ### 2. Nextflow Stub Run Timeouts
+
 If `test_execution.py` is taking a very long time and then failing, it might be that the Nextflow stub run is timing out (default timeout is 60s in `nf_validation.py`). This can happen if the local machine is heavily loaded or if the Nextflow framework initialization is slow. Consider disabling stub runs locally or increasing the timeout.
 
 ### 3. Qdrant Connection Errors
+
 If `test_rag.py` fails immediately with connection errors, ensure the local Qdrant instance is running and populated. The framework expects the vector store to be pre-populated with the component catalog before tests run.
 
 ### 4. Rate Limits
+
 When running the full suite against an external API (like Mistral), you may encounter `429 Too Many Requests`. The `helpers.py` file includes basic retry logic, but you may need to add manual `time.sleep()` calls or use an internal LLM endpoint for bulk testing.
 
 ## 17) CI/CD Integration Best Practices

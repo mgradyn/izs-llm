@@ -657,3 +657,8 @@ if _env_enabled("ONLY_NEW_SCENARIOS"):
     LEVEL4_SCENARIOS = MODULE_REJECTION_SCENARIOS
 else:
     LEVEL4_SCENARIOS = _LEGACY_LEVEL4_SCENARIOS + MODULE_REJECTION_SCENARIOS
+
+DEFAULT_EXPECTED_TOOL_CALLS = ["search_components", "verify_component_id"]
+
+for _scenario in LEVEL4_SCENARIOS:
+    _scenario.setdefault("expected_tool_calls", DEFAULT_EXPECTED_TOOL_CALLS)

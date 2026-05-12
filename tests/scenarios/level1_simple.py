@@ -361,3 +361,8 @@ if _env_enabled("ONLY_NEW_SCENARIOS"):
     LEVEL1_SCENARIOS = NEW_LEVEL1_SCENARIOS
 else:
     LEVEL1_SCENARIOS = _LEGACY_LEVEL1_SCENARIOS + NEW_LEVEL1_SCENARIOS
+
+DEFAULT_EXPECTED_TOOL_CALLS = ["search_components", "verify_component_id"]
+
+for _scenario in LEVEL1_SCENARIOS:
+    _scenario.setdefault("expected_tool_calls", DEFAULT_EXPECTED_TOOL_CALLS)

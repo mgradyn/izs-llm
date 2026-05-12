@@ -2,7 +2,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 
 # Import your custom modules
 from app.core.loader import data_loader
@@ -22,6 +22,7 @@ class ChatResponse(BaseModel):
     mermaid_deterministic: Optional[str] = None
     ast_json: Optional[Dict[str, Any]] = None
     error: Optional[str] = None
+    tool_calls: Optional[List[str]] = None
 
 # --- 2. LIFESPAN (Startup/Shutdown Logic) ---
 @asynccontextmanager
@@ -95,6 +96,23 @@ async def chat_with_agent(request: ChatRequest):
         ast_json = result.get("ast_json")
         mermaid_agent = result.get("mermaid_agent")
         mermaid_deterministic = result.get("mermaid_deterministic")
+
+        # Collect tool calls from the most recent turn (since last human message)
+        tool_calls = []
+        seen = set()
+        last_human_idx = None
+        for idx in range(len(messages) - 1, -1, -1):
+            if getattr(messages[idx], "type", "") == "human":
+                last_human_idx = idx
+                break
+
+        start_idx = last_human_idx + 1 if last_human_idx is not None else 0
+        for msg in messages[start_idx:]:
+            for tc in getattr(msg, "tool_calls", []) or []:
+                name = tc.get("name")
+                if name and name not in seen:
+                    tool_calls.append(name)
+                    seen.add(name)
         
         return ChatResponse(
             status=status,
@@ -103,7 +121,8 @@ async def chat_with_agent(request: ChatRequest):
             mermaid_agent=mermaid_agent,
             mermaid_deterministic=mermaid_deterministic,
             ast_json=ast_json,
-            error=None
+            error=None,
+            tool_calls=tool_calls
         )
 
     except Exception as e:

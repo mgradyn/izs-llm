@@ -9,6 +9,7 @@ provides complexity examples, and gives clear pass/fail summaries.
 """
 from pathlib import Path
 from datetime import datetime
+import csv
 
 PROJECT_DIR = Path(__file__).parent.parent
 REPORT_DIR = PROJECT_DIR / "test_reports"
@@ -155,6 +156,55 @@ class ReportCollector:
         
         lines.append(f"| **RAG Database** | ✅ LOADED (via `conftest.py`) |")
         lines.append(f"| **Retry Attempts** | Each test retried up to 3 times (best result kept) |")
+
+        # Aggregate metrics (if present)
+        def _avg_score(key: str):
+            vals = [r["scores"].get(key) for r in self.results if isinstance(r.get("scores", {}).get(key), (int, float))]
+            return round(sum(vals) / len(vals), 2) if vals else None
+
+        def _avg_detail(key: str):
+            vals = [r["details"].get(key) for r in self.results if isinstance(r.get("details", {}).get(key), (int, float))]
+            return round(sum(vals) / len(vals), 2) if vals else None
+
+        first_submissions = [
+            r for r in self.results
+            if isinstance(r.get("details", {}).get("first_submission_success"), bool)
+        ]
+        if first_submissions:
+            fs_pass = sum(1 for r in first_submissions if r["details"]["first_submission_success"])
+            fs_total = len(first_submissions)
+            fs_pct = (fs_pass / fs_total * 100) if fs_total else 0
+            lines.append(f"| **First-Submission Success** | {fs_pass}/{fs_total} ({fs_pct:.0f}%) |")
+
+        func_avg = _avg_score("functional_correctness_score")
+        if func_avg is not None:
+            lines.append(f"| **Avg Functional Correctness** | {func_avg}/5 |")
+
+        code_avg = _avg_score("code_quality_score")
+        if code_avg is not None:
+            lines.append(f"| **Avg Code Quality** | {code_avg}/5 |")
+
+        route_p = _avg_score("tool_routing_precision_pct")
+        route_r = _avg_score("tool_routing_recall_pct")
+        route_f = _avg_score("tool_routing_f1_pct")
+        if route_p is not None or route_r is not None or route_f is not None:
+            lines.append(
+                f"| **Avg Tool Routing (P/R/F1)** | "
+                f"{route_p if route_p is not None else '—'} / {route_r if route_r is not None else '—'} / {route_f if route_f is not None else '—'} % |"
+            )
+
+        call_p = _avg_score("tool_call_precision_pct")
+        call_r = _avg_score("tool_call_recall_pct")
+        call_f = _avg_score("tool_call_f1_pct")
+        if call_p is not None or call_r is not None or call_f is not None:
+            lines.append(
+                f"| **Avg Tool Call Selection (P/R/F1)** | "
+                f"{call_p if call_p is not None else '—'} / {call_r if call_r is not None else '—'} / {call_f if call_f is not None else '—'} % |"
+            )
+
+        trial_avg = _avg_detail("trial_success_rate_pct")
+        if trial_avg is not None:
+            lines.append(f"| **Avg Trial Success Rate** | {trial_avg:.0f}% |")
         lines.append("")
 
         # ── Failure Summary (Only shown if there are failures) ──
@@ -223,6 +273,61 @@ class ReportCollector:
             n_fail = len(lresults) - n_pass
             lines.append(f"**Results: {n_pass} passed, {n_fail} failed out of {len(lresults)} tests**")
             lines.append("")
+
+            # Per-level aggregate metrics
+            def _level_avg_score(key: str):
+                vals = [r["scores"].get(key) for r in lresults if isinstance(r.get("scores", {}).get(key), (int, float))]
+                return round(sum(vals) / len(vals), 2) if vals else None
+
+            def _level_avg_detail(key: str):
+                vals = [r["details"].get(key) for r in lresults if isinstance(r.get("details", {}).get(key), (int, float))]
+                return round(sum(vals) / len(vals), 2) if vals else None
+
+            level_first = [
+                r for r in lresults
+                if isinstance(r.get("details", {}).get("first_submission_success"), bool)
+            ]
+            if level_first:
+                fs_pass = sum(1 for r in level_first if r["details"]["first_submission_success"])
+                fs_total = len(level_first)
+                fs_pct = (fs_pass / fs_total * 100) if fs_total else 0
+            else:
+                fs_pct = None
+
+            lvl_func = _level_avg_score("functional_correctness_score")
+            lvl_code = _level_avg_score("code_quality_score")
+            lvl_rp = _level_avg_score("tool_routing_precision_pct")
+            lvl_rr = _level_avg_score("tool_routing_recall_pct")
+            lvl_rf = _level_avg_score("tool_routing_f1_pct")
+            lvl_cp = _level_avg_score("tool_call_precision_pct")
+            lvl_cr = _level_avg_score("tool_call_recall_pct")
+            lvl_cf = _level_avg_score("tool_call_f1_pct")
+            lvl_trial = _level_avg_detail("trial_success_rate_pct")
+
+            if any(v is not None for v in [fs_pct, lvl_func, lvl_code, lvl_rp, lvl_rr, lvl_rf, lvl_cp, lvl_cr, lvl_cf, lvl_trial]):
+                lines.append("**Level Metrics:**")
+                lines.append("")
+                lines.append("| Metric | Avg |")
+                lines.append("|--------|-----|")
+                if fs_pct is not None:
+                    lines.append(f"| First-Submission Success | {fs_pct:.0f}% |")
+                if lvl_func is not None:
+                    lines.append(f"| Functional Correctness | {lvl_func}/5 |")
+                if lvl_code is not None:
+                    lines.append(f"| Code Quality | {lvl_code}/5 |")
+                if lvl_rp is not None or lvl_rr is not None or lvl_rf is not None:
+                    lines.append(
+                        f"| Tool Routing (P/R/F1) | "
+                        f"{lvl_rp if lvl_rp is not None else '—'} / {lvl_rr if lvl_rr is not None else '—'} / {lvl_rf if lvl_rf is not None else '—'} % |"
+                    )
+                if lvl_cp is not None or lvl_cr is not None or lvl_cf is not None:
+                    lines.append(
+                        f"| Tool Call Selection (P/R/F1) | "
+                        f"{lvl_cp if lvl_cp is not None else '—'} / {lvl_cr if lvl_cr is not None else '—'} / {lvl_cf if lvl_cf is not None else '—'} % |"
+                    )
+                if lvl_trial is not None:
+                    lines.append(f"| Trial Success Rate | {lvl_trial:.0f}% |")
+                lines.append("")
 
             for r in lresults:
                 icon = "✅" if r["success"] else "❌"
@@ -402,6 +507,76 @@ class ReportCollector:
 
         latest_path = REPORT_DIR / "test_report_latest.md"
         latest_path.write_text(report_content)
+
+        # CSV export (one row per scenario + summary rows)
+        csv_path = REPORT_DIR / f"test_report_{timestamp}.csv"
+        latest_csv_path = REPORT_DIR / "test_report_latest.csv"
+
+        base_fields = [
+            "id",
+            "level",
+            "difficulty",
+            "description",
+            "success",
+            "first_submission_success",
+            "trial_count",
+            "trial_successes",
+            "trial_success_rate_pct",
+        ]
+
+        score_keys = set()
+        for r in self.results:
+            for k, v in r.get("scores", {}).items():
+                if isinstance(v, (int, float)):
+                    score_keys.add(k)
+
+        header = base_fields + sorted(score_keys)
+
+        rows = []
+        for r in self.results:
+            details = r.get("details", {})
+            row = {
+                "id": r.get("id"),
+                "level": r.get("level"),
+                "difficulty": r.get("difficulty"),
+                "description": r.get("description"),
+                "success": 1 if r.get("success") else 0,
+                "first_submission_success": 1 if details.get("first_submission_success") else 0,
+                "trial_count": details.get("trial_count"),
+                "trial_successes": details.get("trial_successes"),
+                "trial_success_rate_pct": details.get("trial_success_rate_pct"),
+            }
+            for k in score_keys:
+                row[k] = r.get("scores", {}).get(k)
+            rows.append(row)
+
+        numeric_cols = [
+            k for k in header
+            if any(isinstance(row.get(k), (int, float)) for row in rows)
+        ]
+
+        sum_row = {k: "" for k in header}
+        sum_row["id"] = "SUM"
+        for k in numeric_cols:
+            vals = [row.get(k) for row in rows if isinstance(row.get(k), (int, float))]
+            if vals:
+                sum_row[k] = round(sum(vals), 2)
+
+        avg_row = {k: "" for k in header}
+        avg_row["id"] = "AVERAGE"
+        for k in numeric_cols:
+            vals = [row.get(k) for row in rows if isinstance(row.get(k), (int, float))]
+            if vals:
+                avg_row[k] = round(sum(vals) / len(vals), 2)
+
+        with csv_path.open("w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=header)
+            writer.writeheader()
+            writer.writerows(rows)
+            writer.writerow(sum_row)
+            writer.writerow(avg_row)
+
+        latest_csv_path.write_text(csv_path.read_text())
 
         print(f"\n📋 REPORT SAVED: {report_path}")
         return report_path

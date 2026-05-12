@@ -13,12 +13,14 @@ import re
 
 from tests.helpers import (
     build_test_execution_graph,
+    EVAL_RUNS,
     rate_limit_pause,
     send_chat,
     run_academic_judge,
     run_pipeline_judge,
     run_diagram_judge,
     run_rejection_judge,
+    run_n_trials,
     run_with_retries,
 )
 from tests.nf_validation import validate_nextflow
@@ -78,150 +80,163 @@ def _extract_context_ids(context: str):
 )
 def test_code_recreation(scenario, store, judge_llm):
     """Verify the execution subgraph can reproduce a known module's code."""
-
     module_id = scenario.get("module_id")
     reference_code = REFERENCE_CODE.get(module_id)
 
     if not reference_code:
         pytest.skip(f"No reference code found for {module_id} in code_store_hollow.jsonl")
 
-    # ── Build execution subgraph ──
-    exec_graph = build_test_execution_graph(store)
+    def _run_once():
+        # ── Build execution subgraph ──
+        exec_graph = build_test_execution_graph(store)
 
-    # ── Pre-baked initial state ──
-    initial_state = {
-        "user_query": f"Recreate {module_id}",
-        "messages": [],
-        "consultant_status": "APPROVED",
-        "design_plan": scenario["design_plan"],
-        "strategy_selector": scenario.get("expect_strategy", "EXACT_MATCH"),
-        "used_template_id": scenario.get("used_template_id"),
-        "selected_module_ids": scenario.get("selected_module_ids", []),
-        "nextflow_code": None,
-        "mermaid_agent": None,
-        "mermaid_deterministic": None,
-        "ast_json": None,
-        "technical_context": None,
-        "validation_error": None,
-        "retries": 0,
-        "error": None,
-    }
+        # ── Pre-baked initial state ──
+        initial_state = {
+            "user_query": f"Recreate {module_id}",
+            "messages": [],
+            "consultant_status": "APPROVED",
+            "design_plan": scenario["design_plan"],
+            "strategy_selector": scenario.get("expect_strategy", "EXACT_MATCH"),
+            "used_template_id": scenario.get("used_template_id"),
+            "selected_module_ids": scenario.get("selected_module_ids", []),
+            "nextflow_code": None,
+            "mermaid_agent": None,
+            "mermaid_deterministic": None,
+            "ast_json": None,
+            "technical_context": None,
+            "validation_error": None,
+            "retries": 0,
+            "error": None,
+        }
 
-    config = {"configurable": {"thread_id": f"test_{scenario['id']}_{uuid.uuid4().hex[:8]}"}}
+        config = {"configurable": {"thread_id": f"test_{scenario['id']}_{uuid.uuid4().hex[:8]}"}}
 
-    # ── Invoke execution subgraph ──
-    final_state = exec_graph.invoke(initial_state, config=config)
+        # ── Invoke execution subgraph ──
+        final_state = exec_graph.invoke(initial_state, config=config)
 
-    # ── Extract outputs ──
-    nf_code = final_state.get("nextflow_code", "")
-    mermaid_agent = final_state.get("mermaid_agent", "")
-    mermaid_det = final_state.get("mermaid_deterministic", "")
-    ast_json = final_state.get("ast_json", {})
-    error = final_state.get("error")
-
-    passed = True
-    errors = []
-    
-    details = {
-        "module_id": module_id,
-        "strategy": initial_state.get("strategy_selector"),
-        "nf_code_length": len(nf_code) if nf_code else 0,
-        "nf_code": nf_code,
-        "reference_length": len(reference_code),
-        "has_ast": bool(ast_json),
-        "mermaid_agent_length": len(mermaid_agent) if mermaid_agent else 0,
-        "mermaid_agent": mermaid_agent,
-        "mermaid_deterministic_length": len(mermaid_det) if mermaid_det else 0,
-        "mermaid_deterministic": mermaid_det,
-        "error": error,
-    }
-    scores = {}
-
-    if error:
-        errors.append(f"Execution subgraph error: {error}")
-        passed = False
-    if not nf_code or len(nf_code) <= 50:
-        errors.append(f"No Nextflow code generated for {module_id}")
-        passed = False
-
-    # ── Nextflow validation ──
-    try:
-        # Run stub for recreation (Level 5)
-        val_res = validate_nextflow(nf_code, run_stub=True)
-        details.update(val_res)
-        if val_res.get("nf_syntax_passed") == False or val_res.get("nf_stub_passed") == False:
-            passed = False
-    except Exception as e:
-        details["nf_validation_error"] = f"Skipped: {str(e)[:100]}"
-
-    # ── LLM Judge: Code Recreation ──
-    if judge_llm:
-        from tests.helpers import run_recreation_judge, run_diagram_judge
-        try:
-            judge_result = run_recreation_judge(
-                judge_llm=judge_llm,
-                reference_code=reference_code,
-                generated_code=nf_code,
-            )
-            if judge_result:
-                scores = {k: v for k, v in judge_result.items() if "score" in k}
-                details["judge_scores"] = scores
-                for k, v in scores.items():
-                    if v < 3:
-                        passed = False
-                        details[f"{k}_low"] = v
-        except Exception as e:
-            details["judge_error"] = str(e)[:200]
-            
-        # ── LLM Judge: Diagrams (BOTH) ──
+        # ── Extract outputs ──
+        nf_code = final_state.get("nextflow_code", "")
+        mermaid_agent = final_state.get("mermaid_agent", "")
+        mermaid_det = final_state.get("mermaid_deterministic", "")
         ast_json = final_state.get("ast_json", {})
-        mermaid_agent = final_state.get("mermaid_agent")
-        mermaid_det = final_state.get("mermaid_deterministic")
-        
-        details["has_ast"] = bool(ast_json)
-        details["has_mermaid_agent"] = bool(mermaid_agent)
-        details["has_mermaid_det"] = bool(mermaid_det)
-        
-        for code_variant, source in [(mermaid_det, "deterministic"), (mermaid_agent, "agentic")]:
-            if code_variant:
-                try:
-                    diagram_result = run_diagram_judge(
-                        judge_llm=judge_llm,
-                        tech_context=initial_state["technical_context"] or "",
-                        nf_code=nf_code,
-                        mermaid_code=code_variant,
-                        strategy=source,
-                    )
-                    if diagram_result:
-                        d_scores = {f"{source}_{k}": v for k, v in diagram_result.items() if "score" in k}
-                        scores.update(d_scores)
-                        if "diagram_judge_scores" not in details:
-                            details["diagram_judge_scores"] = {}
-                        details["diagram_judge_scores"].update(d_scores)
-                        for k, v in d_scores.items():
-                            if v < 4:
-                                passed = False
-                                details[f"{k}_low"] = v
-                except Exception as e:
-                    scores[f"{source}_diagram_judge_passed"] = 0.0
-                    details[f"{source}_diagram_judge_error"] = str(e)[:200]
+        error = final_state.get("error")
 
-    if errors:
-        details["errors"] = errors
-        print(f"\n[FAIL] {scenario['id']} test_recreation failed:\n" + "\n".join(errors))
+        passed = True
+        errors = []
+        
+        details = {
+            "module_id": module_id,
+            "strategy": initial_state.get("strategy_selector"),
+            "nf_code_length": len(nf_code) if nf_code else 0,
+            "nf_code": nf_code,
+            "reference_length": len(reference_code),
+            "has_ast": bool(ast_json),
+            "mermaid_agent_length": len(mermaid_agent) if mermaid_agent else 0,
+            "mermaid_agent": mermaid_agent,
+            "mermaid_deterministic_length": len(mermaid_det) if mermaid_det else 0,
+            "mermaid_deterministic": mermaid_det,
+            "error": error,
+        }
+        scores = {}
+
+        if error:
+            errors.append(f"Execution subgraph error: {error}")
+            passed = False
+        if not nf_code or len(nf_code) <= 50:
+            errors.append(f"No Nextflow code generated for {module_id}")
+            passed = False
+
+        # ── Nextflow validation ──
+        try:
+            # Run stub for recreation (Level 5)
+            val_res = validate_nextflow(nf_code, run_stub=True)
+            details.update(val_res)
+            if val_res.get("nf_syntax_passed") == False or val_res.get("nf_stub_passed") == False:
+                passed = False
+        except Exception as e:
+            details["nf_validation_error"] = f"Skipped: {str(e)[:100]}"
+
+        # ── LLM Judge: Code Recreation ──
+        if judge_llm:
+            from tests.helpers import run_recreation_judge, run_diagram_judge
+            try:
+                judge_result = run_recreation_judge(
+                    judge_llm=judge_llm,
+                    reference_code=reference_code,
+                    generated_code=nf_code,
+                )
+                if judge_result:
+                    scores = {k: v for k, v in judge_result.items() if "score" in k}
+                    details["judge_scores"] = scores
+                    for k, v in scores.items():
+                        if v < 3:
+                            passed = False
+                            details[f"{k}_low"] = v
+            except Exception as e:
+                details["judge_error"] = str(e)[:200]
+                
+            # ── LLM Judge: Diagrams (BOTH) ──
+            ast_json = final_state.get("ast_json", {})
+            mermaid_agent = final_state.get("mermaid_agent")
+            mermaid_det = final_state.get("mermaid_deterministic")
+            
+            details["has_ast"] = bool(ast_json)
+            details["has_mermaid_agent"] = bool(mermaid_agent)
+            details["has_mermaid_det"] = bool(mermaid_det)
+            
+            for code_variant, source in [(mermaid_det, "deterministic"), (mermaid_agent, "agentic")]:
+                if code_variant:
+                    try:
+                        diagram_result = run_diagram_judge(
+                            judge_llm=judge_llm,
+                            tech_context=initial_state["technical_context"] or "",
+                            nf_code=nf_code,
+                            mermaid_code=code_variant,
+                            strategy=source,
+                        )
+                        if diagram_result:
+                            d_scores = {f"{source}_{k}": v for k, v in diagram_result.items() if "score" in k}
+                            scores.update(d_scores)
+                            if "diagram_judge_scores" not in details:
+                                details["diagram_judge_scores"] = {}
+                            details["diagram_judge_scores"].update(d_scores)
+                            for k, v in d_scores.items():
+                                if v < 4:
+                                    passed = False
+                                    details[f"{k}_low"] = v
+                    except Exception as e:
+                        scores[f"{source}_diagram_judge_passed"] = 0.0
+                        details[f"{source}_diagram_judge_error"] = str(e)[:200]
+
+        if errors:
+            details["errors"] = errors
+            print(f"\n[FAIL] {scenario['id']} test_recreation failed:\n" + "\n".join(errors))
+
+        return {
+            "success": passed,
+            "scores": scores,
+            "details": details,
+            "errors": errors,
+        }
+
+    first_result, trial_stats, _ = run_n_trials(_run_once, EVAL_RUNS)
+    details = first_result.get("details", {})
+    details["first_submission_success"] = bool(first_result.get("success"))
+    details.update(trial_stats)
 
     report.add_result(
         scenario_id=f"[Recreation] {scenario['id']}",
         level=scenario["level"],
-        success=passed,
+        success=bool(first_result.get("success")),
         difficulty=scenario.get("difficulty", "—"),
         description=scenario.get("description", ""),
-        scores=scores,
+        scores=first_result.get("scores", {}),
         details=details,
     )
 
     rate_limit_pause()
     
+    errors = first_result.get("errors") or []
     assert not errors, f"Recreation test failed:\n" + "\n".join(errors)
 
 
@@ -545,6 +560,34 @@ def test_recreation_revision_two_stage_flow(scenario, api_client, store, judge_l
 
             scores.setdefault("flow_score", 5.0)
 
+        # ── Tool-call selection metrics (if available) ──
+        expected_tool_calls = scenario.get("expected_tool_calls", []) or []
+        observed_tool_calls = []
+        seen_calls = set()
+        for turn in (t1, t2, t3, t4):
+            for name in (turn.get("tool_calls") or []) if turn else []:
+                if name not in seen_calls:
+                    observed_tool_calls.append(name)
+                    seen_calls.add(name)
+
+        if expected_tool_calls or observed_tool_calls:
+            expected_set = set(expected_tool_calls)
+            observed_set = set(observed_tool_calls)
+            correct = expected_set & observed_set
+            if not expected_set and not observed_set:
+                precision = recall = f1 = 100.0
+            else:
+                precision = (len(correct) / len(observed_set) * 100) if observed_set else 0.0
+                recall = (len(correct) / len(expected_set) * 100) if expected_set else 0.0
+                f1 = (2 * precision * recall / (precision + recall)) if (precision + recall) else 0.0
+
+            scores["tool_call_precision_pct"] = round(precision, 2)
+            scores["tool_call_recall_pct"] = round(recall, 2)
+            scores["tool_call_f1_pct"] = round(f1, 2)
+            details["tool_calls_observed"] = observed_tool_calls
+            details["tool_calls_expected"] = expected_tool_calls
+            details["tool_calls_correct"] = sorted(correct)
+
         details.update(
             {
                 "turn1_status": t1.get("status"),
@@ -606,20 +649,31 @@ def test_recreation_revision_two_stage_flow(scenario, api_client, store, judge_l
             "details": details,
         }
 
-    # Best-of-2 retries; skip attempt 2 when average score is already >= 4.0.
-    best_result = run_with_retries(_attempt_once, max_retries=2, stop_avg_score=4.0)
+    def _run_once():
+        # Best-of-2 retries; skip attempt 2 when average score is already >= 4.0.
+        best_result = run_with_retries(_attempt_once, max_retries=2, stop_avg_score=4.0)
+        success = bool(best_result.get("success", False)) and not best_result.get("error")
+        details = best_result.get("details", {})
+        details["retry_summary"] = best_result.get("all_attempts_summary", [])
+        details["first_submission_success"] = bool(best_result.get("first_attempt_success", False))
 
-    success = bool(best_result.get("success", False)) and not best_result.get("error")
-    details = best_result.get("details", {})
-    details["retry_summary"] = best_result.get("all_attempts_summary", [])
+        return {
+            "success": success,
+            "scores": best_result.get("scores", {}),
+            "details": details,
+        }
+
+    first_result, trial_stats, _ = run_n_trials(_run_once, EVAL_RUNS)
+    details = first_result.get("details", {})
+    details.update(trial_stats)
 
     report.add_result(
         scenario_id=f"[Recreation-Flow] {scenario['id']}",
         level=scenario["level"],
-        success=success,
+        success=bool(first_result.get("success")),
         difficulty=scenario.get("difficulty", "—"),
         description=scenario.get("description", ""),
-        scores=best_result.get("scores", {}),
+        scores=first_result.get("scores", {}),
         details=details,
     )
 

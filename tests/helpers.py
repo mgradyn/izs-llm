@@ -18,6 +18,7 @@ Isolated Helpers (for direct agent/judge invocation, no API):
 import os
 import time
 import uuid
+import pytest
 
 
 # ──────────────────────────────────────────────────────────────
@@ -27,6 +28,7 @@ import uuid
 DEFAULT_PAUSE_BETWEEN_TURNS = 5    # seconds between turns in a conversation
 DEFAULT_PAUSE_BETWEEN_TESTS = 15   # seconds between separate test scenarios
 DEFAULT_PAUSE_ON_ERROR = 30        # seconds to wait after a rate limit / server error
+EVAL_RUNS = max(1, int(os.environ.get("EVAL_RUNS", "1")))
 
 
 def rate_limit_pause(seconds=15, reason="rate limit protection"):
@@ -62,7 +64,7 @@ def send_chat(
 
     Returns a dict with keys:
         success, status, reply, nextflow_code, mermaid_agent,
-        mermaid_deterministic, ast_json, elapsed, error
+        mermaid_deterministic, ast_json, elapsed, error, tool_calls
     """
     url = "/chat"
     payload = {
@@ -87,6 +89,7 @@ def send_chat(
                 "ast_json": None,
                 "elapsed": elapsed,
                 "error": f"HTTP {resp.status_code}: {resp.text[:300]}",
+                "tool_calls": [],
             }
 
         data = resp.json()
@@ -100,6 +103,7 @@ def send_chat(
             "ast_json": data.get("ast_json"),
             "elapsed": elapsed,
             "error": data.get("error"),
+            "tool_calls": data.get("tool_calls") or [],
         }
 
     except Exception as e:
@@ -109,12 +113,14 @@ def send_chat(
                 "nextflow_code": None, "mermaid_agent": None,
                 "mermaid_deterministic": None, "ast_json": None,
                 "elapsed": time.time() - start, "error": "Request timed out",
+                "tool_calls": [],
             }
         return {
             "success": False, "status": "CONNECTION_ERROR", "reply": None,
             "nextflow_code": None, "mermaid_agent": None,
             "mermaid_deterministic": None, "ast_json": None,
             "elapsed": time.time() - start, "error": str(e),
+            "tool_calls": [],
         }
 
 
@@ -152,7 +158,12 @@ def run_multi_turn_chat(
             result["all_replies"] = all_replies
             return result
 
-        all_replies.append({"turn": turn_idx + 1, "reply": result["reply"], "status": result["status"]})
+        all_replies.append({
+            "turn": turn_idx + 1,
+            "reply": result["reply"],
+            "status": result["status"],
+            "tool_calls": result.get("tool_calls") or [],
+        })
 
         # For rejection tests, return after first response
         if expect_rejection:
@@ -212,6 +223,7 @@ def run_with_retries(
             result = test_fn()
             result["attempt"] = attempt
             result["error"] = None
+            result["success"] = bool(result.get("success", False))
             all_results.append(result)
             
             # EARLY EXIT: If we hit the configured score threshold, stop retrying.
@@ -225,7 +237,7 @@ def run_with_retries(
                 
         except Exception as e:
             error_str = str(e).lower()
-            all_results.append({"attempt": attempt, "error": str(e), "scores": {}})
+            all_results.append({"attempt": attempt, "error": str(e), "scores": {}, "success": False})
 
             # If rate limit, pause longer
             if "429" in error_str or "rate limit" in error_str:
@@ -253,8 +265,14 @@ def run_with_retries(
         best = all_results[-1] if all_results else {"error": "No results", "scores": {}}
 
     best["total_attempts"] = len(all_results)
+    best["first_attempt_success"] = bool(all_results[0].get("success", False)) if all_results else False
     best["all_attempts_summary"] = [
-        {"attempt": r.get("attempt"), "error": r.get("error"), "avg_score": _avg_scores(r.get("scores", {}))}
+        {
+            "attempt": r.get("attempt"),
+            "error": r.get("error"),
+            "avg_score": _avg_scores(r.get("scores", {})),
+            "success": bool(r.get("success", False)),
+        }
         for r in all_results
     ]
 
@@ -267,11 +285,63 @@ def _avg_scores(scores: dict) -> float:
     return round(sum(vals) / len(vals), 2) if vals else 0.0
 
 
+def run_n_trials(test_fn, runs=1, pause_between=DEFAULT_PAUSE_BETWEEN_TESTS):
+    """Run the same test N times and return the first result plus trial stats.
+
+    The first run remains authoritative for pass/fail. Additional runs
+    are used only to compute success rate and average scores.
+    """
+    runs = max(1, int(runs or 1))
+    results = []
+
+    for idx in range(runs):
+        try:
+            result = test_fn()
+        except pytest.skip.Exception:
+            raise
+        except Exception as e:
+            result = {
+                "success": False,
+                "scores": {},
+                "details": {"error": str(e)},
+                "errors": [str(e)],
+            }
+        result["trial_index"] = idx + 1
+        results.append(result)
+
+        if idx < runs - 1:
+            rate_limit_pause(pause_between, f"between evaluation runs {idx + 1} and {idx + 2}")
+
+    first_result = results[0]
+    trial_successes = sum(1 for r in results if r.get("success"))
+    trial_success_rate = round(trial_successes / runs * 100, 2) if runs else 0.0
+
+    score_keys = set()
+    for r in results:
+        for k, v in r.get("scores", {}).items():
+            if isinstance(v, (int, float)):
+                score_keys.add(k)
+
+    score_avgs = {}
+    for k in sorted(score_keys):
+        vals = [r["scores"][k] for r in results if isinstance(r.get("scores", {}).get(k), (int, float))]
+        if vals:
+            score_avgs[k] = round(sum(vals) / len(vals), 2)
+
+    trial_stats = {
+        "trial_count": runs,
+        "trial_successes": trial_successes,
+        "trial_success_rate_pct": trial_success_rate,
+        "trial_score_avgs": score_avgs,
+    }
+
+    return first_result, trial_stats, results
+
+
 # ──────────────────────────────────────────────────────────────
 # Isolated Testing Helpers (Direct Invocation, No API)
 # ──────────────────────────────────────────────────────────────
 
-import pytest
 from langchain_core.messages import HumanMessage, AIMessage
 
 from app.services.tools import _inject_template, _inject_component

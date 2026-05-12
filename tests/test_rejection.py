@@ -14,7 +14,7 @@ from langchain_core.messages import HumanMessage
 
 from app.models.consultant_structure import ConsultantOutput
 from tests.evaluation.prompts import CONSULTANT_TEST_PROMPT
-from tests.helpers import get_exact_context, rate_limit_pause
+from tests.helpers import EVAL_RUNS, get_exact_context, run_n_trials, rate_limit_pause
 from tests.scenarios.level4_guardrails import LEVEL4_SCENARIOS
 from tests.report import report
 
@@ -25,80 +25,93 @@ from tests.report import report
 )
 def test_rejection_guardrail(scenario, store, llm, judge_llm):
     """Verify that the consultant rejects invalid tool requests."""
+    def _run_once():
+        if "template_ids" not in scenario or "component_ids" not in scenario:
+            pytest.skip("Mock data for alternatives not defined in scenario.")
 
-    if "template_ids" not in scenario or "component_ids" not in scenario:
-        pytest.skip("Mock data for alternatives not defined in scenario.")
+        # ── Build deterministic context with REAL alternatives ──
+        real_context = get_exact_context(
+            scenario["template_ids"],
+            scenario["component_ids"],
+            store,
+        )
 
-    # ── Build deterministic context with REAL alternatives ──
-    real_context = get_exact_context(
-        scenario["template_ids"],
-        scenario["component_ids"],
-        store,
-    )
+        # ── Build agent chain ──
+        agent = llm.with_structured_output(ConsultantOutput)
+        chain = CONSULTANT_TEST_PROMPT | agent
 
-    # ── Build agent chain ──
-    agent = llm.with_structured_output(ConsultantOutput)
-    chain = CONSULTANT_TEST_PROMPT | agent
+        # ── Invoke with the invalid request ──
+        chat_history = [HumanMessage(content=scenario["chat_messages"][0])]
+        result = chain.invoke({"context": real_context, "messages": chat_history})
 
-    # ── Invoke with the invalid request ──
-    chat_history = [HumanMessage(content=scenario["chat_messages"][0])]
-    result = chain.invoke({"context": real_context, "messages": chat_history})
+        # ── Deterministic assertions ──
+        passed = True
+        errors = []
+        details = {
+            "status": result.status,
+            "ai_reply": result.response_to_user,
+            "expected_rejection_reason": scenario["rejection_reason"],
+        }
+        scores = {}
 
-    # ── Deterministic assertions ──
-    passed = True
-    errors = []
-    details = {
-        "status": result.status,
-        "ai_reply": result.response_to_user,
-        "expected_rejection_reason": scenario["rejection_reason"],
-    }
-    scores = {}
+        if result.status != "CHATTING":
+            passed = False
+            msg = f"Agent APPROVED an invalid request! Expected CHATTING, got {result.status}"
+            errors.append(msg)
 
-    if result.status != "CHATTING":
-        passed = False
-        msg = f"Agent APPROVED an invalid request! Expected CHATTING, got {result.status}"
-        errors.append(msg)
+        if result.draft_plan and result.draft_plan.strip() != "":
+            passed = False
+            msg = "Agent generated a plan for an invalid request."
+            errors.append(msg)
 
-    if result.draft_plan and result.draft_plan.strip() != "":
-        passed = False
-        msg = "Agent generated a plan for an invalid request."
-        errors.append(msg)
+        # ── LLM Judge: Rejection quality ──
+        if judge_llm:
+            try:
+                from tests.helpers import run_rejection_judge
+                judge_result = run_rejection_judge(
+                    judge_llm=judge_llm,
+                    prompt=scenario["chat_messages"][0],
+                    rejection_reason=scenario["rejection_reason"],
+                    reply=result.response_to_user,
+                    status=result.status,
+                )
+                if judge_result:
+                    scores = {k: v for k, v in judge_result.items() if "score" in k}
+                    details["judge_scores"] = scores
+                    for k, v in scores.items():
+                        if v < 4:
+                            passed = False
+                            details[f"{k}_low"] = v
+            except Exception as e:
+                details["judge_error"] = str(e)[:200]
 
-    # ── LLM Judge: Rejection quality ──
-    if judge_llm:
-        try:
-            from tests.helpers import run_rejection_judge
-            judge_result = run_rejection_judge(
-                judge_llm=judge_llm,
-                prompt=scenario["chat_messages"][0],
-                rejection_reason=scenario["rejection_reason"],
-                reply=result.response_to_user,
-                status=result.status,
-            )
-            if judge_result:
-                scores = {k: v for k, v in judge_result.items() if "score" in k}
-                details["judge_scores"] = scores
-                for k, v in scores.items():
-                    if v < 4:
-                        passed = False
-                        details[f"{k}_low"] = v
-        except Exception as e:
-            details["judge_error"] = str(e)[:200]
+        if errors:
+            details["errors"] = errors
+            print(f"\n[FAIL] {scenario['id']} test_rejection failed:\n" + "\n".join(errors))
 
-    if errors:
-        details["errors"] = errors
-        print(f"\n[FAIL] {scenario['id']} test_rejection failed:\n" + "\n".join(errors))
+        return {
+            "success": passed,
+            "scores": scores,
+            "details": details,
+            "errors": errors,
+        }
+
+    first_result, trial_stats, _ = run_n_trials(_run_once, EVAL_RUNS)
+    details = first_result.get("details", {})
+    details["first_submission_success"] = bool(first_result.get("success"))
+    details.update(trial_stats)
 
     report.add_result(
         scenario_id=f"[Rejection] {scenario['id']}",
         level=scenario["level"],
-        success=passed,
+        success=bool(first_result.get("success")),
         difficulty=scenario.get("difficulty", "—"),
         description=scenario.get("description", ""),
-        scores=scores,
+        scores=first_result.get("scores", {}),
         details=details,
     )
 
     rate_limit_pause()
     
+    errors = first_result.get("errors") or []
     assert not errors, f"Rejection test failed:\n" + "\n".join(errors)
