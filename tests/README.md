@@ -39,7 +39,7 @@ This dual-path approach means the test can isolate where a failure comes from:
 
 ```mermaid
 flowchart LR
-  subgraph Full Agentic Pipeline
+  subgraph FullPipeline ["Full Agentic Pipeline"]
     Prompt --> Retrieval[RAG Retrieval]
     Retrieval --> Planning[Consultant Planning]
     Planning --> Generation[Code Generation]
@@ -50,7 +50,7 @@ flowchart LR
   test_consultant -.-> Planning
   test_rejection -.-> Planning
   test_execution -.-> Generation
-  test_recreation -.-> Full Agentic Pipeline
+  test_recreation -.-> FullPipeline
 ```
 
 ## 3) Test Categories (What Is Tested)
