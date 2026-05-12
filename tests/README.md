@@ -38,17 +38,19 @@ This dual-path approach means the test can isolate where a failure comes from:
 ### Test Pipeline Diagram
 
 ```mermaid
-flowchart TD
-  UserPrompt[Scenario Prompt] --> RAG[Context Retrieval]
-  RAG --> Consultant[Consultant Planner]
-  Consultant -->|APPROVED| Execution[Execution Subgraph]
-  Consultant -->|CHATTING/Reject| Reject[Guardrail Response]
-  Execution --> Validation[Nextflow Validation]
-  Execution --> Diagram[Diagram Generation]
-  Execution --> Judges[LLM Judges]
-  Validation --> Report[Report + CSV]
-  Diagram --> Report
-  Judges --> Report
+flowchart LR
+  subgraph Full Agentic Pipeline
+    Prompt --> Retrieval[RAG Retrieval]
+    Retrieval --> Planning[Consultant Planning]
+    Planning --> Generation[Code Generation]
+    Generation --> Validation[Validation & Reports]
+  end
+  
+  test_rag -.-> Retrieval
+  test_consultant -.-> Planning
+  test_rejection -.-> Planning
+  test_execution -.-> Generation
+  test_recreation -.-> Full Agentic Pipeline
 ```
 
 ## 3) Test Categories (What Is Tested)
@@ -62,11 +64,48 @@ These are the actual test modules and their purpose. They map directly to files 
 - Does not involve API, consultant, or code generation.
 - Verifies expected IDs are present in the retrieved context.
 
+```mermaid
+flowchart TD
+  Prompt[User Scenario Prompt] --> DB[(Qdrant Vector DB)]
+  DB --> RAG[retrieve_rag_context]
+  
+  subgraph Deterministic Checks
+    RAG --> Check1[Assert 'expect_in_context' IDs are found]
+    RAG --> Check2[Assert precision/recall > 0]
+  end
+  
+  Check1 --> Report[Report Generation]
+```
+
 ### `test_consultant.py`
 
 - Tests planning logic only.
 - Injects deterministic context with `get_exact_context()`.
 - Verifies approval behavior, strategy/template alignment, and optional judge quality.
+
+```mermaid
+flowchart TD
+  Prompt[Scenario Prompt] --> Inject[Inject exact component catalog]
+  Inject --> Agent[Consultant LLM Planner]
+  
+  subgraph Deterministic Checks
+    Agent --> Check1[Assert status == APPROVED]
+    Agent --> Check2[Assert correct strategy selected]
+  end
+
+  subgraph Tool Assessment
+    Agent --> ToolMetrics[Calculate Precision, Recall, F1 for Component IDs]
+  end
+
+  subgraph Judge Scoring
+    Agent -.->|--judge true| Judge[Consultant Judge]
+    Judge --> J_Score[Faithfulness & Relevance Score]
+  end
+  
+  Check1 --> Report[Report Generation]
+  ToolMetrics --> Report
+  J_Score --> Report
+```
 
 ### `test_execution.py`
 
@@ -74,6 +113,32 @@ These are the actual test modules and their purpose. They map directly to files 
 - Verifies code and AST generation.
 - Runs Nextflow compiler checks (`nf_validation.py`) when available.
 - Scores code and diagrams with the LLM judge when configured.
+
+```mermaid
+flowchart TD
+  Plan[Pre-baked Consultant Design Plan] --> Architect[Architect LLM Builder]
+  Architect --> NF[Generate Nextflow Code]
+  Architect --> Dia[Generate Mermaid Diagram]
+  
+  subgraph Deterministic Checks
+    NF --> Check1[Assert non-empty code]
+    NF --> Check2[Parse AST JSON]
+  end
+
+  subgraph Environment Validations
+    NF -->|NF_FRAMEWORK_DIR set| Comp1[Nextflow -preview check]
+    NF -->|NF_FRAMEWORK_DIR set| Comp2[Nextflow -stub run]
+  end
+
+  subgraph Judge Scoring
+    NF -.->|--judge true| Judge1[Architect Judge: Syntax & Logic]
+    Dia -.->|--judge true| Judge2[Diagram Judge: Mapping & Syntax]
+  end
+  
+  Check1 --> Report[Report Generation]
+  Comp1 --> Report
+  Judge1 --> Report
+```
 
 ### `test_rejection.py`
 
@@ -83,11 +148,50 @@ These are the actual test modules and their purpose. They map directly to files 
   - No build-ready plan should be generated.
 - Optionally scores rejection quality and alternative suggestions using the Rejection Judge.
 
+```mermaid
+flowchart TD
+  Prompt[Invalid / Dangerous Prompt] --> Agent[Consultant Planner]
+  
+  subgraph Deterministic Checks
+    Agent --> Check1[Assert status == CHATTING]
+    Agent --> Check2[Assert no build plan generated]
+  end
+
+  subgraph Judge Scoring
+    Agent -.->|--judge true| Judge[Rejection Judge]
+    Judge --> Score[Rejection quality & Alternatives]
+  end
+  
+  Check1 --> Report[Report Generation]
+  Score --> Report
+```
+
 ### `test_recreation.py`
 
 - Part A: Module recreation against reference code (`LEVEL5_SCENARIOS`).
 - Part B: Two-stage revision flows (initial build -> revision -> re-approval -> final build) from `RECREATION_REV` scenarios.
 - Includes mandatory LLM judge gates in the revision-flow path to ensure structural similarity.
+
+```mermaid
+flowchart TD
+  Prompt[Recreation / Revision Prompt] --> API[Full API / Chat Endpoint]
+  API --> Turn1[Initial Build Generated]
+  Turn1 --> Rev[User Revision Requested]
+  Rev --> Turn2[Revised Build Generated]
+  
+  subgraph Deterministic Checks
+    Turn2 --> Check1[Assert state transitions]
+    Turn2 --> Check2[Assert Nextflow compiler passes]
+  end
+
+  subgraph Judge Scoring
+    Turn2 -.->|--judge true| Judge[Code Recreation Judge]
+    Judge --> Score[Structural Similarity & Channel Routing]
+  end
+  
+  Check1 --> Report[Report Generation]
+  Score --> Report
+```
 
 ## 4) Scenario Levels and Why They Matter
 
@@ -115,6 +219,12 @@ Raw scenario definitions:
 
 Total defined scenarios: **110**
 (19 of these are `RECREATION_REV` scenarios used for revision-flow testing).
+
+**Dataset / Scenario Summary Split:**
+- **Source Material:** Scenarios are derived from real-world laboratory requests, template specifications, and known edge cases in the Nextflow ecosystem.
+- **Guardrails (Level 4):** 36 scenarios explicitly testing rejection logic, impossible combinations, and safety bounds.
+- **Revision Flow:** 19 scenarios testing multi-turn conversational repair and code modifications.
+- **Code Generation (Levels 1-3 & 5):** 55 direct execution and fidelity tests.
 
 Test usage differs by module:
 
@@ -163,17 +273,39 @@ This is the quality layer. Deterministic checks tell you if the run completed co
 `get_judge_llm()` configures a `ChatOpenAI` client using:
 
 - `base_url` from `JUDGE_BASE_URL`
-- model: `Qwen3-Coder-30B` (or equivalent strong coding model)
+- model: `Qwen3-Coder-30B` (or equivalent strong coding model; configurable via environment variables)
 - temperature: `0.0` (for deterministic judging behavior)
+- max_tokens: Configured for long-context evaluation.
 
-### Additional Metrics, Repeats, and CSV Outputs
+*Note on Evaluation Protocol (Main Agent vs Judge)*: 
+- The Main Agent LLM (e.g., Mistral Large/Pro) is run via `get_llm()` and is evaluated with default production settings (typically temperature ~0.0 to 0.2 for strict code generation).
+- The Judge LLM operates strictly at temperature 0.0 to ensure deterministic scoring. All system prompts and structural boundaries are strictly enforced.
 
-- **EVAL_RUNS**: Set `EVAL_RUNS` (default `1`) to evaluate the same prompt set multiple times. The first run remains the authoritative pass/fail; additional runs are used only for success-rate and score averages.
-- **First-submission success**: Tracks whether the first run succeeded (ignores internal architect repair loops).
-- **Tool routing accuracy**: Precision/recall/F1 based on selected module IDs vs expected `component_ids`.
-- **Tool call selection**: Precision/recall/F1 based on tool calls observed in API responses vs expected tool-call names (when available).
-- **RAG retrieval**: Still reported as document-level recall and precision where applicable.
-- **CSV output**: The report writes a per-scenario CSV to `test_reports/test_report_<timestamp>.csv` plus `test_reports/test_report_latest.csv`, with a final SUM and AVERAGE row for easy aggregation.
+### Metrics Definitions
+
+- **First-submission success**: Tracks whether the first run succeeded (ignores internal architect repair loops, measuring one-shot reliability).
+- **Trial success rate**: When `EVAL_RUNS` > 1, this represents the average pass rate across all repeated trials for a scenario.
+- **Tool routing accuracy (P/R/F1)**: Precision, Recall, and F1 based on selected module IDs in the design plan vs expected `component_ids`.
+- **Tool-call selection (P/R/F1)**: Precision, Recall, and F1 based on tool calls observed in API responses vs expected tool-call names (evaluates the LangGraph tools).
+- **Functional Correctness**: Binary pass/fail based on Nextflow `-stub` and `-preview` validation tests.
+- **Code Quality**: Judge LLM score (1-5) evaluating structural similarity, syntax, and logic.
+- **RAG recall**: Percentage of `expect_in_context` component IDs successfully retrieved during the initial vector search.
+
+### Repeatability
+
+- **EVAL_RUNS**: Set `EVAL_RUNS` (default `1`) to evaluate the same prompt set multiple times. This is critical for evaluating LLM stochasticity. 
+- **Aggregation**: The first run remains the authoritative pass/fail for the overall pytest suite; additional runs are aggregated and used only for trial success rate and score averages (mean scores across runs) in the final report.
+
+### Artifacts: Report and CSV
+
+The framework automatically outputs two main artifact formats at the end of a run:
+
+1. **Markdown Report (`test_report_<timestamp>.md` & `test_report_latest.md`)**: A human-readable analysis with scenario-level judge reasoning, global summaries, and error logs.
+2. **Detailed CSV (`test_report_<timestamp>.csv` & `test_report_latest.csv`)**: 
+   - Contains granular scenario data for programmatic analysis.
+   - **Columns include**: `scenario_id`, `level`, `status` (Pass/Fail), `first_run_success`, `trial_success_rate`, `rag_recall`, precision/recall metrics, and specific judge scores.
+   - **Trial Averages**: Includes per-score trial averages (e.g., `trial_avg_faithfulness_score`, `trial_avg_syntax_score`) alongside single-run score columns.
+   - The final rows of the CSV provide aggregated `SUM` and `AVERAGE` metrics for easy ingestion into academic or paper evaluation tables.
 
 ## 7) Actual Judge Prompts and Rubrics
 
@@ -523,14 +655,25 @@ This makes score thresholds practical:
 8. **Aggregation**: Results are aggregated by the `ReportCollector` singleton in `report.py`.
 9. **Finalization**: The final Markdown report is saved to `tests/test_reports/test_report_<timestamp>.md`.
 
-## 11) Environment Variables
+## 11) Reproducibility Checklist and Environment Variables
+
+For strict repeatability in paper evaluations or continuous integration, the following setup must be respected:
+
+### Prerequisites & Data
+1. **FAISS/Qdrant Index**: The vector database index *must* exist. The `setup_database` fixture will fail fast if the index path is missing.
+2. **Nextflow Installation (Hardware Skip)**: Code validation requires a local Nextflow installation. 
+   - Set `NF_FRAMEWORK_DIR=/path/to/framework`.
+   - If `NF_FRAMEWORK_DIR` is unset, tests will automatically skip the hardware compiler checks (Nextflow `-preview` and `-stub`) but will continue with judge scoring and standard assertions. This is known as a "hardware skip".
+
+### Environment Variables
 
 | Variable             | Required           | Purpose                                                                                                                  |
 | -------------------- | ------------------ | ------------------------------------------------------------------------------------------------------------------------ |
 | `MISTRAL_API_KEY`    | Yes                | API key for the primary agent LLM.                                                                                       |
-| `JUDGE_BASE_URL`     | Yes (in preflight) | Endpoint for the Judge LLM (e.g., an OpenAI-compatible endpoint hosting Qwen).                                           |
+| `JUDGE_BASE_URL`     | Yes (if enabled)   | Endpoint for the Judge LLM (e.g., an OpenAI-compatible endpoint hosting Qwen). Fails fast if missing unless `--judge false`.|
 | `JUDGE_API_KEY`      | Optional           | API key for the Judge LLM if required by the endpoint.                                                                   |
-| `NF_FRAMEWORK_DIR`   | Optional           | Path to the local Nextflow environment. Enables Nextflow syntax and stub validation. If unset, these checks are skipped. |
+| `NF_FRAMEWORK_DIR`   | Optional           | Path to the local Nextflow environment. Enables Nextflow syntax and stub validation.                                     |
+| `EVAL_RUNS`          | Optional           | Number of repeat trials for statistical significance (Default: 1).                                                       |
 | `ONLY_NEW_SCENARIOS` | Optional           | If set to `1` or `true`, limits testing to only the newly added scenarios in the scenario files.                         |
 
 ## 12) Detailed Execution Instructions
@@ -540,6 +683,18 @@ This makes score thresholds practical:
 ```bash
 # Install core test dependencies
 pip install pytest httpx
+```
+
+### Test Runner Arguments
+
+- **`--judge [true|false]`**: Enable or disable LLM judge quality scoring. 
+  - **Default**: `true`
+  - Values accepted: `true`/`false`, `yes`/`no`, `1`/`0`.
+  - When `--judge false` is passed, the test preflight will skip the hard requirement for `JUDGE_BASE_URL` (issuing only a warning log), the `judge_llm` fixture returns `None`, and all judge scoring logic is bypassed. This speeds up runs where you only care about deterministic/syntax checks.
+
+```bash
+# Example: Run tests without judge scoring
+pytest tests/ -v --judge false
 ```
 
 ### Running Tests

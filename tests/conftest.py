@@ -4,7 +4,7 @@ Session-scoped fixtures for the IZS test suite.
 
 Performs essential preflight checks before running tests:
   - MISTRAL_API_KEY is set (required for the agent)
-  - JUDGE_BASE_URL is set (optional for the judge)
+  - JUDGE_BASE_URL is set (required by default for the judge, unless --judge false)
   - FAISS index exists (required for RAG retrieval)
 
 Provides two complementary fixture paths:
@@ -14,18 +14,37 @@ Provides two complementary fixture paths:
 import os
 import sys
 from pathlib import Path
+import pytest
+from fastapi.testclient import TestClient
+from langgraph.store.memory import InMemoryStore
 
-# ──────────────────────────────────────────────────────────────
-# 1. Preflight checks
-# ──────────────────────────────────────────────────────────────
-def _preflight_checks():
-    """Fail fast with clear messages instead of cryptic 401s."""
-    errors = []
+from app.api import app
+from app.core.loader import data_loader
+from app.services.llm import get_llm, get_judge_llm
+from tests.report import report
 
-    # FAISS and Keys are validated via app.core.config side-effects mostly,
-    # but we do an explicit check here for the test environment.
-    from app.core.config import settings
+
+def _parse_bool(val: str) -> bool:
+    return str(val).lower() in ("true", "1", "yes", "y", "on")
+
+
+def pytest_addoption(parser):
+    parser.addoption(
+        "--judge",
+        action="store",
+        default="true",
+        help="Enable judge scoring (true/false, default true)"
+    )
+
+
+def pytest_configure(config):
+    """Run preflight checks after options are parsed."""
+    judge_enabled = _parse_bool(config.getoption("--judge"))
+    config.judge_enabled = judge_enabled
     
+    errors = []
+    from app.core.config import settings
+
     # --- MISTRAL_API_KEY (required — powers the agent) ---
     if not os.environ.get("MISTRAL_API_KEY"):
         errors.append(
@@ -33,12 +52,15 @@ def _preflight_checks():
             "  → Add it to .env or export it: export MISTRAL_API_KEY=your_key"
         )
 
-    # --- JUDGE_BASE_URL (required — powers the judge) ---
+    # --- JUDGE_BASE_URL (required by default) ---
     if not os.environ.get("JUDGE_BASE_URL"):
-        errors.append(
-            "JUDGE_BASE_URL is not set.\n"
-            "  → LLM judge is required for evaluation. Set it in .env or export it."
-        )
+        if judge_enabled:
+            errors.append(
+                "JUDGE_BASE_URL is not set.\n"
+                "  → LLM judge is required for evaluation. Set it in .env or export it, or use --judge false."
+            )
+        else:
+            print("WARNING: JUDGE_BASE_URL is not set. Judge is disabled (--judge false) so skipping.", file=sys.stderr)
 
     # --- FAISS index (required — RAG retrieval) ---
     faiss_path = Path(settings.FAISS_INDEX_PATH)
@@ -56,23 +78,13 @@ def _preflight_checks():
             print(f"\n  • {e}")
         print()
         sys.exit(1)
-    print("--- [TEST] preflight checks passed")
-
-
-_preflight_checks()
+        
+    print(f"--- [TEST] preflight checks passed (judge_enabled={judge_enabled})")
 
 
 # ──────────────────────────────────────────────────────────────
 # 2. Now safe to import the app and test utilities
 # ──────────────────────────────────────────────────────────────
-import pytest
-from fastapi.testclient import TestClient
-from langgraph.store.memory import InMemoryStore
-
-from app.api import app
-from app.core.loader import data_loader
-from app.services.llm import get_llm, get_judge_llm
-from tests.report import report
 
 
 # ──────────────────────────────────────────────────────────────
@@ -101,9 +113,10 @@ def llm():
 
 
 @pytest.fixture(scope="session")
-def judge_llm():
-    """Session-scoped judge LLM, or None if JUDGE_BASE_URL is missing."""
-    if not os.environ.get("JUDGE_BASE_URL"):
+def judge_llm(request):
+    """Session-scoped judge LLM, or None if judge is disabled or JUDGE_BASE_URL is missing."""
+    judge_enabled = getattr(request.config, "judge_enabled", True)
+    if not judge_enabled or not os.environ.get("JUDGE_BASE_URL"):
         return None
     return get_judge_llm(temperature=0.0)
 
