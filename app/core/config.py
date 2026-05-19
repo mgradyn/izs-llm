@@ -7,7 +7,7 @@ class Settings:
     DATA_DIR = os.path.join(BASE_DIR, "data")
 
     # Framework path (configurable via env var or .env)
-    FRAMEWORK_DIR = Path(os.getenv("NGSMANAGER_DIR", os.path.join(BASE_DIR, "..", "cohesive-ngsmanager-cli", "cohesive-ngsmanager"))).resolve()
+    FRAMEWORK_DIR = Path(os.getenv("NF_FRAMEWORK_DIR", os.path.join(BASE_DIR, "..", "cohesive-ngsmanager"))).resolve()
     
     # Files
     FAISS_INDEX_PATH = os.path.join(DATA_DIR, "faiss_index")

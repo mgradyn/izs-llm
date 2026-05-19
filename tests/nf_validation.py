@@ -11,19 +11,33 @@ If unset, validation is gracefully skipped.
 """
 import os
 import subprocess
+import uuid
 from pathlib import Path
 
 PROJECT_DIR = Path(__file__).parent.parent
-FRAMEWORK_DIR = Path(os.environ.get("NF_FRAMEWORK_DIR", PROJECT_DIR / "nf_framework"))
-E2E_PARAMS_CONFIG = FRAMEWORK_DIR / "conf" / "e2e_params.config"
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+FRAMEWORK_DIR = Path(os.environ.get("NF_FRAMEWORK_DIR", PROJECT_DIR.parent / "cohesive-ngsmanager"))
+NF_PARAMS_CONFIG = PROJECT_DIR / "tests" / "nf_params.config"
 
 from tests.error_patterns import parse_nextflow_output
 
+# def _format_parsed_errors(stdout: str, stderr: str) -> list[str]:
+#     parsed = parse_nextflow_output(stdout, stderr)
+#     if not parsed["fatal_errors"]:
+#         return []
+#     return [f"{e.get('label')}: {e.get('raw', '')}" for e in parsed["fatal_errors"]]
+
 def _format_parsed_errors(stdout: str, stderr: str) -> list[str]:
     parsed = parse_nextflow_output(stdout, stderr)
-    if not parsed["fatal_errors"]:
-        return []
-    return [f"{e.get('label')}: {e.get('raw', '')}" for e in parsed["fatal_errors"]]
+
+    if parsed["fatal_errors"]:
+        return [f"{e['label']}: {e['raw']}" for e in parsed["fatal_errors"]]
+
+    # fallback to unmatched errors
+    if parsed["unmatched_errors"]:
+        return parsed["unmatched_errors"]
+
+    return []
 
 def check_syntax(code: str) -> dict:
     """
@@ -39,15 +53,15 @@ def check_syntax(code: str) -> dict:
         }
 
     test_dir = FRAMEWORK_DIR / "pipelines"
-    test_file = test_dir / "_llm_test_pipeline.nf"
+    test_file = test_dir / f"_llm_test_pipeline_{uuid.uuid4().hex}.nf"
 
     try:
         test_dir.mkdir(parents=True, exist_ok=True)
         test_file.write_text(code)
 
         args = ["nextflow", "run", str(test_file), "-preview"]
-        if E2E_PARAMS_CONFIG.exists():
-            args += ["-c", str(E2E_PARAMS_CONFIG)]
+        if NF_PARAMS_CONFIG.exists():
+            args += ["-c", str(NF_PARAMS_CONFIG)]
 
         result = subprocess.run(
             args,
@@ -89,7 +103,7 @@ def check_stub(code: str) -> dict:
         }
 
     test_dir = FRAMEWORK_DIR / "pipelines"
-    test_file = test_dir / "_llm_test_pipeline.nf"
+    test_file = test_dir / f"_llm_test_pipeline_{uuid.uuid4().hex}.nf"
     work_dir = FRAMEWORK_DIR / "_llm_test_work"
 
     try:
