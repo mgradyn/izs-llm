@@ -1,24 +1,26 @@
-# Evaluation schemas, judge prompts, and runner functions.
+# Pairwise comparison evaluation engine.
 #
 # Clean imports:
-#   from tests.evaluation.schemas import AcademicEval, ArchitectEval, DiagramEval
-#   from tests.evaluation.prompts import CONSULTANT_TEST_PROMPT, JUDGE_PROMPT, ...
-#   from tests.evaluation.judge   import judge_consultant, judge_pipeline, ...
+#   from tests.evaluation.schemas import PairwiseResult, BenchmarkResult, ...
+#   from tests.evaluation.pairwise import PairwiseEvaluator
+#   from tests.evaluation.elo import Glicko2Tracker, Glicko2Rating
+#   from tests.evaluation.dimensions import DIMENSIONS, DIMENSION_MAP, ...
+#   from tests.evaluation.prompts import PAIRWISE_PROMPTS, ...
 
+from tests.evaluation.dimensions import (
+    DIMENSION_MAP,
+    DIMENSIONS,
+    SUMMARY_DIMENSIONS,
+    get_dimensions_for_test_type,
+    get_summary_for_dimensions,
+)
+from tests.evaluation.elo import Glicko2Rating, Glicko2Tracker
+from tests.evaluation.pairwise import PairwiseEvaluator
 from tests.evaluation.schemas import (
-    AcademicEval,
-    ArchitectEval,
-    DiagramEval,
-    RejectionEval,
-    CodeRecreationEval,
+    BenchmarkResult,
+    DeterministicChecks,
+    GroundTruthVerdict,
+    MultiTurnResult,
+    PairwiseResult,
+    PairwiseVerdict,
 )
-
-from tests.evaluation.prompts import (
-    CONSULTANT_TEST_PROMPT,
-    JUDGE_PROMPT,
-    PIPELINE_JUDGE_PROMPT,
-    DIAGRAM_JUDGE_PROMPT,
-    REJECTION_JUDGE_PROMPT,
-    CODE_RECREATION_JUDGE_PROMPT,
-)
-

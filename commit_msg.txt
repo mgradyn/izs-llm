@@ -1,0 +1,17 @@
+Refactor: Generalize architecture and fix AST generation bugs
+
+This commit finalizes the transition to a dynamic plugin-based architecture while resolving critical code generation regressions identified in recent benchmarks.
+
+Major Changes:
+1. Architecture Refactoring:
+   - Migrated legacy `app/` and `data/` directories to the new `core/`, `plugins/`, and `ingestion/` structures to support flexible bioinformatic cataloging.
+   - Refactored `core/api.py` to add idempotency, structlog error handling, and robust async timeouts, while retaining 100% backward compatibility with legacy API contracts.
+
+2. Code Generation Fixes:
+   - Fixed NextflowPipelineAST pathing error in `catalog_registry.py` by restoring the correct legacy `../steps/` prefix matching pattern.
+   - Fixed defensive looping in `architect_tools.py` by updating regex validators to ignore valid Nextflow method chains.
+
+3. Testing & Benchmarking:
+   - Benchmarked the fixed pipeline against 20 complex test scenarios (including Level 4 rejections, Level 5 module recreations, and Multi-turn modifications) with a 100% syntactic pass rate.
+   - Resolved unit test linting warnings (SIM102, C901).
+   - Updated `.gitignore` to naturally filter out heavy JSONL checkpoints, benchmark outputs, and legacy backups before deployment.

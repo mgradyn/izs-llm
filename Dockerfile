@@ -35,4 +35,4 @@ RUN chgrp -R 0 /app && \
 
 # 7. Start the Server
 # We use the PORT environment variable which orchestrators often set automatically
-CMD ["sh", "-c", "uvicorn app.api:app --host 0.0.0.0 --port 8080"]
+CMD ["sh", "-c", "uvicorn core.api:app --host 0.0.0.0 --port 8080"]

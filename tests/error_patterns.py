@@ -527,7 +527,7 @@ def parse_nextflow_output(stdout: str, stderr: str) -> dict:
                     "label": ep["label"],
                     "is_fatal": ep["is_fatal"],
                     "raw": line[:400],
-                    "captures": dict(zip(ep["groups"], m.groups())),
+                    "captures": dict(zip(ep["groups"], m.groups(), strict=False)),
                 }
                 if ep["is_fatal"]:
                     fatal_errors.append(entry)

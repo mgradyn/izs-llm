@@ -1,385 +1,325 @@
-# Nextflow AI Agent API (izs-llm) - Comprehensive Documentation
+# Nextflow AI Agent API (izs-llm) - Domain-Agnostic Architectural Specification
 
-Welcome to the IZS Nextflow AI Agent API (izs-llm). This repository hosts a FastAPI and LangGraph powered system that consults, plans, and generates Nextflow DSL2 pipelines, including deterministic and agentic Mermaid diagrams. This document is the per-folder, per-file guide for engineers and scientists continuing development.
+> [!CAUTION]
+> **System Scope:** This is the master documentation for the `izs-llm` framework. It is a **domain-agnostic** hybrid system integrating **FastAPI**, **LangGraph**, **Pydantic Guardrails**, **Advanced LLMs**, and **Pluggable Vector Semantics (ChromaDB / FAISS)**. Configured by default via plugins, the core engine itself is a pure Nextflow DSL2 pipeline architect capable of serving any domain.
+> 
+> *Warning:* The logic contained within is strictly deterministic where necessary (syntax generation) and highly probabilistic where allowed (planning). Proceed with extreme caution when modifying core state managers.
 
 ---
 
-## System Architecture
+## 1. System Master Ontology & Top-Level Architecture
 
-### End-to-End Request Flow
+The izs-llm ecosystem is fundamentally a two-stage autonomous agent composed of a **Planner Subgraph** (the Consultant) and an **Execution Subgraph** (the Architect). It acts as a domain-agnostic abstraction layer between natural language intent and highly technical, hardware-bound execution environments (Nextflow DSL2).
+
+### 1.1 The Tri-State Event Horizon (End-to-End Flow)
+
+This sequence maps the absolute lifecycle of a single user request, detailing the micro-interactions between the web server, the vector storage engines, and the LLM execution graphs.
 
 ```mermaid
 sequenceDiagram
-    participant User
-    participant FastAPI as app/api.py
-    participant Core as app/core/loader.py
-    participant Graph as app/services/graph.py
-
-    Note over FastAPI,Core: Lifespan Startup
-    FastAPI->>Core: data_loader.load_all(store=global_store)
-    Core-->>FastAPI: code_db + catalogs + FAISS loaded
-
-    Note over User,Graph: Request
-    User->>FastAPI: POST /chat (session_id, message, generate_diagrams)
-    FastAPI->>Graph: app_graph.ainvoke(state, thread_id)
-    Graph-->>FastAPI: GraphState (status, reply, ast, code, diagrams)
-    FastAPI-->>User: ChatResponse JSON
-```
-
-### Planner and Executor Graph
-
-```mermaid
-flowchart LR
-    API[FastAPI /chat] --> Planner
-    Planner -->|CHATTING| Reply([Return Reply])
-    Planner -->|APPROVED| Executor
-    Executor --> Done([Return Code + Diagrams])
-
-    subgraph Planner[Planner Subgraph]
-        CNode[consultant_node]
-        CTools[ToolNode: CONSULTANT_TOOLS]
-        Sanitize[sanitize_orphaned_tool_calls]
-        Extract[consultant_extract_node]
-        Compact[compact_memory_node]
-        CNode -->|tool_calls| CTools --> CNode
-        CNode -->|no tool_calls| Sanitize --> Extract --> Compact
+    autonumber
+    actor User as User (e.g., Domain Expert)
+    participant Uvicorn as API Gateway (Uvicorn/FastAPI)
+    participant DataLoader as Core Hydrator (core/loader.py)
+    participant State as LangGraph InMemoryStore
+    participant FAISS as Semantic Index (Vector DB)
+    participant Agent as LangGraph Orchestrator (app_graph)
+    
+    %% Boot Phase
+    rect rgb(20, 20, 40)
+    Note right of Uvicorn: [LIFESPAN BOOT] Application Startup Phase
+    Uvicorn->>DataLoader: lifespan(): trigger data_loader.load_all()
+    DataLoader->>FAISS: Hydrate embeddings into Vector DB Client
+    DataLoader->>State: Cache JSON catalogs (code_db, comp_db, tmpl_db)
+    State-->>Uvicorn: Subsystems Online & Ready
     end
 
-    subgraph Executor[Execution Subgraph]
-        Hydrate[hydrator_node]
-        Precheck[architect_precheck_node]
-        Gen[architect_generate_node]
-        Repair[repair_node]
-        Reason[architect_reason_node]
-        ATools[ToolNode: ARCHITECT_TOOLS]
-        Render[renderer_node]
-        DetDiag[deterministic_diagram_node]
-        AgentDiag[diagram_node]
-        Hydrate --> Precheck --> Gen
-        Gen -->|valid| Render --> DetDiag --> AgentDiag
-        Gen -->|invalid| Repair --> Reason
-        Reason -->|tool_calls| ATools --> Reason
-        Reason -->|no tool_calls| Gen
+    %% Request Phase
+    rect rgb(20, 40, 20)
+    Note right of Uvicorn: [RUNTIME] Request & Semantic Routing
+    User->>Uvicorn: POST /chat {session_id, message, generate_diagrams}
+    Uvicorn->>Agent: app_graph.ainvoke(state, config.thread_id)
+    
+    %% Graph Phase - Planner
+    Note over Agent: PHASE 1: Consultant Subgraph (Planning)
+    Agent->>FAISS: query: Hybrid semantic search on user_message
+    FAISS-->>Agent: return: top-K context blocks & template blueprints
+    Agent->>Agent: LLM: Generate draft_plan & status
+    
+    alt Status == CHATTING
+        Agent-->>Uvicorn: return ChatResponse {reply: "Needs more info"}
+        Uvicorn-->>User: JSON Response
+    else Status == APPROVED
+        %% Graph Phase - Executor
+        Note over Agent: PHASE 2: Execution Subgraph (Generation)
+        Agent->>Agent: hydrator_node: Assemble technical context
+        Agent->>Agent: architect_generate_node: Enforce Pydantic constraints
+        Agent->>Agent: deterministic_diagram_node: AST -> Mermaid
+        Agent->>Agent: renderer_node: AST -> Jinja2 -> DSL2
+        Agent-->>Uvicorn: return ChatResponse {code, AST, diagrams}
+        Uvicorn-->>User: Final Nextflow Pipeline Payload
+    end
     end
 ```
 
-### Data Loading Flow
+---
+
+## 2. The Agentic State Machine: Subgraph Mechanics
+
+The core intelligence of izs-llm is routed through a LangGraph state machine. This is not a linear chain; it is a cyclic, self-repairing graph capable of tool usage, fallback reasoning, and semantic auto-correction.
+
+### 2.1 The Master Graph Routing Matrix
 
 ```mermaid
-flowchart TD
-    Config[core/config.py Settings] --> Loader[core/loader.py DataLoader]
-    Loader -->|code_store_hollow.jsonl| CodeDB[(code_db)]
-    Loader -->|catalog_part1_components.json| CompDB[(comp_db)]
-    Loader -->|catalog_part2_templates.json| TmplDB[(tmpl_db)]
-    Loader -->|catalog_part3_resources.json| ResDB[(res_list + containers)]
-    Loader -->|FAISS_INDEX_PATH| FAISS[(FAISS)]
-    Loader --> Store[(LangGraph InMemoryStore)]
+stateDiagram-v2
+    direction TB
+    
+    %% Global Entry
+    [*] --> FastAPI_Entry
+    
+    state FastAPI_Entry {
+        direction LR
+        POST_chat --> Graph_ainvoke
+    }
+    
+    FastAPI_Entry --> Planner_Subgraph
+    
+    state Planner_Subgraph {
+        direction TB
+        CNode(consultant_node): Consult LLM
+        CTools(ToolNode): Catalog & Vector DB
+        Sanitize(sanitize_orphaned_tool_calls): Memory Guard
+        Extract(consultant_extract_node): Struct Output
+        Compact(compact_memory_node): History Pruning
+        
+        CNode --> CTools : yield tool_calls
+        CTools --> CNode : return results
+        CNode --> Sanitize : final string
+        Sanitize --> Extract
+        Extract --> Compact
+    }
+    
+    Planner_Subgraph --> Check_Status
+    
+    state Check_Status <<choice>>
+    Check_Status --> Return_Chatting : [CHATTING]
+    Check_Status --> Executor_Subgraph : [APPROVED]
+    
+    Return_Chatting --> [*]
+    
+    state Executor_Subgraph {
+        direction TB
+        Hydrator(hydrator_node): Build technical context
+        Precheck(architect_precheck_node): Channel math verification
+        Gen(architect_generate_node): Pydantic AST JSON Gen
+        Repair(repair_node): Construct retry prompt
+        Reason(architect_reason_node): Reasoning via Arch Tools
+        ATools(Architect_Tools): Component Lookup
+        Render(renderer_node): Jinja2 Templating
+        DetDiag(deterministic_diagram_node): AST parsing
+        AgentDiag(diagram_node): Probabilistic visualization
+        
+        Hydrator --> Precheck
+        Precheck --> Gen
+        Gen --> Validate <<choice>>
+        Validate --> Render : [Valid AST]
+        Validate --> Repair : [Validation Error]
+        
+        Repair --> Reason
+        Reason --> ATools : yield tool_calls
+        ATools --> Reason : return results
+        Reason --> Gen : attempt generation
+        
+        Render --> DetDiag
+        DetDiag --> AgentDiag
+    }
+    
+    Executor_Subgraph --> [*] : Return Full Payload
 ```
 
-### Diagram Generation Paths
+---
+
+## 3. Epistemic Architecture (Knowledge Engineering)
+
+The AI engine is **completely domain and tool agnostic**. While configured via plugins, the core python framework knows nothing inherently about specific domain software. It is entirely bounded by the data catalogs in the active plugin's `data/` directory. This prevents hallucinated parameters or fabricated algorithms, allowing developers to plug in *any* command-line tool dynamically.
+
+### 3.1 Entity Relationship Diagram of the Hive Mind
+
+```mermaid
+erDiagram
+    %% Core Stores
+    CODE_STORE {
+        string component_id PK
+        string raw_groovy_code "Physical Nextflow Implementation"
+    }
+    VECTOR_DB_INDEX {
+        vector embeddings "768-dim Semantic Space"
+        string metadata_pointer FK
+    }
+    
+    %% Catalog Part 1
+    COMPONENT_CATALOG {
+        string component_id PK
+        string readable_name
+        string sequence_format "e.g. FASTQ, FASTA"
+        array take_channels "Input bindings"
+        array emit_channels "Output bindings"
+    }
+    
+    %% Catalog Part 2
+    TEMPLATE_CATALOG {
+        string template_id PK
+        string domain_purpose
+        string routing_strategy "EXACT_MATCH, ADAPTED_MATCH"
+        array logic_flow "Ordered list of component_ids"
+    }
+    
+    %% Catalog Part 3
+    RESOURCE_CATALOG {
+        string resource_id PK
+        string usage_syntax "How to invoke the helper"
+        string purpose
+    }
+    
+    %% Relations
+    CODE_STORE ||--|| COMPONENT_CATALOG : "Manifests"
+    CODE_STORE ||--|| TEMPLATE_CATALOG : "Defines Flow For"
+    VECTOR_DB_INDEX }o--|| COMPONENT_CATALOG : "Retrieves"
+    VECTOR_DB_INDEX }o--|| TEMPLATE_CATALOG : "Retrieves"
+    TEMPLATE_CATALOG }o--|{ COMPONENT_CATALOG : "Composed Of"
+    COMPONENT_CATALOG }o--o{ RESOURCE_CATALOG : "Requires Helper"
+```
+
+---
+
+## 4. System Agnosticism & Modularity
+
+The izs-llm architecture is engineered with extreme modularity, isolating the cognitive engine from domain-specific data and underlying LLM providers. 
+
+### 4.1 LLM Provider Agnosticism
+The application is entirely agnostic to the underlying AI model. 
+- **Code Mapping:** Managed centrally via `core/services/llm.py`. The `get_llm()` factory pattern uses LangChain to dynamically bind standard API interfaces (OpenAI, Anthropic, Google, Local) based on the `LLM_PROVIDER` environment variable. 
+- **Developer Impact:** You can swap reasoning engines by altering `.env` without changing a single line of logic inside the LangGraph nodes.
+
+### 4.2 Domain Data Modularity (The Plugin System)
+The agent possesses *no inherent knowledge* of specific scientific disciplines, domain logic, or specific Nextflow parameters. It is a pure logic engine.
+- **Code Mapping:** Managed by `core/plugin_loader.py` and hydrated by `core/loader.py`. The active plugin (defined via `NF_AGENT_PLUGIN`) dictates the paths to component catalogs, prompt overlays, and vector indices (ChromaDB / FAISS). 
+- **Developer Impact:** To adapt the agent for a completely different domain (e.g., computational chemistry, financial data processing, or MLOps), you only need to swap the active plugin directory. No Python code edits in `core/` are required.
+
+### 4.3 Execution Graph Modularity
+The "thought process" is not a massive monolithic prompt, but a highly isolated state machine.
+- **Code Mapping:** Defined in `core/services/graph.py` and populated by `core/services/agents.py`.
+- **Developer Impact:** The Consultant (Planner) and Architect (Executor) run in separate, isolated loops. This allows developers to easily inject deterministic Python validations (like `architect_precheck_node`) directly between the AI's planning phase and its generation phase.
+
+---
+
+## 5. Architectural Novelties (Scientific Publication Highlights)
+
+The system was heavily overhauled to address the common failures of generic multi-agent architectures (e.g., "Small-LLM reasoning collapse", "Context window exhaustion", and endless tool loops). The following novel features represent the core technical contributions of the framework:
+
+### 5.1 Lossless Tool-Trajectory Compaction
+- **The Problem:** ReAct-style LLMs rapidly exhaust their context window when repeatedly querying Vector Databases, leading to "attention collapse" where they forget the user's original goal.
+- **The Solution:** The `compact_memory_node` implements a surgical memory pruning algorithm. It extracts the concrete semantic facts from a tool's output, caches them in a structured `tool_memory` buffer, and completely deletes the raw tool call tokens from the chat history. The LLM retains the "knowledge" without the token bloat.
+
+### 5.2 Deterministic Approval Short-Circuiting
+- **The Problem:** LLMs struggle to decisively end planning loops, often hallucinating final tool calls just to say "I'm done."
+- **The Solution:** The `consultant_node` bypasses the LLM for terminal routing. It uses an internal `_detect_approval` heuristic alongside structured output (`strict=True`) to forcibly sever the planning loop and route directly to the Execution Subgraph the moment human intent is satisfied.
+
+### 5.3 Pydantic AST Enforcement
+- **The Problem:** LLMs cannot reliably write valid Nextflow DSL2, especially concerning channel math and variable state tracking.
+- **The Solution:** The `architect_generate_node` does not write code. It writes a strict Abstract Syntax Tree (AST) as a JSON object. This JSON is intercepted by deep Pydantic validators (`core/models/ast_structure.py`) that perform deterministic channel verification before passing it to the Jinja2 rendering engine.
+
+### 5.4 Pairwise Glicko-2 Evaluation (Topo@k)
+- **The Problem:** Traditional Pass@k metrics fail for multi-agent reasoning, and Likert-scale LLM Judges suffer from high variance.
+- **The Solution:** The test harness (`tests/`) implements an advanced Pairwise A/B comparison with position-bias control and Chain-of-Thought reasoning. Models are evaluated using Glicko-2 ratings to mathematically prove architectural improvements.
+
+---
+
+## 6. Multi-Modal Diagram Generation Matrix
+
+The system provides two distinct ways of perceiving the generated pipeline, addressing both engineering precision and human readability.
 
 ```mermaid
 flowchart LR
-    AST[AST JSON] --> Det[render_mermaid_from_ast]
-    Code[Nextflow Code] --> Agent[diagram_node LLM]
-    Det --> MermaidDet[mermaid_deterministic]
-    Agent --> MermaidAgent[mermaid_agent]
+    subgraph Data Sources
+        AST[Strict AST JSON Object]
+        Code[Raw Nextflow DSL2 Code]
+    end
+    
+    subgraph Transformation Engines
+        Engine1[Deterministic Engine\n(Python/AST parser)]
+        Engine2[Probabilistic Engine\n(LLM)]
+    end
+    
+    subgraph Outputs
+        Out1{{Mermaid.js Flowchart}}:::deterministic
+        Out2{{Mermaid.js Flowchart}}:::probabilistic
+    end
+    
+    AST --> Engine1
+    Engine1 -->|render_mermaid_from_ast| Out1
+    
+    Code --> Engine2
+    Engine2 -->|diagram_node| Out2
+    
+    classDef deterministic fill:#1e3d59,stroke:#fff,stroke-width:2px,color:#fff
+    classDef probabilistic fill:#ff6e40,stroke:#fff,stroke-width:2px,color:#fff
 ```
 
----
-
-## Repository Index (Tests Ignored)
-
-### Root Directory
-
-| File / Folder      | Purpose / Description                                                                                |
-| ------------------ | ---------------------------------------------------------------------------------------------------- |
-| main.py            | Uvicorn entrypoint. Reads PORT and launches FastAPI app from app.api.                                |
-| Dockerfile         | Container image definition. Python 3.12-slim with safe filesystem permissions and HF cache settings. |
-| docker-compose.yml | Local orchestration. Runs api plus caddy reverse proxy.                                              |
-| Caddyfile          | Caddy reverse-proxy configuration.                                                                   |
-| requirements.txt   | Python dependencies (FastAPI, LangGraph, LangChain, FAISS, Pydantic, etc.).                          |
-| langgraph.json     | Graph pointer for LangGraph Studio/CLI.                                                              |
-| app/               | Core application and graph logic.                                                                    |
-| data/              | Catalogs, code store, and FAISS index used for RAG and validation.                                   |
-| scripts/           | Utility scripts (local usage).                                                                       |
+### The Dichotomy of Visualization
+1. **Deterministic Diagram**: Created directly from the validated Abstract Syntax Tree. It is mathematically exact, rendering every node and edge identically to how the Jinja2 template renders the code. It is immune to hallucination.
+2. **Agentic Diagram**: The LLM reads the final compiled code and attempts to draw it. This often summarizes complex logic into more human-readable "macro" steps, but is subject to probabilistic interpretation.
 
 ---
 
-## app/ Directory (Core Application)
+## 7. Repository Matrix & Master Index
 
-### app/api.py
+| Directory / File | Core Responsibility | Engineering Designation |
+| :--- | :--- | :--- |
+| `main.py` | API Entrypoint | Instantiates Uvicorn ASGI server and triggers Lifespan hooks. |
+| `core/` | **[ACTIVE] System Brain** | The modernized logic layer. Contains all graph nodes, tools, and strict validation schemas. |
+| `core/api.py` | HTTP Routing | Exposes `/chat` and `/health`, maps Pydantic request models to LangGraph inputs. |
+| `core/loader.py` | Data Hydration | Singleton manager for reading `.jsonl` and `.json` catalogs into memory matrices. |
+| `core/models/` | Immune System | Pydantic classes defending against LLM syntax hallucinations. The ultimate source of truth. |
+| `core/services/`| Cognitive Engines | The actual LangGraph nodes (`graph.py`, `agents.py`, `tools.py`). |
+| `core/utils/` | Code Synthesizers | Pure algorithms (Jinja2) for rewriting abstract states into physical text. |
+| `data/` | Semantic Memory Base | The physical `.nf` snippets, RAG indexes, and catalog JSONs. |
+| `tests/` | QA & Benchmarking | Exhaustive test suite simulating hundreds of domain-specific use cases and failure scenarios. |
+| `_app_legacy/` | **[DEPRECATED] Vault**| Old application structures preserved for historical context. **DO NOT USE.** |
+| `Dockerfile` | Container Architecture| Defines the multi-stage build for scalable, stateless API deployments. |
 
-Defines the FastAPI app, request/response schemas, and HTTP endpoints.
-
-Functions and Classes:
-
-- ChatRequest: request model for /chat.
-  - session_id, message, generate_diagrams.
-- ChatResponse: response model for /chat.
-  - status, reply, nextflow_code, mermaid_agent, mermaid_deterministic, ast_json, error.
-- lifespan(app): startup hook; loads data_loader into global_store.
-- health_check(): returns online status and vector store load status.
-- chat_with_agent(request): invokes app_graph with thread_id and returns ChatResponse.
-
-### app/core/config.py
-
-Settings for paths, models, and tuning.
-
-Key fields:
-
-- BASE_DIR, DATA_DIR, FRAMEWORK_DIR (overridable by NGSMANAGER_DIR).
-- FAISS_INDEX_PATH, CODE_STORE, CATALOG_COMPONENTS, CATALOG_TEMPLATES, CATALOG_RESOURCES.
-- EMBEDDING_MODEL, LLM_MODEL.
-- RAG thresholds and limits (keyword scan, FAISS k, L2 margins).
-- Graph limits (MAX_TOOL_ITERATIONS, MAX_ARCHITECT_TOOL_ITERATIONS, MAX_REPAIR_RETRIES, MAX_DIAGRAM_RETRIES).
-- Memory and truncation settings (MEMORY_KEEP_LAST_N, MAX_TOOL_RESULT_PREVIEW, MAX_CODE_DISPLAY_LENGTH).
-
-### app/core/loader.py
-
-DataLoader singleton that hydrates catalog data and FAISS index.
-
-Functions:
-
-- load_all(store=None): loads lookups and vector store, prints progress.
-- \_load_lookups(store=None): loads code_db, comp_db, tmpl_db, res_list, containers_list and mirrors into store if provided.
-- \_build_usage_index(store): builds reverse index component_id -> templates with usage snippets.
-- \_extract_usage_snippet(template_code, component_id): extracts call-site context for a component.
-- \_load_vector_store(): initializes HuggingFaceEmbeddings and loads FAISS.
+> [!TIP]
+> **Developer Navigation Protocol**:
+> If you are adding a new domain tool: Update `data/catalog/` and `data/code_store_hollow.jsonl`.
+> If the LLM is making syntax mistakes: Update `core/models/ast_structure.py`.
+> If you are changing the pipeline building steps: Update `core/services/graph.py` and `agents.py`.
 
 ---
 
-## app/models/ Directory (Guardrails)
-
-### app/models/consultant_structure.py
-
-ConsultantOutput schema for the planner.
-
-Functions and Validators:
-
-- ConsultantOutput: response_to_user, status, draft_plan, strategy_selector, used_template_id, selected_module_ids.
-- prevent_null_list: normalizes null lists to empty lists.
-
-### app/models/diagram_structure.py
-
-DiagramData schema for agentic diagrams.
-
-Functions and Validators:
-
-- Node: id, label, shape, subgraph.
-  - validate_id, sanitize_label, validate_subgraph.
-- Edge: source, target, label.
-  - sanitize_edge_label.
-- DiagramData: nodes, edges.
-  - validate_graph_integrity.
-
-### app/models/ast_structure.py
-
-Nextflow AST schema and strict validators.
-
-Core classes:
-
-- ImportItem, GlobalDef, InlineProcess, WorkflowBlock, Entrypoint, NextflowPipelineAST.
-
-Helper functions:
-
-- \_is_void_tool(name): detects void tools by suffix or exact name.
-- \_is_void_reference(text): detects references to void tools in emits.
-
-Key validators:
-
-- ImportItem: validate_aliases, forbid_nf_core, auto_fix_module_paths.
-- GlobalDef: forbid_active_channels.
-- InlineProcess: validate_no_dsl, validate_name.
-- WorkflowBlock: rescue_and_heal_body, validate_emit_format, validate_emit_identifiers, forbid_void_emits,
-  enforce_take_channel_usage, forbid_recursion, enforce_strict_data_shaping, enforce_variable_existence,
-  enforce_host_depletion_shape, forbid_set_on_processes, enforce_reference_slice, forbid_void_tool_assignment,
-  forbid_active_channels_in_subworkflows.
-- Entrypoint: auto_heal_entrypoint.
-- NextflowPipelineAST: auto_relocate_active_globals, auto_generate_imports,
-  enforce_framework_components, enforce_workflow_usage.
-
----
-
-## app/services/ Directory (Agents, Tools, Graph Wiring)
-
-### app/services/graph_state.py
-
-GraphState TypedDict with all fields exchanged across nodes.
-
-Key fields:
-
-- Planner state: consultant_status, design_plan, tool_memory, tool_call_count.
-- Routing state: strategy_selector, used_template_id, selected_module_ids, technical_context.
-- Executor outputs: ast_json, nextflow_code, mermaid_agent, mermaid_deterministic.
-- Errors: error, validation_error, retries.
-- messages: uses add_messages reducer.
-
-### app/services/graph.py
-
-Graph wiring for planner and executor.
-
-Functions:
-
-- sanitize_orphaned_tool_calls(state): injects stub ToolMessages for orphaned tool calls.
-- check_consultant_status(state): returns approved or chatting.
-- check_diagram_generation(state): decides diagram branch.
-- compact_memory_node(state): extracts tool facts and trims tool loop history.
-- build_consultant_subgraph(): tool loop, sanitize, extract, compact.
-- build_execution_subgraph(): hydrator, precheck, generate, repair loop, render, diagrams.
-- build_graph(): combines subgraphs with InMemorySaver and InMemoryStore.
-- route_consultant(state): internal router for tool iteration caps and approval gating.
-- route_architect_reason(state): internal router for architect tool iterations.
-
-### app/services/agents.py
-
-Node implementations for planner and executor.
-
-Support functions:
-
-- \_sanitize_messages_for_api(messages): ensures tool_call / tool_result parity, removes stale architect tool calls.
-- filter_template_logic(code, allowed_components): comments out template steps not in plan.
-
-Planner nodes:
-
-- consultant_node(state, store): uses tool-bound LLM, prompts from prompt_loader, sanitizes history.
-- consultant_extract_node(state, store): extracts ConsultantOutput, validates IDs via store, updates state.
-
-Executor nodes:
-
-- hydrator_node(state, store): assembles technical_context from template/code store and usage snippets.
-- architect_precheck_node(state, store): deterministic channel checks and void tool warnings.
-- architect_reason_node(state, store): tool-assisted reasoning for repair attempts.
-- architect_generate_node(state): structured output to NextflowPipelineAST with error recovery.
-- deterministic_diagram_node(state): AST -> Mermaid via render_mermaid_from_ast.
-- diagram_node(state): LLM Mermaid graph from Nextflow code with retry loop.
-
-### app/services/consultant_tools.py
-
-Tools for planning and ID verification.
-
-Tools:
-
-- verify_component_id(component_id): validates IDs and returns metadata.
-- search_components(query): hybrid keyword + FAISS search.
-- get_template_logic(template_id): returns template metadata and code snippet.
-- get_component_code(component_id): returns component metadata and code snippet.
-- check_channel_compatibility(source_component_id, target_component_id): compares emit/take channels with fuzzy matching.
-- check_plan_logic(component_ids, template_id): validates IDs, channel flow, and template coverage.
-- find_component_usage(component_id): reverse lookup to show usage snippets.
-
-Helpers:
-
-- \_parse_nextflow_channels(code): parse take/emit blocks.
-- \_parse_include_statements(code): parse include { ... } from lines.
-
-### app/services/architect_tools.py
-
-Tools used in architect repair reasoning.
-
-Tools:
-
-- lookup_component_code(component_id): returns code and parsed take/emit channels.
-- verify_channel_connection(source_id, target_id): checks channel compatibility.
-- validate_body_code(code_snippet, workflow_name): deterministic validation of body_code.
-
-### app/services/renderer.py
-
-Code rendering and deterministic diagrams.
-
-Functions:
-
-- render_nextflow_code(ast): renders AST using Jinja2 template.
-- renderer_node(state): outputs nextflow_code, warns on persistent validation errors.
-- render_mermaid_from_json(data): Mermaid rendering from DiagramData.
-- render_mermaid_from_ast(ast_json): deterministic Mermaid rendering from AST.
-
-### app/services/repair.py
-
-Repair loop control.
-
-Functions:
-
-- repair_node(state): injects repair instruction with validation error.
-- should_repair(state): routes to repair or fail based on retries.
-
-### app/services/llm.py
-
-LLM factory and rate limit helpers.
-
-Functions:
-
-- get_llm(): builds ChatMistralAI with settings and MISTRAL_API_KEY.
-- get_judge_llm(temperature=0.0): ChatOpenAI for evaluation.
-- rate_limit_pause(seconds=20): delay helper.
-- with_rate_limit_retry(max_attempts=3, delay_seconds=25): retry decorator for 429 errors.
-
-### app/services/prompt_loader.py
-
-Prompt loading and caching.
-
-Functions:
-
-- \_escape_braces(text): escapes braces for prompt templates.
-- \_load_file(path, escape=True): loads prompt files with optional escaping.
-- load_tool_whitelist(): loads tool whitelist and formats it for prompts.
-- load_consultant_prompt(): builds the consultant prompt.
-- \_generate_tool_tables(): builds void tool list and emitting table from catalog.
-- load_architect_prompt(): loads architect prompt and injects tables.
-- load_diagram_prompt(): loads diagram prompt.
-- reload_prompts(): clears caches.
-
-### app/services/query_normalizer.py
-
-Query normalization and intent detection.
-
-Functions:
-
-- normalize_query(user_query): replaces phrases, tokenizes, expands synonyms.
-- is_discovery_query(clean_query): detects broad catalog exploration queries.
-- build_semantic_query(clean_query, query_tokens): produces semantic search string.
-- \_expand_tokens(base_tokens): adds stem and suffix variants.
-- \_expand_synonyms(query_tokens): expands domain synonym sets.
-
-### app/services/tools.py
-
-Hybrid retrieval and context assembly.
-
-Functions:
-
-- retrieve_rag_context(user_query, store, embed_code=False): constructs context from catalogs, code store, resources, and FAISS.
-- \_inject_component(comp_id, found_ids, context_blocks, store, embed_code=True): injects component metadata and code.
-- \_inject_template(template_id, found_ids, context_blocks, store, embed_code=True): injects template metadata and code.
-
----
-
-## app/utils/ Directory
-
-### app/utils/rendering.py
-
-Jinja2 template for rendering DSL2 output.
-
-Key object:
-
-- NF_TEMPLATE_AST: the template for imports, globals, inline processes, subworkflows, and entrypoint.
-
----
-
-## data/ Directory (RAG Knowledge Base)
-
-- faiss_index/: vector embeddings for semantic retrieval.
-- code_store_hollow.jsonl: code store keyed by component/template IDs.
-- catalog/:
-  - catalog_part1_components.json: component metadata.
-  - catalog_part2_templates.json: pipeline template metadata.
-  - catalog_part3_resources.json: helper functions and containers.
-
----
-
-## Usage Flow (Example)
-
-1. User sends a message to /chat.
-2. Planner runs: consultant_node -> tools loop -> consultant_extract_node.
-3. If APPROVED, execution runs: hydrator -> precheck -> architect_generate -> render.
-4. Diagrams are generated if generate_diagrams is true.
-5. Response includes status, reply, code, and diagrams.
+## 8. Development & Deployment Procedures
+
+### 8.1 Local Iteration
+```bash
+# 1. Establish virtual environment
+python -m venv venv && source venv/bin/activate
+pip install -r requirements.txt
+
+# 2. Inject Secrets
+export OPENAI_API_KEY="your_key"
+export JUDGE_BASE_URL="optional_for_testing"
+
+# 3. Ignite Core
+uvicorn main:app --reload --port 8000
+```
+
+### 8.2 Docker Orchestration
+```bash
+# Build the secure, slim runtime image
+docker build -t izs-llm:latest .
+
+# Deploy via Docker Compose (includes Caddy Reverse Proxy for edge routing)
+docker-compose up -d
+```
+
+### 8.3 Graph Introspection (LangGraph Studio)
+The repository includes a `langgraph.json` configuration file. You can attach LangGraph Studio directly to this repository to visually step through the `app_graph` execution matrix, inspect message histories, and rewind failed tool calls in real time.

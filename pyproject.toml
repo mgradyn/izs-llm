@@ -1,0 +1,66 @@
+[project]
+name = "izs-llm"
+requires-python = ">=3.11"
+
+# ── Ruff (linter + formatter) ───────────────────────────────────────────────
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+
+# Only lint active code — skip legacy, vendored, and generated dirs
+include = ["core/**/*.py", "ingestion/**/*.py", "tests/**/*.py", "main.py"]
+exclude = [
+    "_app_legacy",
+    "tests/legacy",
+    "cohesive-llm-benchmark-eval-full",
+    "venv",
+    "__pycache__",
+    ".git",
+    "plugins/*/scripts/not_used",
+]
+
+[tool.ruff.lint]
+# Rules enabled:
+#   F  = pyflakes     (unused imports, undefined names, etc.)
+#   E  = pycodestyle  (style errors)
+#   W  = pycodestyle  (style warnings)
+#   I  = isort        (import ordering)
+#   UP = pyupgrade    (modernize syntax for Python 3.11+)
+#   B  = flake8-bugbear (common bug patterns)
+#   SIM = flake8-simplify (unnecessary complexity)
+#   C90 = mccabe      (function complexity)
+#   N  = pep8-naming  (naming conventions for variables, functions, classes)
+#   RET = flake8-return (return statement logic)
+#   ARG = flake8-unused-arguments (unused function arguments)
+#   RUF = Ruff-specific rules
+#   ANN = flake8-annotations (type hints)
+select = ["F", "E", "W", "I", "UP", "B", "SIM", "C90", "N", "RET", "ARG", "RUF", "ANN"]
+
+ignore = [
+    "E501",   # line-too-long — enforced at 120 but not a blocker for now
+    "E402",   # module-import-not-at-top — we use lazy imports in adapters intentionally
+    "E701",   # multiple-statements-on-one-line — common in test assertions
+    "B008",   # function-call-in-default-arg — used with FastAPI Depends()
+    "SIM103", # needless-bool — returning early vs negated condition is a readability choice
+    "SIM108", # use-ternary-expression — readability preference
+    "SIM110", # reimplemented-builtin — for-loop-return is often clearer than any()/all()
+    "SIM116", # if-else-block-instead-of-dict — if/elif chains are clearer for dispatch
+    "ANN204", # missing-return-type-init
+    "ANN401", # any-type
+]
+
+# Allow autofix for safe rules
+fixable = ["ALL"]
+unfixable = []
+
+[tool.ruff.lint.isort]
+known-first-party = ["core", "ingestion"]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests can have unused imports (fixtures), assertions, etc.
+# Skipping ANN (type hints), C901 (complexity), N (naming), RUF (ruff specific), ARG (unused args) for tests based on user feedback.
+"tests/**" = ["F401", "F811", "B011", "ANN", "C901", "N", "RUF", "ARG"]
+# conftest files import fixtures that look unused
+"**/conftest.py" = ["F401", "F811", "ANN"]
+# __init__.py often re-exports
+"**/__init__.py" = ["F401"]

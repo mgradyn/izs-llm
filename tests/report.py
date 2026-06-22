@@ -1,586 +1,364 @@
 """
 tests/report.py
-ReportCollector — collects test results across all levels and generates
-a comprehensive, readable markdown assessment report.
+Pairwise evaluation report generator.
 
-The report is designed to be understandable by someone who does NOT know
-the internal system architecture — it explains what each level tests,
-provides complexity examples, and gives clear pass/fail summaries.
+Produces:
+  1. Markdown report with Glicko-2 ratings, win/loss/tie counts, position bias
+     analysis, three-tier verdicts, and per-example details
+  2. CSV export with one row per example × dimension for data analysis
+
+Reports are saved to tests/reports/ with timestamps.
 """
-from pathlib import Path
-from datetime import datetime
+from __future__ import annotations
+
 import csv
+import io
+import json
+from datetime import UTC, datetime, timezone
+from pathlib import Path
+from typing import Any
 
-PROJECT_DIR = Path(__file__).parent.parent
-REPORT_DIR = PROJECT_DIR / "test_reports"
-REPORT_DIR.mkdir(exist_ok=True)
+from tests.evaluation.elo import Glicko2Tracker
+from tests.evaluation.schemas import BenchmarkResult, MultiTurnResult
 
-# ──────────────────────────────────────────────────────────────
-# Level Metadata — descriptions and examples for the report
-# ──────────────────────────────────────────────────────────────
-
-LEVEL_META = {
-    1: {
-        "name": "Single-Tool Pipelines",
-        "difficulty": "Simple",
-        "description": (
-            "Tests basic single-tool requests. The user asks for one specific bioinformatics "
-            "tool (e.g., 'trim my reads with fastp'). The system should identify the tool, "
-            "generate valid Nextflow code, and produce a visual diagram."
-        ),
-        "example": "User: 'I want to trim my Illumina reads with fastp' → System builds a one-step pipeline.",
-    },
-    2: {
-        "name": "Template-Level Pipelines",
-        "difficulty": "Medium",
-        "description": (
-            "Tests multi-step requests that match known pipeline templates. The user describes "
-            "a biological scenario involving 2–3 tools (e.g., 'SARS-CoV-2 mapping and lineage'). "
-            "The system should recognize the template and build the correct workflow."
-        ),
-        "example": "User: 'I have COVID samples, I need mapping + Pangolin lineage' → System selects the COVID emergency template.",
-    },
-    3: {
-        "name": "Complex Multi-Step Pipelines",
-        "difficulty": "Complex",
-        "description": (
-            "Tests complex requests requiring 3+ tools chained together. The system must "
-            "correctly wire data channels between steps, handle different input/output types, "
-            "and produce a pipeline that would execute correctly."
-        ),
-        "example": "User: 'Trim with fastp → assemble with SPAdes → detect AMR with ABRicate' → System chains three tools with correct data flow.",
-    },
-    4: {
-        "name": "Rejection Guardrails",
-        "difficulty": "Medium",
-        "description": (
-            "Tests that the system correctly REJECTS invalid or impossible requests. "
-            "These include: tools not in the catalog (BWA, GATK), tools for the wrong organism "
-            "(Pangolin for bacteria), or tools for the wrong sequencing technology "
-            "(Flye for Illumina short reads). The system should refuse, explain why, "
-            "and suggest valid alternatives."
-        ),
-        "example": "User: 'Run Pangolin on my Salmonella samples' → System refuses: 'Pangolin is SARS-CoV-2 only' and suggests MLST instead.",
-    },
-    5: {
-        "name": "Module Recreation",
-        "difficulty": "Complex",
-        "description": (
-            "Tests the system's ability to recreate known pipeline modules from the framework. "
-            "Each test provides a natural language description of a pipeline and checks if the "
-            "generated Nextflow code structurally matches the reference implementation. "
-            "This validates channel wiring, step ordering, and conditional logic."
-        ),
-        "example": "User describes the WNV pipeline → System generates code matching the module_westnile reference implementation.",
-    },
-}
+REPORTS_DIR = Path(__file__).resolve().parent / "reports"
 
 
-class ReportCollector:
-    """Collects all test results and generates a final markdown report."""
+class PairwiseReport:
+    """Collects pairwise evaluation results and generates reports.
+
+    Usage:
+        report = PairwiseReport()
+        report.add_benchmark_result(result)
+        ...
+        report.save(elo_tracker)
+    """
 
     def __init__(self):
-        self.results = []
-        self.start_time = datetime.now()
+        self.benchmark_results: list[BenchmarkResult] = []
+        self.multi_turn_results: list[MultiTurnResult] = []
+        self.ab_significance: list[dict] = []
 
-    def add_result(
-        self,
-        scenario_id: str,
-        level: int,
-        success: bool,
-        difficulty: str = "—",
-        description: str = "",
-        scores: dict = None,
-        details: dict = None,
-        elapsed: float = 0.0,
+    def add_benchmark_result(self, result: BenchmarkResult):
+        """Add a single-turn benchmark result."""
+        self.benchmark_results.append(result)
+
+    def add_multi_turn_result(self, result: MultiTurnResult):
+        """Add a multi-turn conversation result."""
+        self.multi_turn_results.append(result)
+
+    def add_ab_significance(
+        self, label_a: str, label_b: str, significance: dict[str, dict]
     ):
-        self.results.append({
-            "id": scenario_id,
-            "level": level,
-            "difficulty": difficulty,
-            "description": description,
-            "success": success,
-            "scores": scores or {},
-            "details": details or {},
-            "elapsed": elapsed,
+        """Add A/B significance test results."""
+        self.ab_significance.append({
+            "label_a": label_a,
+            "label_b": label_b,
+            "results": significance,
         })
 
-    def generate_report(self) -> str:
-        """Generate the final assessment markdown report."""
-        end_time = datetime.now()
-        duration = (end_time - self.start_time).total_seconds()
+    # ──────────────────────────────────────────────────────────
 
-        levels = {}
-        for r in self.results:
-            lvl = r["level"]
-            if lvl not in levels:
-                levels[lvl] = []
-            levels[lvl].append(r)
+    def save(self, elo_tracker: Glicko2Tracker) -> Path:
+        """Generate and save the full report (markdown + CSV).
 
+        Returns the path to the markdown report.
+        """
+        REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+        timestamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
+
+        md_path = REPORTS_DIR / f"pairwise_report_{timestamp}.md"
+        csv_path = REPORTS_DIR / f"pairwise_results_{timestamp}.csv"
+
+        md_content = self._generate_markdown(elo_tracker)
+        md_path.write_text(md_content, encoding="utf-8")
+
+        csv_content = self._generate_csv(elo_tracker)
+        csv_path.write_text(csv_content, encoding="utf-8")
+
+        # Also save a "latest" symlink-like file
+        latest_md = REPORTS_DIR / "pairwise_report_latest.md"
+        latest_md.write_text(md_content, encoding="utf-8")
+
+        print(f"\n  📄 Report: {md_path}")
+        print(f"  📊 CSV:    {csv_path}")
+
+        return md_path
+
+    # ──────────────────────────────────────────────────────────
+    # Markdown report generation
+    # ──────────────────────────────────────────────────────────
+
+    def _generate_markdown(self, elo: Glicko2Tracker) -> str:
+        """Generate the full markdown report."""
         lines = []
-
-        # ══════════════════════════════════════
-        # HEADER
-        # ══════════════════════════════════════
-        lines.append("# 🧬 IZS Bioinformatics Pipeline AI — Test Assessment Report")
-        lines.append("")
-        lines.append("## What Is This?")
+        lines.append("# Pairwise Evaluation Report")
         lines.append("")
         lines.append(
-            "This report evaluates an AI system that helps laboratory scientists design "
-            "Nextflow bioinformatics pipelines for pathogen surveillance. The AI takes "
-            "natural language requests (e.g., *'I have COVID samples, I need lineage classification'*) "
-            "and generates executable Nextflow DSL2 pipeline code with visual Mermaid diagrams."
+            f"Generated: {datetime.now(UTC).strftime('%Y-%m-%d %H:%M:%S UTC')}"
         )
         lines.append("")
-        lines.append("### Test Summary")
+
+        # ── Summary statistics ──
+        lines.append("## Summary")
         lines.append("")
-        lines.append(f"| Metric | Value |")
-        lines.append(f"|--------|-------|")
-        lines.append(f"| **Date** | {end_time.strftime('%Y-%m-%d %H:%M')} |")
-        lines.append(f"| **Total Duration** | {duration:.0f} seconds ({duration/60:.1f} minutes) |")
-        lines.append(f"| **Total Tests** | {len(self.results)} |")
-        total_pass = sum(1 for r in self.results if r["success"])
-        total_fail = len(self.results) - total_pass
-        pct = (total_pass / len(self.results) * 100) if self.results else 0
-        lines.append(f"| **Passed** | {total_pass} ✅ ({pct:.0f}%) |")
-        lines.append(f"| **Failed** | {total_fail} ❌ |")
-        
-        # Calculate aggregate RAG performance
-        rag_results = [r for r in self.results if "rag_recall_pct" in r["scores"]]
-        if rag_results:
-            total_found = sum(r["details"].get("found_count", 0) for r in rag_results)
-            total_req = sum(r["details"].get("total_count", 0) for r in rag_results)
-            rag_pct = (total_found / total_req * 100) if total_req > 0 else 0
-            lines.append(f"| **RAG Retrieval** | {total_found}/{total_req} documents ({rag_pct:.0f}%) |")
-        
-        lines.append(f"| **RAG Database** | ✅ LOADED (via `conftest.py`) |")
-        lines.append(f"| **Retry Attempts** | Each test retried up to 3 times (best result kept) |")
-
-        # Aggregate metrics (if present)
-        def _avg_score(key: str):
-            vals = [r["scores"].get(key) for r in self.results if isinstance(r.get("scores", {}).get(key), (int, float))]
-            return round(sum(vals) / len(vals), 2) if vals else None
-
-        def _avg_detail(key: str):
-            vals = [r["details"].get(key) for r in self.results if isinstance(r.get("details", {}).get(key), (int, float))]
-            return round(sum(vals) / len(vals), 2) if vals else None
-
-        first_submissions = [
-            r for r in self.results
-            if isinstance(r.get("details", {}).get("first_submission_success"), bool)
-        ]
-        if first_submissions:
-            fs_pass = sum(1 for r in first_submissions if r["details"]["first_submission_success"])
-            fs_total = len(first_submissions)
-            fs_pct = (fs_pass / fs_total * 100) if fs_total else 0
-            lines.append(f"| **First-Submission Success** | {fs_pass}/{fs_total} ({fs_pct:.0f}%) |")
-
-        func_avg = _avg_score("functional_correctness_score")
-        if func_avg is not None:
-            lines.append(f"| **Avg Functional Correctness** | {func_avg}/5 |")
-
-        code_avg = _avg_score("code_quality_score")
-        if code_avg is not None:
-            lines.append(f"| **Avg Code Quality** | {code_avg}/5 |")
-
-        route_p = _avg_score("tool_routing_precision_pct")
-        route_r = _avg_score("tool_routing_recall_pct")
-        route_f = _avg_score("tool_routing_f1_pct")
-        if route_p is not None or route_r is not None or route_f is not None:
-            lines.append(
-                f"| **Avg Tool Routing (P/R/F1)** | "
-                f"{route_p if route_p is not None else '—'} / {route_r if route_r is not None else '—'} / {route_f if route_f is not None else '—'} % |"
-            )
-
-        call_p = _avg_score("tool_call_precision_pct")
-        call_r = _avg_score("tool_call_recall_pct")
-        call_f = _avg_score("tool_call_f1_pct")
-        if call_p is not None or call_r is not None or call_f is not None:
-            lines.append(
-                f"| **Avg Tool Call Selection (P/R/F1)** | "
-                f"{call_p if call_p is not None else '—'} / {call_r if call_r is not None else '—'} / {call_f if call_f is not None else '—'} % |"
-            )
-
-        trial_avg = _avg_detail("trial_success_rate_pct")
-        if trial_avg is not None:
-            lines.append(f"| **Avg Trial Success Rate** | {trial_avg:.0f}% |")
+        n_single = len(self.benchmark_results)
+        n_multi = len(self.multi_turn_results)
+        n_multi_turns = sum(len(m.turn_results) for m in self.multi_turn_results)
+        lines.append(f"- **Single-turn examples**: {n_single}")
+        lines.append(f"- **Multi-turn conversations**: {n_multi} ({n_multi_turns} total turns)")
+        lines.append(f"- **Total pairwise comparisons**: {len(elo.match_log)}")
         lines.append("")
 
-        # ── Failure Summary (Only shown if there are failures) ──
-        if total_fail > 0:
-            lines.append("### ❌ Failure Summary")
-            lines.append("")
-            lines.append("| Scenario ID | Level | Error |")
-            lines.append("|-------------|-------|-------|")
-            for r in self.results:
-                if not r["success"]:
-                    err = "—"
-                    if r["details"].get("errors"):
-                        err = "; ".join(r["details"]["errors"])[:200] + "..."
-                    elif r["details"].get("error"):
-                        err = str(r["details"]["error"])[:200] + "..."
-                    
-                    lines.append(f"| `{r['id']}` | {r['level']} | {err} |")
-            lines.append("")
-
-        # ── Summary Table ──
-        lines.append("### Results by Level")
+        # ── Glicko-2 ratings table ──
+        lines.append("## Glicko-2 Ratings")
         lines.append("")
-        lines.append("| Level | Category | Difficulty | Tests | ✅ Pass | ❌ Fail | Avg Time |")
-        lines.append("|-------|----------|-----------|-------|--------|--------|----------|")
-
-        for lvl in sorted(levels.keys()):
-            lresults = levels[lvl]
-            meta = LEVEL_META.get(lvl, {"name": f"Level {lvl}", "difficulty": "—"})
-            n = len(lresults)
-            n_pass = sum(1 for r in lresults if r["success"])
-            n_fail = n - n_pass
-            avg_time = f"{sum(r['elapsed'] for r in lresults) / n:.0f}s"
-            icon = "✅" if n_fail == 0 else "⚠️"
-            lines.append(
-                f"| {lvl} | {meta['name']} {icon} | {meta['difficulty']} | {n} | {n_pass} | {n_fail} | {avg_time} |"
-            )
-
+        lines.append(
+            "Ratings start at 1500 (default). Higher = better. "
+            "CI = 95% confidence interval."
+        )
         lines.append("")
 
-        # Pre-calculate RAG status map for cross-referencing
-        rag_status_map = {}
-        for r in self.results:
-            if r["id"].startswith("[RAG]"):
-                base_id = r["id"].replace("[RAG] ", "")
-                rag_status_map[base_id] = "Passed ✅" if r["success"] else "Failed ❌"
-
-        # ══════════════════════════════════════
-        # DETAILED RESULTS PER LEVEL
-        # ══════════════════════════════════════
-        for lvl in sorted(levels.keys()):
-            lresults = levels[lvl]
-            meta = LEVEL_META.get(lvl, {"name": f"Level {lvl}", "difficulty": "—", "description": "", "example": ""})
-
-            lines.append("---")
-            lines.append("")
-            lines.append(f"## Level {lvl}: {meta['name']} ({meta['difficulty']})")
+        ratings = elo.get_ratings_table()
+        if ratings:
+            lines.append("| Player | Dimension | Rating | ±Deviation | CI 95% | Conservative |")
+            lines.append("|--------|-----------|--------|------------|--------|-------------|")
+            for r in ratings:
+                lines.append(
+                    f"| {r['player']} | {r['dimension']} | "
+                    f"**{r['rating']}** | ±{r['deviation']} | "
+                    f"[{r['ci_95_lower']}, {r['ci_95_upper']}] | "
+                    f"{r['conservative']} |"
+                )
             lines.append("")
 
-            # Level description box
-            lines.append(f"> **What this tests:** {meta['description']}")
-            lines.append(f">")
-            lines.append(f"> **Example:** {meta['example']}")
+        # ── Summary rollup ──
+        summary = elo.get_summary()
+        if summary:
+            lines.append("### Summary Ratings")
+            lines.append("")
+            lines.append("| Player | Avg Rating | Avg Deviation | Dimensions | Matches |")
+            lines.append("|--------|-----------|---------------|-----------|---------|")
+            for player, s in summary.items():
+                lines.append(
+                    f"| {player} | **{s['avg_rating']}** | ±{s['avg_deviation']} | "
+                    f"{s['n_dimensions']} | {s['n_matches']} |"
+                )
             lines.append("")
 
-            n_pass = sum(1 for r in lresults if r["success"])
-            n_fail = len(lresults) - n_pass
-            lines.append(f"**Results: {n_pass} passed, {n_fail} failed out of {len(lresults)} tests**")
+        # ── Win/Loss/Tie counts ──
+        wlt = elo.get_win_loss_tie_counts()
+        if wlt:
+            lines.append("## Win / Loss / Tie Breakdown")
             lines.append("")
+            for player, dims in sorted(wlt.items()):
+                lines.append(f"### {player}")
+                lines.append("")
+                lines.append("| Dimension | Wins | Losses | Ties | Win % |")
+                lines.append("|-----------|------|--------|------|-------|")
+                for dim, counts in sorted(dims.items()):
+                    total = counts["wins"] + counts["losses"] + counts["ties"]
+                    win_pct = (counts["wins"] / total * 100) if total else 0
+                    lines.append(
+                        f"| {dim} | {counts['wins']} | {counts['losses']} | "
+                        f"{counts['ties']} | {win_pct:.1f}% |"
+                    )
+                lines.append("")
 
-            # Per-level aggregate metrics
-            def _level_avg_score(key: str):
-                vals = [r["scores"].get(key) for r in lresults if isinstance(r.get("scores", {}).get(key), (int, float))]
-                return round(sum(vals) / len(vals), 2) if vals else None
-
-            def _level_avg_detail(key: str):
-                vals = [r["details"].get(key) for r in lresults if isinstance(r.get("details", {}).get(key), (int, float))]
-                return round(sum(vals) / len(vals), 2) if vals else None
-
-            level_first = [
-                r for r in lresults
-                if isinstance(r.get("details", {}).get("first_submission_success"), bool)
-            ]
-            if level_first:
-                fs_pass = sum(1 for r in level_first if r["details"]["first_submission_success"])
-                fs_total = len(level_first)
-                fs_pct = (fs_pass / fs_total * 100) if fs_total else 0
+        # ── Three-tier verdict breakdown ──
+        lines.append("## Ground-Truth Verdict Breakdown")
+        lines.append("")
+        tiers = {"MATCH": 0, "EXCEEDS": 0, "DEFICIENT": 0, "N/A": 0}
+        for r in self.benchmark_results:
+            if r.ground_truth_verdict:
+                tiers[r.ground_truth_verdict.tier] += 1
             else:
-                fs_pct = None
+                tiers["N/A"] += 1
+        # Include multi-turn turns
+        for mt in self.multi_turn_results:
+            for tr in mt.turn_results:
+                if tr.ground_truth_verdict:
+                    tiers[tr.ground_truth_verdict.tier] += 1
+                else:
+                    tiers["N/A"] += 1
 
-            lvl_func = _level_avg_score("functional_correctness_score")
-            lvl_code = _level_avg_score("code_quality_score")
-            lvl_rp = _level_avg_score("tool_routing_precision_pct")
-            lvl_rr = _level_avg_score("tool_routing_recall_pct")
-            lvl_rf = _level_avg_score("tool_routing_f1_pct")
-            lvl_cp = _level_avg_score("tool_call_precision_pct")
-            lvl_cr = _level_avg_score("tool_call_recall_pct")
-            lvl_cf = _level_avg_score("tool_call_f1_pct")
-            lvl_trial = _level_avg_detail("trial_success_rate_pct")
+        total_verdicts = sum(tiers.values())
+        lines.append("| Tier | Count | % |")
+        lines.append("|------|-------|---|")
+        for tier, count in tiers.items():
+            pct = (count / total_verdicts * 100) if total_verdicts else 0
+            lines.append(f"| {tier} | {count} | {pct:.1f}% |")
+        lines.append("")
 
-            if any(v is not None for v in [fs_pct, lvl_func, lvl_code, lvl_rp, lvl_rr, lvl_rf, lvl_cp, lvl_cr, lvl_cf, lvl_trial]):
-                lines.append("**Level Metrics:**")
+        # ── Deterministic check pass rates ──
+        lines.append("## Deterministic Check Results")
+        lines.append("")
+        all_results = list(self.benchmark_results)
+        for mt in self.multi_turn_results:
+            all_results.extend(mt.turn_results)
+
+        if all_results:
+            n_has_code = sum(1 for r in all_results if r.deterministic_checks.has_code)
+            avg_p = sum(r.deterministic_checks.tool_routing_precision_pct for r in all_results) / len(all_results)
+            avg_r = sum(r.deterministic_checks.tool_routing_recall_pct for r in all_results) / len(all_results)
+            avg_f1 = sum(r.deterministic_checks.tool_routing_f1_pct for r in all_results) / len(all_results)
+
+            lines.append(f"- **Code generation rate**: {n_has_code}/{len(all_results)} ({n_has_code/len(all_results)*100:.1f}%)")
+            lines.append(f"- **Avg tool routing precision**: {avg_p:.1f}%")
+            lines.append(f"- **Avg tool routing recall**: {avg_r:.1f}%")
+            lines.append(f"- **Avg tool routing F1**: {avg_f1:.1f}%")
+            lines.append("")
+
+        # ── Position bias analysis ──
+        lines.append("## Position Bias Analysis")
+        lines.append("")
+        total_comparisons = 0
+        consistent_count = 0
+        for r in self.benchmark_results:
+            for pr in r.pairwise_results:
+                total_comparisons += 1
+                if pr.consistent:
+                    consistent_count += 1
+        for mt in self.multi_turn_results:
+            for tr in mt.turn_results:
+                for pr in tr.pairwise_results:
+                    total_comparisons += 1
+                    if pr.consistent:
+                        consistent_count += 1
+
+        if total_comparisons:
+            consistency = consistent_count / total_comparisons * 100
+            lines.append(
+                f"- **Total pairwise comparisons**: {total_comparisons}"
+            )
+            lines.append(
+                f"- **Position-consistent**: {consistent_count} ({consistency:.1f}%)"
+            )
+            lines.append(
+                f"- **Position-inconsistent → forced tie**: "
+                f"{total_comparisons - consistent_count} "
+                f"({100 - consistency:.1f}%)"
+            )
+            if consistency >= 80:
+                lines.append("- ✅ Judge consistency is good (≥80%)")
+            else:
+                lines.append("- ⚠️ Judge consistency is low (<80%) — consider a stronger judge model")
+        else:
+            lines.append("- No pairwise comparisons recorded.")
+        lines.append("")
+
+        # ── A/B significance results ──
+        if self.ab_significance:
+            lines.append("## A/B Significance Tests")
+            lines.append("")
+            for ab in self.ab_significance:
+                lines.append(f"### {ab['label_a']} vs {ab['label_b']}")
                 lines.append("")
-                lines.append("| Metric | Avg |")
-                lines.append("|--------|-----|")
-                if fs_pct is not None:
-                    lines.append(f"| First-Submission Success | {fs_pct:.0f}% |")
-                if lvl_func is not None:
-                    lines.append(f"| Functional Correctness | {lvl_func}/5 |")
-                if lvl_code is not None:
-                    lines.append(f"| Code Quality | {lvl_code}/5 |")
-                if lvl_rp is not None or lvl_rr is not None or lvl_rf is not None:
+                lines.append("| Dimension | Δ Rating | p-value | 95% CI | Significant? |")
+                lines.append("|-----------|----------|---------|--------|-------------|")
+                for dim, sig in ab["results"].items():
+                    status = "✅" if sig["significant_at_005"] else "❌"
                     lines.append(
-                        f"| Tool Routing (P/R/F1) | "
-                        f"{lvl_rp if lvl_rp is not None else '—'} / {lvl_rr if lvl_rr is not None else '—'} / {lvl_rf if lvl_rf is not None else '—'} % |"
+                        f"| {dim} | {sig['mean_delta']:+.1f} | "
+                        f"{sig['p_value']:.4f} | "
+                        f"[{sig['ci_95'][0]:+.1f}, {sig['ci_95'][1]:+.1f}] | "
+                        f"{status} |"
                     )
-                if lvl_cp is not None or lvl_cr is not None or lvl_cf is not None:
-                    lines.append(
-                        f"| Tool Call Selection (P/R/F1) | "
-                        f"{lvl_cp if lvl_cp is not None else '—'} / {lvl_cr if lvl_cr is not None else '—'} / {lvl_cf if lvl_cf is not None else '—'} % |"
-                    )
-                if lvl_trial is not None:
-                    lines.append(f"| Trial Success Rate | {lvl_trial:.0f}% |")
                 lines.append("")
 
-            for r in lresults:
-                icon = "✅" if r["success"] else "❌"
-                lines.append(f"### {icon} `{r['id']}` — {r['description']}")
+        # ── Per-example details (single-turn) ──
+        if self.benchmark_results:
+            lines.append("## Per-Example Results (Single-Turn)")
+            lines.append("")
+            lines.append("<details>")
+            lines.append(f"<summary>Click to expand ({len(self.benchmark_results)}  examples)</summary>")
+            lines.append("")
+            for r in self.benchmark_results:
+                tier = r.ground_truth_verdict.tier if r.ground_truth_verdict else "N/A"
+                has_code = "✅" if r.deterministic_checks.has_code else "❌"
+                lines.append(f"### {r.example_id}")
+                lines.append(f"- Type: {r.test_type} | GT Tier: **{tier}** | Code: {has_code}")
+                lines.append(f"- P/R/F1: {r.deterministic_checks.tool_routing_precision_pct}% / "
+                           f"{r.deterministic_checks.tool_routing_recall_pct}% / "
+                           f"{r.deterministic_checks.tool_routing_f1_pct}%")
+                if r.deterministic_checks.extra_steps:
+                    lines.append(f"- Extra steps: {', '.join(r.deterministic_checks.extra_steps)}")
+                if r.deterministic_checks.missing_steps:
+                    lines.append(f"- Missing steps: {', '.join(r.deterministic_checks.missing_steps)}")
+                for pr in r.pairwise_results:
+                    icon = "🏆" if pr.verdict == "A" else ("🥈" if pr.verdict == "B" else "🤝")
+                    cons = "✓" if pr.consistent else "⚡inconsistent"
+                    lines.append(f"- {pr.dimension}: {icon} {pr.verdict} ({cons})")
                 lines.append("")
-                lines.append(f"| Property | Value |")
-                lines.append(f"|----------|-------|")
-                lines.append(f"| Difficulty | {r['difficulty']} |")
-                lines.append(f"| Time | {r['elapsed']:.1f}s |")
-                
-                # Cross-reference RAG status if available
-                base_id = r["id"].split("] ")[-1] if "]" in r["id"] else r["id"]
-                if not r["id"].startswith("[RAG]") and base_id in rag_status_map:
-                    lines.append(f"| RAG Status | {rag_status_map[base_id]} |")
-                    
-                lines.append(f"| Total Result | {'Passed ✅' if r['success'] else 'Failed ❌'} |")
+            lines.append("</details>")
+            lines.append("")
 
-                det = r["details"]
+        # ── Multi-turn summary ──
+        if self.multi_turn_results:
+            lines.append("## Multi-Turn Results")
+            lines.append("")
+            lines.append("| Conversation | Kind | Turns | All Passed? |")
+            lines.append("|-------------|------|-------|------------|")
+            for mt in self.multi_turn_results:
+                status = "✅" if mt.all_turns_passed else "❌"
+                lines.append(
+                    f"| {mt.conversation_id} | {mt.modification_kind} | "
+                    f"{len(mt.turn_results)} | {status} |"
+                )
+            lines.append("")
 
-                if det.get("turns"):
-                    lines.append(f"| Conversation Turns | {det['turns']} |")
-                if det.get("ai_status"):
-                    lines.append(f"| AI Status | `{det['ai_status']}` |")
-                if det.get("nf_code_length"):
-                    lines.append(f"| Nextflow Code | {det['nf_code_length']} characters |")
-                    
-                    if "nf_syntax_passed" in det:
-                        icon = "✅" if det["nf_syntax_passed"] else "❌"
-                        lines.append(f"| NF Compiler (Syntax) | {icon} |")
-                        if not det["nf_syntax_passed"] and det.get("nf_syntax_error"):
-                            lines.append(f"| NF Syntax Error | `{det['nf_syntax_error'][:200]}` |")
-                    if "nf_stub_passed" in det:
-                        icon = "✅" if det["nf_stub_passed"] else "❌"
-                        lines.append(f"| NF Compiler (Stub) | {icon} |")
-                        if not det["nf_stub_passed"] and det.get("nf_stub_error"):
-                            lines.append(f"| NF Stub Error | `{det['nf_stub_error'][:200]}` |")
-                        
-                if det.get("mermaid_agent_length"):
-                    lines.append(f"| Mermaid Diagram (AI) | {det['mermaid_agent_length']} chars |")
-                if det.get("mermaid_deterministic_length"):
-                    lines.append(f"| Mermaid Diagram (Deterministic) | {det['mermaid_deterministic_length']} chars |")
-                if det.get("has_ast"):
-                    lines.append(f"| AST JSON | ✅ Generated |")
-                if det.get("module_id"):
-                    lines.append(f"| Reference Module | `{det['module_id']}` |")
-                if det.get("reference_code_length"):
-                    lines.append(f"| Reference Code | {det['reference_code_length']} chars |")
-                if det.get("include_match_ratio"):
-                    lines.append(f"| Include Match | {det['include_match_ratio']} |")
-                if "found_count" in det and "total_count" in det:
-                    lines.append(f"| Retrieval Score | **{det['found_count']}/{det['total_count']}** documents found |")
-
-                lines.append("")
-
-                # Scores (if any)
-                if r["scores"]:
-                    lines.append("**Evaluation Scores:**")
-                    lines.append("")
-                    for k, v in r["scores"].items():
-                        if "score" in k or "pct" in k:
-                            label = k.replace("_", " ").title()
-                            if isinstance(v, (int, float)):
-                                if "pct" in k:
-                                    e = "🟢" if v >= 75 else "🟡" if v >= 50 else "🔴"
-                                    lines.append(f"- {e} {label}: **{v}%**")
-                                else:
-                                    e = "🟢" if v >= 4 else "🟡" if v >= 3 else "🔴"
-                                    lines.append(f"- {e} {label}: **{v}**/5")
-                    lines.append("")
-
-                # Judge Reasoning (if any)
-                has_reasoning = any("reason" in k for k in det.keys())
-                if has_reasoning:
-                    lines.append("**Judge Reasoning:**")
-                    lines.append("")
-                    for k, v in det.items():
-                        if "reason" in k and v:
-                            label = k.replace("judge_", "").replace("_reason", "").replace("_", " ").title()
-                            lines.append(f"> **{label}**: {v}")
-                    lines.append("")
-
-                # AI Reply preview
-                if det.get("ai_reply"):
-                    reply_preview = det["ai_reply"][:250].replace("\n", " ")
-                    lines.append(f"**AI said:** _{reply_preview}_")
-                    lines.append("")
-
-                # Rejection info
-                if det.get("rejection_expected"):
-                    lines.append(f"**Why this should be rejected:** {det['rejection_expected']}")
-                    lines.append("")
-
-                # Error info
-                if det.get("error"):
-                    lines.append(f"**Error:** `{str(det['error'])[:300]}`")
-                    lines.append("")
-
-                if det.get("errors"):
-                    lines.append("**Errors:**")
-                    for err in det["errors"]:
-                        lines.append(f"- `{err}`")
-                    lines.append("")
-
-                # Code and Diagram Dropdowns
-                if det.get("rag_context"):
-                    lines.append("<details><summary>View Retrieved RAG Context</summary>")
-                    lines.append("")
-                    lines.append("```text")
-                    lines.append(str(det["rag_context"])[:3000] + "\n...(truncated)" if len(str(det["rag_context"])) > 3000 else str(det["rag_context"]))
-                    lines.append("```")
-                    lines.append("</details>")
-                    lines.append("")
-
-                if det.get("nf_code"):
-                    lines.append("<details><summary>View Nextflow Code</summary>")
-                    lines.append("")
-                    lines.append("```groovy")
-                    lines.append(det["nf_code"])
-                    lines.append("```")
-                    lines.append("</details>")
-                    lines.append("")
-
-                if det.get("mermaid_agent"):
-                    lines.append("<details><summary>View Mermaid Diagram (AI)</summary>")
-                    lines.append("")
-                    lines.append("```mermaid")
-                    lines.append(det["mermaid_agent"])
-                    lines.append("```")
-                    lines.append("</details>")
-                    lines.append("")
-
-                if det.get("mermaid_deterministic"):
-                    lines.append("<details><summary>View Mermaid Diagram (Deterministic)</summary>")
-                    lines.append("")
-                    lines.append("```mermaid")
-                    lines.append(det["mermaid_deterministic"])
-                    lines.append("```")
-                    lines.append("</details>")
-                    lines.append("")
-
-        # ══════════════════════════════════════
-        # FOOTER
-        # ══════════════════════════════════════
-        lines.append("---")
-        lines.append("")
-        lines.append("## How to Read This Report")
-        lines.append("")
-        lines.append("- **✅ Passed**: The AI correctly handled the request")
-        lines.append("- **❌ Failed**: The AI produced an incorrect or unexpected result")
-        lines.append("- **Conversation Turns**: How many messages were exchanged before getting a result")
-        lines.append("- **Nextflow Code**: The generated pipeline code length (longer = more complex)")
-        lines.append("- **Mermaid Diagram (AI)**: A visual flowchart generated by the AI from the code")
-        lines.append("- **Mermaid Diagram (Deterministic)**: A flowchart generated algorithmically from the pipeline structure")
-        lines.append("- **Include Match**: For recreation tests — what percentage of the reference module's tool imports were present")
-        lines.append("")
-        lines.append("### Score Guide")
-        lines.append("")
-        lines.append("| Score | Meaning |")
-        lines.append("|-------|---------|")
-        lines.append("| 🟢 5/5 | Excellent — meets or exceeds expectations |")
-        lines.append("| 🟢 4/5 | Good — correct with minor issues |")
-        lines.append("| 🟡 3/5 | Acceptable — works but has notable gaps |")
-        lines.append("| 🔴 2/5 | Poor — significant issues |")
-        lines.append("| 🔴 1/5 | Unacceptable — fundamentally wrong |")
-        lines.append("")
-        lines.append(
-            f"*Report generated by `tests/` framework on {end_time.strftime('%Y-%m-%d %H:%M:%S')}*"
-        )
         return "\n".join(lines)
 
-    def save_report(self) -> Path:
-        """Save the report to disk and return the path."""
-        report_content = self.generate_report()
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        report_path = REPORT_DIR / f"test_report_{timestamp}.md"
-        report_path.write_text(report_content)
+    # ──────────────────────────────────────────────────────────
+    # CSV export
+    # ──────────────────────────────────────────────────────────
 
-        latest_path = REPORT_DIR / "test_report_latest.md"
-        latest_path.write_text(report_content)
+    def _generate_csv(self, elo: Glicko2Tracker) -> str:
+        """Generate CSV with one row per example x dimension."""
+        output = io.StringIO()
+        writer = csv.writer(output)
 
-        # CSV export (one row per scenario + summary rows)
-        csv_path = REPORT_DIR / f"test_report_{timestamp}.csv"
-        latest_csv_path = REPORT_DIR / "test_report_latest.csv"
+        # Header
+        writer.writerow([
+            "example_id", "test_type", "dimension", "verdict",
+            "consistent", "gt_tier", "has_code",
+            "precision_pct", "recall_pct", "f1_pct",
+            "extra_steps", "missing_steps",
+            "elapsed_s", "source",
+        ])
 
-        base_fields = [
-            "id",
-            "level",
-            "difficulty",
-            "description",
-            "success",
-            "first_submission_success",
-            "trial_count",
-            "trial_successes",
-            "trial_success_rate_pct",
-        ]
+        # Single-turn results
+        for r in self.benchmark_results:
+            tier = r.ground_truth_verdict.tier if r.ground_truth_verdict else ""
+            for pr in r.pairwise_results:
+                writer.writerow([
+                    r.example_id, r.test_type, pr.dimension, pr.verdict,
+                    pr.consistent, tier,
+                    r.deterministic_checks.has_code,
+                    r.deterministic_checks.tool_routing_precision_pct,
+                    r.deterministic_checks.tool_routing_recall_pct,
+                    r.deterministic_checks.tool_routing_f1_pct,
+                    ";".join(r.deterministic_checks.extra_steps),
+                    ";".join(r.deterministic_checks.missing_steps),
+                    r.elapsed_s, "single_turn",
+                ])
 
-        score_keys = set()
-        for r in self.results:
-            for k, v in r.get("scores", {}).items():
-                if isinstance(v, (int, float)):
-                    score_keys.add(k)
+        # Multi-turn results
+        for mt in self.multi_turn_results:
+            for tr in mt.turn_results:
+                tier = tr.ground_truth_verdict.tier if tr.ground_truth_verdict else ""
+                for pr in tr.pairwise_results:
+                    writer.writerow([
+                        tr.example_id, tr.test_type, pr.dimension, pr.verdict,
+                        pr.consistent, tier,
+                        tr.deterministic_checks.has_code,
+                        tr.deterministic_checks.tool_routing_precision_pct,
+                        tr.deterministic_checks.tool_routing_recall_pct,
+                        tr.deterministic_checks.tool_routing_f1_pct,
+                        ";".join(tr.deterministic_checks.extra_steps),
+                        ";".join(tr.deterministic_checks.missing_steps),
+                        tr.elapsed_s,
+                        f"multi_turn:{mt.conversation_id}",
+                    ])
 
-        header = base_fields + sorted(score_keys)
-
-        rows = []
-        for r in self.results:
-            details = r.get("details", {})
-            row = {
-                "id": r.get("id"),
-                "level": r.get("level"),
-                "difficulty": r.get("difficulty"),
-                "description": r.get("description"),
-                "success": 1 if r.get("success") else 0,
-                "first_submission_success": 1 if details.get("first_submission_success") else 0,
-                "trial_count": details.get("trial_count"),
-                "trial_successes": details.get("trial_successes"),
-                "trial_success_rate_pct": details.get("trial_success_rate_pct"),
-            }
-            for k in score_keys:
-                row[k] = r.get("scores", {}).get(k)
-            rows.append(row)
-
-        numeric_cols = [
-            k for k in header
-            if any(isinstance(row.get(k), (int, float)) for row in rows)
-        ]
-
-        sum_row = {k: "" for k in header}
-        sum_row["id"] = "SUM"
-        for k in numeric_cols:
-            vals = [row.get(k) for row in rows if isinstance(row.get(k), (int, float))]
-            if vals:
-                sum_row[k] = round(sum(vals), 2)
-
-        avg_row = {k: "" for k in header}
-        avg_row["id"] = "AVERAGE"
-        for k in numeric_cols:
-            vals = [row.get(k) for row in rows if isinstance(row.get(k), (int, float))]
-            if vals:
-                avg_row[k] = round(sum(vals) / len(vals), 2)
-
-        with csv_path.open("w", newline="") as f:
-            writer = csv.DictWriter(f, fieldnames=header)
-            writer.writeheader()
-            writer.writerows(rows)
-            writer.writerow(sum_row)
-            writer.writerow(avg_row)
-
-        latest_csv_path.write_text(csv_path.read_text())
-
-        print(f"\n📋 REPORT SAVED: {report_path}")
-        return report_path
-
-
-# Global singleton
-report = ReportCollector()
+        return output.getvalue()

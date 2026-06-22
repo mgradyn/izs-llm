@@ -12,3 +12,19 @@ app/models/__pycache__/ast.cpython-311.pyc
 *.pyc
 *.DS_Store
 *.sh
+
+# Debug and test artifacts
+izs-llm-main-original/
+tests/reports/
+debug_run.py
+test_graph.py
+fix_ann.py
+*.log
+*.pid
+evaluation_report.txt
+updated_diagram.md
+full_ids.txt
+
+# Databases and large data
+chroma_db/
+cohesive-llm-benchmark-eval-full/

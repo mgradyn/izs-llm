@@ -1,45 +1,53 @@
 """
 tests/helpers.py
-Shared helper functions for the IZS test suite.
+Shared helper functions for the pairwise evaluation test suite.
 
-API Helpers (for L1–L5 tests via /chat endpoint):
-  - send_chat(): sends a message to the API and returns the parsed response
-  - run_multi_turn_chat(): drives a full multi-turn conversation through the API
-  - run_with_retries(): runs a test function up to N times, keeps the best result
-  - rate_limit_pause(): sleeps between API calls to respect rate limits
+API Helpers:
+  - send_chat(): sends a message to the /chat API endpoint
+  - run_multi_turn_chat(): drives a full multi-turn conversation
+  - rate_limit_pause(): sleeps between API calls
 
-Isolated Helpers (for direct agent/judge invocation, no API):
+Context Helpers:
   - get_exact_context(): bypasses vector search, injects exact catalog items
-  - force_approve_consultant(): runs the agent chain directly with auto-retry
-  - run_academic_judge(): invokes the consultant LLM judge
-  - run_pipeline_judge(): invokes the Nextflow code LLM judge
-  - run_diagram_judge(): invokes the Mermaid diagram LLM judge
+  - format_llm_output_for_pairwise(): format LLM response for pairwise comparison
+  - format_ground_truth_for_pairwise(): format ground truth for pairwise comparison
+  - compute_step_metrics(): compute P/R/F1 on step selection
+
+Legacy judge functions (run_academic_judge, run_pipeline_judge, etc.) have been
+moved to tests/legacy/helpers.py. This module only contains the pairwise system helpers.
 """
+from __future__ import annotations
+
 import os
+import re
 import time
 import uuid
-import pytest
+from pathlib import Path
+
+# ──────────────────────────────────────────────────────────────
+# Configuration
+# ──────────────────────────────────────────────────────────────
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+CHECKPOINT_DIR = PROJECT_ROOT / "tests" / "reports"
+REPORTS_DIR = PROJECT_ROOT / "tests" / "reports"
 
 
 # ──────────────────────────────────────────────────────────────
 # Rate Limit Protection
 # ──────────────────────────────────────────────────────────────
 
-DEFAULT_PAUSE_BETWEEN_TURNS = 5    # seconds between turns in a conversation
-DEFAULT_PAUSE_BETWEEN_TESTS = 15   # seconds between separate test scenarios
-DEFAULT_PAUSE_ON_ERROR = 30        # seconds to wait after a rate limit / server error
-EVAL_RUNS = max(1, int(os.environ.get("EVAL_RUNS", "1")))
+def rate_limit_pause(seconds: int = 5, reason: str = "rate limit protection"):
+    """Pause execution for rate limit protection.
 
-
-def rate_limit_pause(seconds=15, reason="rate limit protection"):
-    """Pause execution for rate limit protection."""
-    # Hardcoded default to False (disabled for judge), then check environment
-    disable_judge_rate = True 
+    Respects JUDGE_RATE_LIMIT env var: if "true", pauses for judge calls too.
+    Otherwise, judge-related pauses are skipped.
+    """
+    disable_judge_rate = True
     if os.environ.get("JUDGE_RATE_LIMIT", "false").lower() == "true":
         disable_judge_rate = False
 
     is_judge = "judge" in reason.lower()
-
     if is_judge and disable_judge_rate:
         return
 
@@ -56,11 +64,10 @@ def send_chat(
     client,
     session_id: str,
     message: str,
-    timeout: int = 120,
+    timeout: int = 600,
     generate_diagrams: bool = True,
 ) -> dict:
-    """
-    Send a single message to the /chat API endpoint.
+    """Send a single message to the /chat API endpoint.
 
     Returns a dict with keys:
         success, status, reply, nextflow_code, mermaid_agent,
@@ -128,25 +135,24 @@ def run_multi_turn_chat(
     client,
     chat_messages: list[str],
     expect_rejection: bool = False,
-    pause_between_turns: int = DEFAULT_PAUSE_BETWEEN_TURNS,
+    pause_between_turns: int = 5,
+    session_id: str | None = None,
 ) -> dict:
-    """
-    Drive a full multi-turn conversation through the API.
+    """Drive a full multi-turn conversation through the API.
 
     Parameters
     ----------
     chat_messages : list[str]
-        List of user messages to send in order. The AI replies between them
-        are driven by the API (via thread memory).
+        List of user messages to send in order.
     expect_rejection : bool
-        If True, return after the first response (we expect CHATTING / rejection).
+        If True, return after the first response.
 
     Returns
     -------
     dict with: success, status, reply, nextflow_code, mermaid_agent,
-    mermaid_deterministic, ast_json, elapsed, turns, all_replies
+    mermaid_deterministic, ast_json, elapsed, turns, all_replies, session_id
     """
-    session_id = f"test_{uuid.uuid4().hex[:12]}"
+    session_id = session_id or f"test_{uuid.uuid4().hex[:12]}"
     total_start = time.time()
     all_replies = []
 
@@ -156,6 +162,7 @@ def run_multi_turn_chat(
         if not result["success"]:
             result["turns"] = turn_idx + 1
             result["all_replies"] = all_replies
+            result["session_id"] = session_id
             return result
 
         all_replies.append({
@@ -165,204 +172,68 @@ def run_multi_turn_chat(
             "tool_calls": result.get("tool_calls") or [],
         })
 
-        # For rejection tests, return after first response
         if expect_rejection:
             result["turns"] = turn_idx + 1
             result["elapsed"] = time.time() - total_start
             result["all_replies"] = all_replies
+            result["session_id"] = session_id
             return result
 
-        # If we got APPROVED with code, we're done
         if result["status"] == "APPROVED" and result.get("nextflow_code"):
             result["turns"] = turn_idx + 1
             result["elapsed"] = time.time() - total_start
             result["all_replies"] = all_replies
+            result["session_id"] = session_id
             return result
 
-        # Pause between turns
         if turn_idx < len(chat_messages) - 1:
             rate_limit_pause(pause_between_turns, f"between turn {turn_idx + 1} and {turn_idx + 2}")
 
-    # If we exhausted all messages without APPROVED, return last result
     result["turns"] = len(chat_messages)
     result["elapsed"] = time.time() - total_start
     result["all_replies"] = all_replies
+    result["session_id"] = session_id
     return result
 
 
-def run_with_retries(
-    test_fn,
-    max_retries=2,
-    pause_between=DEFAULT_PAUSE_ON_ERROR,
-    stop_avg_score=5.0,
-):
-    """
-    Run a test function up to max_retries times, keeping the BEST result.
-    
-    The test_fn should return a dict with at least a 'scores' dict.
-    The "best" result is the one with the highest average score.
+def build_modification_chat_messages(raw_chat_messages: list[str]) -> list[str]:
+    """Build the message sequence for a modification benchmark example.
 
-    Retries even on "success" unless stop_avg_score is achieved.
+    Modification examples have interleaved user/assistant turns in the raw
+    chat_messages field (indices 0, 2, 4, … are user turns). We keep only
+    the user turns and append a canonical approval message so the agent
+    proceeds from plan to generation.
+
+    Parameters
+    ----------
+    raw_chat_messages : list[str]
+        Raw chat_messages from the benchmark example dict.
 
     Returns
     -------
-    best_result
+    list[str]
+        User-only messages plus a trailing approval message.
     """
-    all_results = []
-    # Hardcoded default to False, then check env
-    disable_judge_rate = True
-    if os.environ.get("JUDGE_RATE_LIMIT", "false").lower() == "true":
-        disable_judge_rate = False
-
-    for attempt in range(1, max_retries + 1):
-        print(f"\n{'='*60}")
-        print(f"  ATTEMPT {attempt} / {max_retries}")
-        print(f"{'='*60}")
-
-        try:
-            result = test_fn()
-            result["attempt"] = attempt
-            result["error"] = None
-            result["success"] = bool(result.get("success", False))
-            all_results.append(result)
-            
-            # EARLY EXIT: If we hit the configured score threshold, stop retrying.
-            avg_score = _avg_scores(result.get("scores", {}))
-            if avg_score >= stop_avg_score:
-                print(
-                    f"🌟 Early stop threshold ({stop_avg_score}) achieved on "
-                    f"attempt {attempt} with avg score {avg_score}. Skipping further trials."
-                )
-                break
-                
-        except Exception as e:
-            error_str = str(e).lower()
-            all_results.append({"attempt": attempt, "error": str(e), "scores": {}, "success": False})
-
-            # If rate limit, pause longer
-            if "429" in error_str or "rate limit" in error_str:
-                is_judge_error = "judge" in error_str
-                if not (is_judge_error and disable_judge_rate):
-                    print(f"\n⚠️ Rate limit hit on attempt {attempt}. Pausing {pause_between}s...")
-                    rate_limit_pause(pause_between, "rate limit recovery")
-            elif attempt < max_retries:
-                rate_limit_pause(pause_between // 2, "error recovery")
-
-        # Pause between retries to protect the main LLM (but not if it's judge-only)
-        if attempt < max_retries:
-            rate_limit_pause(DEFAULT_PAUSE_BETWEEN_TESTS, "between retry attempts (main llm)")
-
-    # Pick the best result (highest average score)
-    best = None
-    best_avg = -1
-    for r in all_results:
-        avg = _avg_scores(r.get("scores", {}))
-        if avg > best_avg:
-            best_avg = avg
-            best = r
-
-    if best is None:
-        best = all_results[-1] if all_results else {"error": "No results", "scores": {}}
-
-    best["total_attempts"] = len(all_results)
-    best["first_attempt_success"] = bool(all_results[0].get("success", False)) if all_results else False
-    best["all_attempts_summary"] = [
-        {
-            "attempt": r.get("attempt"),
-            "error": r.get("error"),
-            "avg_score": _avg_scores(r.get("scores", {})),
-            "success": bool(r.get("success", False)),
-        }
-        for r in all_results
-    ]
-
-    return best
-
-
-def _avg_scores(scores: dict) -> float:
-    """Calculate average of all score fields in a dict."""
-    vals = [v for k, v in scores.items() if isinstance(v, (int, float)) and "score" in k]
-    return round(sum(vals) / len(vals), 2) if vals else 0.0
-
-
-def run_n_trials(test_fn, runs=1, pause_between=DEFAULT_PAUSE_BETWEEN_TESTS):
-    """Run the same test N times and return the first result plus trial stats.
-
-    The first run remains authoritative for pass/fail. Additional runs
-    are used only to compute success rate and average scores.
-    """
-    runs = max(1, int(runs or 1))
-    results = []
-
-    for idx in range(runs):
-        try:
-            result = test_fn()
-        except pytest.skip.Exception:
-            raise
-        except Exception as e:
-            result = {
-                "success": False,
-                "scores": {},
-                "details": {"error": str(e)},
-                "errors": [str(e)],
-            }
-        result["trial_index"] = idx + 1
-        results.append(result)
-
-        if idx < runs - 1:
-            rate_limit_pause(pause_between, f"between evaluation runs {idx + 1} and {idx + 2}")
-
-    first_result = results[0]
-    trial_successes = sum(1 for r in results if r.get("success"))
-    trial_success_rate = round(trial_successes / runs * 100, 2) if runs else 0.0
-
-    score_keys = set()
-    for r in results:
-        for k, v in r.get("scores", {}).items():
-            if isinstance(v, (int, float)):
-                score_keys.add(k)
-
-    score_avgs = {}
-    for k in sorted(score_keys):
-        vals = [r["scores"][k] for r in results if isinstance(r.get("scores", {}).get(k), (int, float))]
-        if vals:
-            score_avgs[k] = round(sum(vals) / len(vals), 2)
-
-    trial_stats = {
-        "trial_count": runs,
-        "trial_successes": trial_successes,
-        "trial_success_rate_pct": trial_success_rate,
-        "trial_score_avgs": score_avgs,
-    }
-
-    return first_result, trial_stats, results
+    user_turns = [msg for i, msg in enumerate(raw_chat_messages) if i % 2 == 0]
+    user_turns.append("I approve the plan, please build the pipeline.")
+    return user_turns
 
 
 # ──────────────────────────────────────────────────────────────
-# Isolated Testing Helpers (Direct Invocation, No API)
+# Context Helpers
 # ──────────────────────────────────────────────────────────────
 
-from langchain_core.messages import HumanMessage, AIMessage
-
-from app.services.tools import _inject_template, _inject_component
-from tests.evaluation.prompts import (
-    CONSULTANT_TEST_PROMPT,
-    JUDGE_PROMPT,
-    PIPELINE_JUDGE_PROMPT,
-    DIAGRAM_JUDGE_PROMPT,
-)
-from tests.evaluation.schemas import AcademicEval, ArchitectEval, DiagramEval, RejectionEval, CodeRecreationEval
-
-
-def get_exact_context(template_ids, component_ids, store):
-    """Bypasses vector search to inject exact catalog items for deterministic logic testing.
+def get_exact_context(template_ids: list[str], component_ids: list[str], store) -> str:
+    """Bypasses vector search to inject exact catalog items for deterministic testing.
 
     Pulls items directly from the InMemoryStore using the same
     _inject_template / _inject_component functions used by the
     production RAG pipeline, but skips all scoring and ranking.
     """
-    found_ids = set()
-    context_blocks = []
+    from core.services.tools import _inject_component, _inject_template
+
+    found_ids: set[str] = set()
+    context_blocks: list[str] = []
     for tid in template_ids:
         _inject_template(tid, found_ids, context_blocks, store, embed_code=False)
     for cid in component_ids:
@@ -370,165 +241,122 @@ def get_exact_context(template_ids, component_ids, store):
     return "\n".join(context_blocks) + "\n\n"
 
 
-def force_approve_consultant(agent, real_context, chat_history, max_attempts=3):
-    """Runs the consultant agent chain and auto-retries if it stays in CHATTING status.
+# ──────────────────────────────────────────────────────────────
+# Step Extraction & Metrics
+# ──────────────────────────────────────────────────────────────
 
-    Uses direct chain invocation (prompt | agent), matching the
-    production pattern from agents.py consultant_node.
+# Matches: include { step_XXX } from '../steps/step_XXX'
+_STEP_INCLUDE_RE = re.compile(r"include\s*\{\s*([^}]+?)\s*\}\s*from\s*'([^']+)'")
 
-    Parameters
-    ----------
-    agent : Runnable
-        The LLM wrapped with `.with_structured_output(ConsultantOutput)`.
-    real_context : str
-        Deterministic RAG context from `get_exact_context`.
-    chat_history : list[BaseMessage]
-        The conversation messages to feed to the agent.
-    max_attempts : int
-        Maximum retries before failing the test.
 
-    Returns
-    -------
-    ConsultantOutput
-        The agent's structured output with status == APPROVED.
+def extract_steps_from_code(nf_code: str) -> list[str]:
+    """Extract step IDs from Nextflow include statements.
+
+    >>> extract_steps_from_code("include { step_4TY_MLST__mlst } from '../steps/step_4TY_MLST__mlst'")
+    ['step_4TY_MLST__mlst']
     """
-    chain = CONSULTANT_TEST_PROMPT | agent
-    for attempt in range(max_attempts):
-        result = chain.invoke({"context": real_context, "messages": chat_history})
+    if not nf_code:
+        return []
 
-        if result.status == "APPROVED":
-            return result
+    step_ids: set[str] = set()
+    for sym_list, _path in _STEP_INCLUDE_RE.findall(nf_code):
+        for sym in sym_list.split(";"):
+            sym = sym.strip()
+            if sym.startswith("step_"):
+                step_ids.add(sym.split()[0])  # Handle "step_X as alias"
 
-        print(f"\n[Attempt {attempt+1}] Agent returned status '{result.status}'. Nudging for approval...")
-        chat_history.append(AIMessage(content=result.response_to_user))
-        chat_history.append(HumanMessage(content="I explicitly APPROVE this pipeline plan. I am ready to build. Please change your status to APPROVED and output the module IDs."))
-
-    pytest.fail(f"Agent stubbornly refused to approve after {max_attempts} attempts. Final status: {result.status} | AI said: {result.response_to_user}")
+    return sorted(step_ids)
 
 
-def run_academic_judge(judge_llm, real_context, chat_history, ai_reply, design_plan=None):
-    """Runs the LLM judge for the Consultant (faithfulness + relevance).
+def compute_step_metrics(llm_code: str, gt_code: str) -> dict:
+    """Compute precision/recall/F1 on step selection between LLM and ground truth.
 
-    Invokes the production-grade JUDGE_PROMPT with AcademicEval
-    structured output. Returns a dictionary of results.
+    Returns a dict with:
+        llm_steps, gt_steps, common_steps, extra_steps, missing_steps,
+        precision, recall, f1
     """
-    judge = judge_llm.with_structured_output(AcademicEval)
-    formatted_chat = "\n".join([f"{m.type.capitalize()}: {m.content}" for m in chat_history])
-    evaluation = (JUDGE_PROMPT | judge).invoke({
-        "context": real_context,
-        "chat": formatted_chat,
-        "reply": ai_reply,
-        "design_plan": design_plan or "No design plan generated."
-    })
-    
-    if not evaluation:
-        return {}
-        
-    print(f"\nFaithfulness {evaluation.faithfulness_score} - {evaluation.faithfulness_reason}")
-    print(f"Relevance {evaluation.relevance_score} - {evaluation.relevance_reason}")
-    return evaluation.model_dump()
+    llm_steps = set(extract_steps_from_code(llm_code))
+    gt_steps = set(extract_steps_from_code(gt_code))
+
+    common = llm_steps & gt_steps
+    extra = sorted(llm_steps - gt_steps)
+    missing = sorted(gt_steps - llm_steps)
+
+    precision = (len(common) / len(llm_steps) * 100) if llm_steps else 0.0
+    recall = (len(common) / len(gt_steps) * 100) if gt_steps else 0.0
+    f1 = (2 * precision * recall / (precision + recall)) if (precision + recall) > 0 else 0.0
+
+    return {
+        "llm_steps": sorted(llm_steps),
+        "gt_steps": sorted(gt_steps),
+        "common_steps": sorted(common),
+        "extra_steps": extra,
+        "missing_steps": missing,
+        "precision": round(precision, 1),
+        "recall": round(recall, 1),
+        "f1": round(f1, 1),
+    }
 
 
-def run_pipeline_judge(judge_llm, design_plan, tech_context, nf_code, strategy=None):
-    """Runs the LLM judge for the rendered Nextflow code (syntax + logic)."""
-    judge = judge_llm.with_structured_output(ArchitectEval)
-    evaluation = (PIPELINE_JUDGE_PROMPT | judge).invoke({
-        "plan": design_plan,
-        "context": tech_context,
-        "code": nf_code
-    })
-    
-    if not evaluation:
-        return {}
+# ──────────────────────────────────────────────────────────────
+# Pairwise Formatting
+# ──────────────────────────────────────────────────────────────
 
-    print(f"\nSyntax {evaluation.syntax_score} - {evaluation.syntax_reason}")
-    print(f"Logic {evaluation.logic_score} - {evaluation.logic_reason}")
-    return evaluation.model_dump()
+def format_llm_output_for_pairwise(result: dict) -> str:
+    """Format the LLM response for pairwise comparison.
 
-
-def run_diagram_judge(judge_llm, tech_context, nf_code, mermaid_code, strategy):
-    """Runs the LLM judge for the generated Mermaid diagram (syntax + mapping)."""
-    judge = judge_llm.with_structured_output(DiagramEval)
-    evaluation = (DIAGRAM_JUDGE_PROMPT | judge).invoke({
-        "diagram_source": strategy,
-        "context": tech_context,
-        "nf_code": nf_code,
-        "mermaid_code": mermaid_code
-    })
-    
-    if not evaluation:
-        return {}
-
-    print(f"\nDiagram Syntax {evaluation.syntax_score} - {evaluation.syntax_reason}")
-    print(f"Diagram Mapping {evaluation.mapping_score} - {evaluation.mapping_reason}")
-    return evaluation.model_dump()
-
-def run_rejection_judge(judge_llm, prompt, rejection_reason, reply, status):
-    """Runs the LLM judge for Guardrail / Rejection logic."""
-    from tests.evaluation.prompts import REJECTION_JUDGE_PROMPT
-    judge = judge_llm.with_structured_output(RejectionEval)
-    evaluation = (REJECTION_JUDGE_PROMPT | judge).invoke({
-        "prompt": prompt,
-        "rejection_reason": rejection_reason,
-        "reply": reply,
-        "status": status,
-    })
-    
-    if not evaluation:
-        return {}
-        
-    print(f"\nRejection {evaluation.rejection_score} - {evaluation.rejection_reason}")
-    print(f"Alternative {evaluation.alternative_score} - {evaluation.alternative_reason}")
-    return evaluation.model_dump()
-    
-def run_recreation_judge(judge_llm, reference_code, generated_code):
-    """Runs the LLM judge for code recreation against a reference."""
-    from tests.evaluation.prompts import CODE_RECREATION_JUDGE_PROMPT
-    judge = judge_llm.with_structured_output(CodeRecreationEval)
-    evaluation = (CODE_RECREATION_JUDGE_PROMPT | judge).invoke({
-        "reference_code": reference_code,
-        "generated_code": generated_code,
-    })
-    
-    if not evaluation:
-        return {}
-        
-    print(f"\nStructural {evaluation.structural_score} - {evaluation.structural_reason}")
-    print(f"Channel {evaluation.channel_score} - {evaluation.channel_reason}")
-    return evaluation.model_dump()
-
-
-def build_test_execution_graph(store):
-    """Build the execution subgraph for direct isolated testing.
-
-    Mirrors the production build_execution_subgraph() from graph.py,
-    but compiles with an explicit store so hydrator_node can read catalog data.
+    Combines the natural language reply and the generated code into a single
+    string for the judge to evaluate. Truncates the reply to avoid overwhelming
+    the judge with very long responses.
     """
-    from langgraph.graph import StateGraph, END
-    from app.services.graph_state import GraphState
-    from app.services.agents import hydrator_node, architect_generate_node, diagram_node, deterministic_diagram_node
-    from app.services.repair import repair_node, should_repair
-    from app.services.renderer import renderer_node
+    parts = []
 
-    builder = StateGraph(GraphState)
-    builder.add_node("hydrator", hydrator_node)
-    builder.add_node("architect", architect_generate_node)
-    builder.add_node("repair", repair_node)
-    builder.add_node("renderer", renderer_node)
-    builder.add_node("diagram", diagram_node)
-    builder.add_node("deterministic_diagram", deterministic_diagram_node)
+    reply = (result.get("reply") or "").strip()
+    if reply:
+        parts.append(f"Reply:\n{reply[:3000]}")
 
-    builder.set_entry_point("hydrator")
-    builder.add_edge("hydrator", "architect")
-    builder.add_conditional_edges(
-        "architect", should_repair,
-        {"success": "renderer", "repair": "repair", "fail": "renderer"}
+    code = (result.get("nextflow_code") or "").strip()
+    if code:
+        parts.append(f"Nextflow Code:\n{code}")
+    else:
+        parts.append("(No Nextflow code was generated)")
+
+    mermaid = (result.get("mermaid_deterministic") or result.get("mermaid_agent") or "").strip()
+    if mermaid:
+        parts.append(f"Mermaid Diagram:\n```mermaid\n{mermaid}\n```")
+
+    return "\n\n".join(parts)
+
+
+def format_ground_truth_for_pairwise(example: dict) -> str:
+    """Format the ground truth for pairwise comparison.
+
+    Depending on the test type, the ground truth might be code, a consultant
+    reply, a Mermaid diagram, or a rejection response.
+    """
+    parts = []
+
+    # Text-based ground truths (Consultant, Rejection, Recreation)
+    gt_reply = (
+        example.get("consultant_reply")
+        or example.get("rejection_reason")
+        or example.get("rejection_reply")
+        or example.get("recreation_reply")
     )
-    builder.add_edge("repair", "architect")
-    builder.add_edge("renderer", "deterministic_diagram")
-    builder.add_edge("renderer", "diagram")
-    builder.add_edge("deterministic_diagram", END)
-    builder.add_edge("diagram", END)
+    if gt_reply:
+        parts.append(f"Reply:\n{gt_reply}")
 
-    return builder.compile(store=store)
+    # Diagram ground truth
+    diagram_code = example.get("diagram_code")
+    if diagram_code:
+        parts.append(f"Mermaid Diagram:\n```mermaid\n{diagram_code}\n```")
 
+    # Code-based ground truth
+    code = (example.get("nextflow_code") or "").strip()
+    if code:
+        parts.append(f"Nextflow Code:\n{code}")
+
+    if not parts:
+        return "(No ground truth available)"
+
+    return "\n\n".join(parts)

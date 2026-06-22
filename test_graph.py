@@ -1,5 +1,7 @@
 import asyncio
-from app.services.graph import app_graph
+from dotenv import load_dotenv
+load_dotenv()
+from core.services.graph import app_graph
 
 # We need a configurable thread to use the MemorySaver checkpointer
 config = {"configurable": {"thread_id": "test_thread_1"}}
