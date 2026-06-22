@@ -279,20 +279,20 @@ flowchart LR
 | `main.py` | API Entrypoint | Instantiates Uvicorn ASGI server and triggers Lifespan hooks. |
 | `core/` | **[ACTIVE] System Brain** | The modernized logic layer. Contains all graph nodes, tools, and strict validation schemas. |
 | `core/api.py` | HTTP Routing | Exposes `/chat` and `/health`, maps Pydantic request models to LangGraph inputs. |
-| `core/loader.py` | Data Hydration | Singleton manager for reading `.jsonl` and `.json` catalogs into memory matrices. |
+| `core/loader.py` | Data Hydration | Singleton manager for reading `.jsonl` and `.json` catalogs into memory matrices based on the active plugin. |
 | `core/models/` | Immune System | Pydantic classes defending against LLM syntax hallucinations. The ultimate source of truth. |
 | `core/services/`| Cognitive Engines | The actual LangGraph nodes (`graph.py`, `agents.py`, `tools.py`). |
 | `core/utils/` | Code Synthesizers | Pure algorithms (Jinja2) for rewriting abstract states into physical text. |
-| `data/` | Semantic Memory Base | The physical `.nf` snippets, RAG indexes, and catalog JSONs. |
-| `tests/` | QA & Benchmarking | Exhaustive test suite simulating hundreds of domain-specific use cases and failure scenarios. |
-| `_app_legacy/` | **[DEPRECATED] Vault**| Old application structures preserved for historical context. **DO NOT USE.** |
+| `plugins/` | Semantic Memory Base | The domain-specific `.nf` snippets, RAG indexes, prompt overrides, and catalog JSONs (e.g., `plugins/izs/`). |
+| `ingestion/` | Database Builders | Tools and parser scripts used to dynamically build vector databases and code catalogs for new plugins. |
+| `tests/` | QA & Benchmarking | Exhaustive Pairwise LLM Judge test suite simulating complex guardrail and domain-specific scenarios. |
 | `Dockerfile` | Container Architecture| Defines the multi-stage build for scalable, stateless API deployments. |
 
 > [!TIP]
 > **Developer Navigation Protocol**:
-> If you are adding a new domain tool: Update `data/catalog/` and `data/code_store_hollow.jsonl`.
+> If you are adding a new domain tool: Update `plugins/<domain>/catalog/` and `plugins/<domain>/code_store.jsonl`.
 > If the LLM is making syntax mistakes: Update `core/models/ast_structure.py`.
-> If you are changing the pipeline building steps: Update `core/services/graph.py` and `agents.py`.
+> If you are changing the pipeline building steps: Update `core/services/graph.py`.
 
 ---
 
@@ -304,12 +304,12 @@ flowchart LR
 python -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
 
-# 2. Inject Secrets
+# 2. Inject Secrets & Plugin Config
 export OPENAI_API_KEY="your_key"
-export JUDGE_BASE_URL="optional_for_testing"
+export NF_AGENT_PLUGIN="izs"
 
 # 3. Ignite Core
-uvicorn main:app --reload --port 8000
+uvicorn main:app --reload --port 8080
 ```
 
 ### 8.2 Docker Orchestration
