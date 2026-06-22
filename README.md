@@ -247,8 +247,8 @@ flowchart LR
     end
     
     subgraph Transformation Engines
-        Engine1[Deterministic Engine\n(Python/AST parser)]
-        Engine2[Probabilistic Engine\n(LLM)]
+        Engine1["Deterministic Engine<br>(Python/AST parser)"]
+        Engine2["Probabilistic Engine<br>(LLM)"]
     end
     
     subgraph Outputs
