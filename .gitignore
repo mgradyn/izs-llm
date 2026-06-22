@@ -28,3 +28,6 @@ full_ids.txt
 # Databases and large data
 chroma_db/
 cohesive-llm-benchmark-eval-full/
+
+# AI IDE skills
+.agents/
