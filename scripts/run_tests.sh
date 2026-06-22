@@ -52,8 +52,8 @@ fi
 
 # No need for external networking setup!
 docker compose exec \
-  -e JUDGE_BASE_URL="http://195.148.31.206:8000/v1" \
-  -e MISTRAL_API_KEY="JhT93ppqIVlosR1yEzdcFq9KQtVM5M6R" \
+  -e JUDGE_BASE_URL="${JUDGE_BASE_URL:-http://195.148.31.206:8000/v1}" \
+  -e MISTRAL_API_KEY="${MISTRAL_API_KEY}" \
   -e ONLY_NEW_SCENARIOS="${ONLY_NEW_SCENARIOS}" \
   -e ONLY_NEW_REJECTION_SCENARIOS="${ONLY_NEW_REJECTION_SCENARIOS}" \
   api pytest "$TARGET" -v -s $K_FLAG -W ignore::DeprecationWarning
