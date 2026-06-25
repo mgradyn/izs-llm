@@ -40,7 +40,7 @@ helper_imports:
   "extractKey": "../functions/common.nf"
   "extractDsRef": "../functions/common.nf"
   "getEmpty": "../functions/common.nf"
-  "getReferences": "../functions/common.nf"
+  "getReferences": "../functions/parameters.nf"
   "_getParam": "../functions/parameters.nf"
   "getDS": "../functions/parameters.nf"
   "isFullOutput": "../functions/parameters.nf"

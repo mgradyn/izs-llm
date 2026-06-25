@@ -82,13 +82,13 @@ def _build_exact_match(used_template_id: str, context_parts: list[str], store: B
             context_parts.extend(_get_component_reference(comp_id, store))
 
 
-def _build_adapted_match(used_template_id: str, component_ids: list[str], context_parts: list[str], store: BaseStore) -> None:
+def _build_adapted_match(used_template_id: str, component_ids: list[str], context_parts: list[str], store: BaseStore, helper_names: list[str]) -> None:
     context_parts.append(f"### ADAPTED TEMPLATE MODE: Based on {used_template_id}")
     t_item = store.get(("code",), used_template_id)
     tmpl_code = t_item.value.get("content") if t_item else None
 
     if tmpl_code:
-        allowed_ids = {used_template_id, *component_ids}
+        allowed_ids = {used_template_id, *component_ids, *helper_names}
         filtered_code = filter_template_logic(tmpl_code, allowed_ids)
 
         context_parts.append(f"[[TEMPLATE SOURCE CODE: {used_template_id}]]")
@@ -127,7 +127,7 @@ def hydrator_node(state: GraphState, store: BaseStore) -> Any:
     if strategy == "EXACT_MATCH" and used_template_id:
         _build_exact_match(used_template_id, context_parts, store)
     elif strategy == "ADAPTED_MATCH" and used_template_id:
-        _build_adapted_match(used_template_id, component_ids, context_parts, store)
+        _build_adapted_match(used_template_id, component_ids, context_parts, store, helper_names)
     else:
         _build_custom_match(component_ids, context_parts, store)
 
