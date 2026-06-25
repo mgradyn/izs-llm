@@ -257,8 +257,22 @@ class Entrypoint(BaseModel):
 
 
 
+class DataFlowSubWorkflow(BaseModel):
+    name: str = Field(description="Name of the sub-workflow")
+    takes: list[str] = Field(description="Exact 'take' parameters needed")
+    emits: list[str] = Field(description="Exact 'emit' parameters produced")
+
+class DataFlowPlan(BaseModel):
+    entrypoint_instantiations: list[str] = Field(
+        description="List exactly how you will instantiate variables in the entrypoint (e.g., 'trimmed = getSingleInput()'). DO NOT skip this if you need input data!"
+    )
+    sub_workflows: list[DataFlowSubWorkflow] = Field(
+        description="List the sub-workflows you plan to create, and their take/emit channels."
+    )
+
 class NextflowPipelineAST(BaseModel):
     reasoning: str | None = Field(None, description="Explain your thought process, what you are fixing, and how you addressed any validation errors. Do NOT place conversational text in the code fields.")
+    data_flow_plan: DataFlowPlan = Field(description="Deterministic planning step: explicitly map out all inputs, takes, and emits BEFORE generating the code.")
     imports: list[ImportItem] = Field(default_factory=list)
     globals: list[GlobalDef] = Field(default_factory=list)
     inline_processes: list[InlineProcess] = Field(default_factory=list)

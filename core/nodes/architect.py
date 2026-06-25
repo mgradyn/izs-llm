@@ -23,15 +23,26 @@ def architect_reason_node(state: GraphState) -> Any:
     llm = get_llm()
     validation_error = state.get("validation_error", "")
     plan = state.get('design_plan', 'No plan provided.')
+    tech_context = state.get('technical_context', 'No context provided.')
 
     from core.services.architect_tools import ARCHITECT_TOOLS
     llm_with_tools = llm.bind_tools(ARCHITECT_TOOLS)
 
     system_template = """You are a Nextflow DSL2 code architect. You previously attempted to generate a pipeline AST but validation failed. You now have tools to investigate and fix the issue.
 
+You have access to the TECHNICAL CONTEXT below which contains all the source code of the components. You DO NOT need to look them up.
+Read the VALIDATION ERROR, the PLAN, and the TECHNICAL CONTEXT, and explain what needs to be fixed.
+
 TOOLS:
-1. `lookup_component_code(component_id)` - Read a component's source code to check take/emit channels
-2. `validate_body_code(code_snippet, workflow_name)` - Validate a body_code snippet for DSL2 errors
+1. `check_component_channels(component_name)` - Look up a specific component's EXACT take/emit signature.
+2. `verify_dataflow_plan(entrypoint_instantiations, sub_workflows)` - Test your dataflow mapping to see if you forgot to instantiate any variables.
+3. `validate_body_code(code_snippet, workflow_name)` - Validate a body_code snippet for DSL2 syntax errors.
+
+INCREMENTAL REASONING WORKFLOW (Mandatory):
+Step 1: Use `check_component_channels` to double-check the constraints of any complex components.
+Step 2: Use `verify_dataflow_plan` to propose and test your DataFlow plan. Do NOT proceed until the tool returns "SUCCESS".
+Step 3: Use `validate_body_code` to test any tricky groovy snippets you intend to write.
+Step 4: Once all tests pass, output your final reasoning.
 
 CRITICAL DSL2 RULES (common mistakes):
 - body_code must NOT contain 'workflow name {{}}', 'take:', 'main:', or 'emit:' keywords — the rendering template handles these automatically
@@ -40,15 +51,18 @@ CRITICAL DSL2 RULES (common mistakes):
 - The entrypoint workflow calls sub-workflows: data = my_input(); subworkflow_name(data)
 - The sub-workflow receives data via take_channels, processes it, and emits results via emit_channels
 
-TASK: Investigate the validation error below. Use your tools to check the specific components involved. Explain what needs to be fixed.
+TASK: Investigate the validation error below. Explain what needs to be fixed before retrying.
 
 VALIDATION ERROR:
 {validation_error}
 
 PLAN:
-{plan}"""
+{plan}
 
-    system_content = system_template.replace("{validation_error}", str(validation_error)).replace("{plan}", str(plan))
+TECHNICAL CONTEXT:
+{tech_context}"""
+
+    system_content = system_template.replace("{validation_error}", str(validation_error)).replace("{plan}", str(plan)).replace("{tech_context}", str(tech_context))
 
     state_messages = state.get("messages", [])
 

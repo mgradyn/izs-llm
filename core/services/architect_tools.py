@@ -10,7 +10,8 @@ import re
 
 from langchain_core.tools import tool
 
-from core.services.consultant_tools import lookup_catalog_item
+from core.services.consultant_tools import _parse_nextflow_channels
+from core.catalog_registry import get_registry
 
 
 @tool
@@ -51,8 +52,16 @@ def validate_body_code(code_snippet: str, workflow_name: str) -> dict:  # noqa: 
         )
 
     # Check for active channels in sub-workflows
-    if not _is_entrypoint:
-        active_calls = re.findall(r'\b(get_[a-zA-Z0-9_]+|my_active_channel)\s*\(', code_snippet)
+    from core.catalog_registry import get_registry
+    registry = get_registry()
+    
+    if not _is_entrypoint and registry.is_initialized:
+        exported_functions = registry.function_exports
+        active_calls = []
+        for match in re.finditer(r'\b([a-zA-Z0-9_]+)\s*\(', code_snippet):
+            func_name = match.group(1)
+            if func_name in exported_functions:
+                active_calls.append(func_name)
         if active_calls:
             issues.append(
                 f"Active channel instantiation {active_calls} found inside sub-workflow '{workflow_name}'. "
@@ -110,13 +119,18 @@ def validate_body_code(code_snippet: str, workflow_name: str) -> dict:  # noqa: 
         }
 
         plugin_helpers = set()
+        exported_functions = set()
         try:
             from core.plugin_loader import get_active_plugin
             plugin_helpers = set(get_active_plugin().helper_imports.keys())
+            exported_functions = registry.function_exports
         except Exception:
             pass
 
-        filtered_referenced = {r for r in referenced if not (r in builtins or r in plugin_helpers or r.startswith('get_') or r == 'my_active_channel')}
+        filtered_referenced = {
+            r for r in referenced 
+            if not (r in builtins or r in plugin_helpers or r in exported_functions)
+        }
 
         invalid = filtered_referenced - registry.valid_components
         if invalid:
@@ -130,7 +144,87 @@ def validate_body_code(code_snippet: str, workflow_name: str) -> dict:  # noqa: 
     }
 
 
+@tool
+def verify_dataflow_plan(entrypoint_instantiations: list[str], sub_workflows: list[dict]) -> dict:
+    """Use this tool to incrementally test your dataflow plan before finalizing your reasoning.
+    
+    Args:
+        entrypoint_instantiations: List of variable instantiations (e.g., ["input = my_active_channel()"])
+        sub_workflows: List of dictionaries with 'name', 'takes' (list of strings), and 'emits' (list of strings).
+    """
+    warnings = []
+    
+    # Extract defined variables from entrypoint instantiations
+    defined_vars = set()
+    for inst in entrypoint_instantiations:
+        if "=" in inst:
+            lhs = inst.split("=")[0].strip()
+            # Handle tuple unpacking: val1, val2 = ...
+            if "," in lhs:
+                for v in lhs.split(","):
+                    defined_vars.add(v.strip())
+            else:
+                defined_vars.add(lhs)
+
+    # Check subworkflow takes against defined vars (warning if not defined)
+    for sw in sub_workflows:
+        sw_name = sw.get("name", "unknown")
+        takes = sw.get("takes", [])
+        for t in takes:
+            if t not in defined_vars and not t.startswith("params."):
+                warnings.append(
+                    f"Warning: Subworkflow '{sw_name}' takes '{t}', but '{t}' is never instantiated in the entrypoint. "
+                    "Did you forget to add 'var = getSingleInput()' or similar?"
+                )
+
+    if not warnings:
+        return {"status": "SUCCESS", "message": "DataFlow Plan looks logically consistent."}
+    return {"status": "WARNINGS FOUND", "warnings": warnings}
+
+
+@tool
+def check_component_channels(component_name: str) -> dict:
+    """Check exactly what channels a specific component takes and emits.
+    Use this to pull specific constraints into your working memory to avoid hallucinations.
+    
+    Args:
+        component_name: The name of the component (e.g., 'step_2AS_mapping__ivar')
+    """
+    registry = get_registry()
+    if component_name not in registry.valid_components:
+        return {"error": f"Component '{component_name}' not found in catalog."}
+
+    # Extract source code
+    comp = registry.get_component(component_name)
+    code = ""
+    if comp:
+        with open(comp.file_path, "r") as f:
+            code = f.read()
+    else:
+        # Check templates
+        for p in registry.plugins.values():
+            if component_name in p.templates:
+                with open(p.templates[component_name], "r") as f:
+                    code = f.read()
+                break
+
+    parsed = _parse_nextflow_channels(code)
+    takes = parsed["takes"]
+    emits = parsed["emits"]
+    
+    from core.services.ast_compiler import _is_void_tool
+    if _is_void_tool(component_name):
+        emits = ["(VOID TOOL - DOES NOT EMIT)"]
+
+    return {
+        "component": component_name,
+        "takes": takes if takes else ["(NONE)"],
+        "emits": emits if emits else ["(NONE)"],
+    }
+
+
 ARCHITECT_TOOLS = [
-    lookup_catalog_item,
     validate_body_code,
+    verify_dataflow_plan,
+    check_component_channels,
 ]

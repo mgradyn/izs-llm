@@ -214,6 +214,11 @@ class CatalogRegistry:
         return self._valid_components.copy()
 
     @property
+    def function_exports(self) -> set[str]:
+        """All known exported functions."""
+        return set(self._function_exports.keys())
+
+    @property
     def is_initialized(self) -> bool:
         return self._initialized
 
