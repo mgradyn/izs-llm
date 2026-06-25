@@ -82,6 +82,8 @@ def generate_imports_for_code(all_code: str, defined_sws: set) -> dict:
     for func in used_callables:
         if func in helper_imports:
             path = helper_imports[func]
+        elif registry.get_function_import_path(func):
+            path = registry.get_function_import_path(func)
         else:
             path = registry.get_import_path(func)
 
@@ -126,7 +128,7 @@ def validate_framework_components(all_code: str, defined_sws: set, defined_inlin
 
     invalid = []
     for item in to_check:
-        if item in plugin_helpers:
+        if item in plugin_helpers or registry.get_function_import_path(item):
             continue
 
         if item.startswith('get_') or item == 'my_active_channel':
@@ -137,3 +139,49 @@ def validate_framework_components(all_code: str, defined_sws: set, defined_inlin
             invalid.append((item, matches))
 
     return invalid
+
+def validate_undefined_variables(body_code: str, defined_vars: set) -> list[str]:
+    """
+    Scans the body code to ensure that base variables used in expressions were actually defined.
+    Returns a list of undefined variables found.
+    """
+    if not body_code:
+        return []
+        
+    local_vars = set(defined_vars)
+    
+    # Extract assignments: var = ...
+    assignments = re.findall(r'\b([a-zA-Z0-9_]+)\s*=(?!=)', body_code)
+    local_vars.update(assignments)
+    
+    # Extract .set { var }
+    sets = re.findall(r'\.set\s*\{\s*([a-zA-Z0-9_]+)\s*\}', body_code)
+    local_vars.update(sets)
+    
+    used_vars = set()
+    
+    # Find variables used before a dot: var.method()
+    dot_usages = re.findall(r'\b([a-zA-Z_][a-zA-Z0-9_]*)\s*\.', body_code)
+    used_vars.update(dot_usages)
+    
+    # Find variables used as arguments in process calls: process(var1, var2.prop)
+    arg_usages = re.findall(r'\b[a-zA-Z_][a-zA-Z0-9_]*\s*\(([^)]+)\)', body_code)
+    for arg_str in arg_usages:
+        args = arg_str.split(',')
+        for arg in args:
+            arg = arg.strip()
+            if not arg: continue
+            base_var = re.split(r'[\.\[]', arg)[0].strip()
+            if base_var.startswith("'") or base_var.startswith('"'):
+                continue
+            if re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', base_var):
+                used_vars.add(base_var)
+                
+    builtins = {'true', 'false', 'null', 'it', 'Channel', 'file', 'param', 'get', 'def', 'workflow', 'process', 'log', 'error', 'exit', 'println', 'env'}
+    
+    undefined = []
+    for var in used_vars:
+        if var not in local_vars and var not in builtins:
+            undefined.append(var)
+            
+    return sorted(list(set(undefined)))

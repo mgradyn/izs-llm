@@ -30,6 +30,7 @@ class CatalogRegistry:
         self._valid_components: set[str] = set()
         self._import_paths: dict[str, str] = {}
         self._component_outputs: dict[str, list[str]] = {}
+        self._function_exports: dict[str, str] = {}
         self._initialized = False
 
     def init_from_plugin(self, plugin: Any) -> None:
@@ -55,9 +56,12 @@ class CatalogRegistry:
         # Build import path mappings (from catalog or plugin prefix)
         self._build_import_paths(plugin)
 
+        # Dynamic scanning for exported functions
+        self._load_function_exports(plugin)
+
         self._initialized = True
         logger.info(f"--- [REGISTRY] Initialized: {len(self._valid_components)} components, "
-              f"{len(self._void_exact)} exact void, {len(self._void_suffixes)} void suffixes")
+              f"{len(self._void_exact)} exact void, {len(self._void_suffixes)} void suffixes, {len(self._function_exports)} exported functions")
 
     def init_from_catalog(self, catalog_path: Path, templates_path: Path | None = None, modules_dir: Path | None = None) -> None:
         """Initialize directly from a catalog file (for ingestion-based setups)."""
@@ -127,6 +131,40 @@ class CatalogRegistry:
                 else:
                     self._import_paths[comp_name] = f"{prefix}{comp_name}"
 
+    def _load_function_exports(self, plugin: Any) -> None:
+        """Scan the code store to find all exported functions and map them to their parent component."""
+        import re
+        store_paths = [
+            plugin.plugin_dir / "code_store_hollow.jsonl",
+            plugin.plugin_dir / "code_store.jsonl",
+        ]
+        
+        target_path = next((p for p in store_paths if p.exists()), None)
+        if not target_path:
+            return
+
+        static_helpers = set(getattr(plugin, "helper_imports", {}).keys())
+
+        try:
+            with open(target_path, encoding='utf-8') as f:
+                for line in f:
+                    if not line.strip():
+                        continue
+                    data = json.loads(line)
+                    comp_id = data.get("id")
+                    content = data.get("content", "")
+                    
+                    if not comp_id or not content:
+                        continue
+                        
+                    matches = re.finditer(r'^\s*def\s+([a-zA-Z0-9_]+)\s*\(', content, flags=re.MULTILINE)
+                    for m in matches:
+                        func_name = m.group(1)
+                        if func_name not in static_helpers:
+                            self._function_exports[func_name] = comp_id
+        except Exception as e:
+            logger.warning(f"--- [REGISTRY] Warning: Could not load function exports: {e}")
+
     # ── Public API ───────────────────────────────────────────────────────────
 
     def is_void_tool(self, name: str) -> bool:
@@ -152,6 +190,13 @@ class CatalogRegistry:
     def get_import_path(self, comp_id: str) -> str | None:
         """Get the import path for a component."""
         return self._import_paths.get(comp_id)
+
+    def get_function_import_path(self, func_name: str) -> str | None:
+        """Get the import path for a specific exported function."""
+        comp_id = self._function_exports.get(func_name)
+        if comp_id:
+            return self.get_import_path(comp_id)
+        return None
 
 
 

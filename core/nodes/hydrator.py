@@ -88,8 +88,19 @@ def _build_adapted_match(used_template_id: str, component_ids: list[str], contex
     tmpl_code = t_item.value.get("content") if t_item else None
 
     if tmpl_code:
+        import re
         allowed_ids = {used_template_id, *component_ids, *helper_names}
         filtered_code = filter_template_logic(tmpl_code, allowed_ids)
+
+        take_match = re.search(r'^\s*take:\s*([a-zA-Z0-9_,\s]+)(?=\s*main:|\s*emit:|\})', tmpl_code, flags=re.MULTILINE)
+        if take_match:
+            takes = [t.strip() for t in take_match.group(1).split() if t.strip()]
+            if takes:
+                context_parts.append(
+                    f"WARNING: The template below defines 'take:' parameters ({', '.join(takes)}). "
+                    f"If you adapt this logic inline into the main entrypoint, you MUST explicitly fetch "
+                    f"or define these inputs first (e.g. `{takes[0]} = getSingleInput()`). DO NOT use them undefined!"
+                )
 
         context_parts.append(f"[[TEMPLATE SOURCE CODE: {used_template_id}]]")
         context_parts.append("INFO: Some steps in this template have been commented out because they are not in your Design Plan.")

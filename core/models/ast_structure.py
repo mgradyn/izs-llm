@@ -57,15 +57,7 @@ class GlobalDef(BaseModel):
             plugin_helpers = ['get', 'param']
 
         if '(' in v and ')' in v and (any(kw in v for kw in plugin_helpers) or 'Channel' in v):
-            raise ValueError(
-                f"\n=======================================================\n"
-                f"GLOBAL SCOPE ERROR: You placed an active function '{v}' in the `globals` list.\n"
-                f"Active data channels WILL CRASH Nextflow if defined globally.\n"
-                f"CRITICAL REPAIR INSTRUCTION: \n"
-                f"1. DELETE this variable from the `globals` array.\n"
-                f"2. Move '{v}' down into the `entrypoint` body_code!\n"
-                f"=======================================================\n"
-            )
+            raise ValueError(f"GLOBAL SCOPE ERROR: Active func '{v}' in globals. Move to entrypoint body_code.")
         return v
 
 class InlineProcess(BaseModel):
@@ -87,10 +79,7 @@ class InlineProcess(BaseModel):
         forbidden = ['workflow', '.cross(', '.join(', '.multiMap', '.map{', '.mix(']
         for kw in forbidden:
             if kw in v:
-                raise ValueError(
-                    f"INVALID PROCESS CONTENT: Found DSL2 keyword '{kw}' inside a Process script.\n"
-                    f"Processes are for BASH/SHELL commands only. If you need logic, define a 'sub_workflow'."
-                )
+                raise ValueError(f"DSL2 keyword '{kw}' inside Process. Use sub_workflow for logic.")
         return v
 
     @field_validator('name')
@@ -147,9 +136,7 @@ class WorkflowBlock(BaseModel):
         for ch in v:
             cleaned = ch.strip()
             if cleaned and not re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', cleaned):
-                raise ValueError(
-                    f"TAKE CHANNEL FORMAT ERROR: '{cleaned}' is not a valid identifier."
-                )
+                raise ValueError(f"TAKE ERROR: '{cleaned}' is invalid identifier.")
         return [ch.strip() for ch in v if ch.strip()]
 
     @field_validator('emit_channels')
@@ -157,10 +144,7 @@ class WorkflowBlock(BaseModel):
     def validate_emit_format(cls, v: Any) -> Any:
         for emit_str in v:
             if '(' in emit_str or ')' in emit_str:
-                raise ValueError(
-                    f"EMIT FORMAT ERROR: '{emit_str}' is invalid. You cannot call functions or logic in emit_channels. "
-                    f"Only property extraction is allowed (e.g., 'result = process_out.result')."
-                )
+                raise ValueError(f"EMIT ERROR: '{emit_str}' invalid. No logic allowed, only assignments like 'res = proc.res'.")
         return v
 
     @field_validator('emit_channels')
@@ -171,17 +155,11 @@ class WorkflowBlock(BaseModel):
             if '=' in emit_str:
                 lhs = emit_str.split('=')[0].strip()
                 if not re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', lhs):
-                    raise ValueError(
-                        f"EMIT NAME ERROR: '{lhs}' is not a valid identifier. "
-                        f"Use format: 'name = variable.property' (e.g., 'result = process_out.result')."
-                    )
+                    raise ValueError(f"EMIT NAME ERROR: '{lhs}' is invalid identifier.")
             else:
                 cleaned = emit_str.strip()
                 if cleaned and not re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', cleaned):
-                    raise ValueError(
-                        f"EMIT FORMAT ERROR: '{cleaned}' is not a valid identifier. "
-                        f"Use a bare variable name or 'name = value' format."
-                    )
+                    raise ValueError(f"EMIT ERROR: '{cleaned}' is invalid identifier.")
         return v
 
     @model_validator(mode='after')
@@ -194,11 +172,7 @@ class WorkflowBlock(BaseModel):
         for ch in self.take_channels:
             pattern = rf"\b{re.escape(ch)}\b"
             if not re.search(pattern, combined_text):
-                raise ValueError(
-                    f"LOGIC ERROR in workflow '{self.name}'. You defined '{ch}' in take_channels "
-                    f"but you never used it in the body_code and never emitted it. "
-                    f"Either use it, emit it directly, or remove it from take_channels."
-                )
+                raise ValueError(f"LOGIC ERROR: '{ch}' in take_channels of '{self.name}' is unused and not emitted.")
         return self
 
     @model_validator(mode='after')
@@ -238,17 +212,7 @@ class WorkflowBlock(BaseModel):
                 continue
 
             if base_var not in valid_vars:
-                raise ValueError(
-                    f"\n=======================================================\n"
-                    f"HALLUCINATION DETECTED in workflow '{self.name}'.\n"
-                    f"You are trying to emit '{emit_str}' but the base variable '{base_var}' was NEVER DEFINED in the body_code.\n\n"
-                    f"CRITICAL REPAIR INSTRUCTIONS:\n"
-                    f"1. Did you forget to extract the channel? (e.g., If you assigned `analysis_out = my_process(...)`, you CANNOT just emit `report_file`. You MUST emit `analysis_out.report_file` or define `report_file = analysis_out.report_file` first).\n"
-                    f"2. Did you misspell the variable name from your `.set {{}}` or assignment block?\n"
-                    f"3. If this tool is a VOID tool (publishDir only), it DOES NOT emit anything! Delete this emit entirely.\n"
-                    f"Fix the emit channel or the body_code so the variables match exactly.\n"
-                    f"=======================================================\n"
-                )
+                raise ValueError(f"HALLUCINATION in '{self.name}': Emitting undefined variable '{base_var}'. Did you misspell it, forget to assign it, or emit a void tool?")
         return self
 
     @model_validator(mode='after')
@@ -257,15 +221,7 @@ class WorkflowBlock(BaseModel):
             return self
 
         if re.search(r'\b[a-zA-Z0-9_]+\s*\([^)]*\)\s*\.set\s*\{', self.body_code):
-            raise ValueError(
-                f"\n=======================================================\n"
-                f"SYNTAX ERROR in '{self.name}': You appended `.set {{...}}` to a process call.\n"
-                f"In Nextflow, `.set` is ONLY for channel shaping (like `.map`).\n"
-                f"CRITICAL REPAIR INSTRUCTION:\n"
-                f"1. If this is a standard process, use direct assignment: `var_name = process(...)`\n"
-                f"2. If this is a VOID tool, DO NOT assign it to a variable at all. Just call `process(...)`.\n"
-                f"=======================================================\n"
-            )
+            raise ValueError(f"SYNTAX ERROR in '{self.name}': Do not use .set on processes. Use assignment 'var = process(...)' or call directly if void tool.")
         return self
 
     @model_validator(mode='after')
@@ -281,10 +237,16 @@ class WorkflowBlock(BaseModel):
         for m in assignment_matches:
             proc_name = m.group(1)
             if _is_void_tool(proc_name):
-                raise ValueError(
-                    f"VOID TOOL ERROR in '{self.name}': Assigned void tool '{proc_name}' to a variable. "
-                    f"Remove the assignment and call it directly."
-                )
+                raise ValueError(f"VOID TOOL ERROR in '{self.name}': Assigned void tool '{proc_name}' to a variable. Call it directly.")
+        return self
+
+    @model_validator(mode='after')
+    def validate_no_undefined_variables(self) -> Any:
+        from core.services.ast_compiler import validate_undefined_variables
+        defined = set(self.take_channels)
+        undefined = validate_undefined_variables(self.body_code, defined)
+        if undefined:
+            raise ValueError(f"UNDEFINED VAR in '{self.name}': Variables {', '.join(undefined)} used but not defined in take_channels or locally.")
         return self
 
 class Entrypoint(BaseModel):
@@ -300,7 +262,16 @@ class Entrypoint(BaseModel):
         cleaned_body, _ = heal_workflow_body(v)
         return cleaned_body
 
+    @model_validator(mode='after')
+    def validate_no_undefined_variables(self) -> Any:
+        from core.services.ast_compiler import validate_undefined_variables
+        undefined = validate_undefined_variables(self.body_code, set())
+        if undefined:
+            raise ValueError(f"UNDEFINED VAR in entrypoint: Variables {', '.join(undefined)} used but not defined. Did you forget to getSingleInput()?")
+        return self
+
 class NextflowPipelineAST(BaseModel):
+    reasoning: str | None = Field(None, description="Explain your thought process, what you are fixing, and how you addressed any validation errors. Do NOT place conversational text in the code fields.")
     imports: list[ImportItem] = Field(default_factory=list)
     globals: list[GlobalDef] = Field(default_factory=list)
     inline_processes: list[InlineProcess] = Field(default_factory=list)
@@ -392,12 +363,7 @@ class NextflowPipelineAST(BaseModel):
                 error_details.append(f"  - {item}{suggestion}")
             details_str = "\n".join(error_details)
 
-            raise ValueError(
-                f"FRAMEWORK CONSTRAINT VIOLATION: The following components/processes do NOT exist "
-                f"in the catalog:\n"
-                f"{details_str}\n\n"
-                f"REPAIR: Replace them with valid catalog components or remove them.\n"
-            )
+            raise ValueError(f"CATALOG ERROR: Missing components/processes:\n{details_str}\nReplace with valid catalog components.")
         return self
 
     @model_validator(mode='after')
@@ -410,8 +376,5 @@ class NextflowPipelineAST(BaseModel):
         for sw in self.sub_workflows:
             pattern = rf"\b{sw.name}\b\s*\("
             if not re.search(pattern, all_code):
-                raise ValueError(
-                    f"VALIDATION ERROR: The sub_workflow '{sw.name}' is defined but NEVER CALLED in the pipeline. "
-                    f"Either call it in the entrypoint or subworkflow or remove it."
-                )
+                raise ValueError(f"UNUSED WORKFLOW: '{sw.name}' is defined but NEVER CALLED.")
         return self
