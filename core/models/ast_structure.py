@@ -240,14 +240,7 @@ class WorkflowBlock(BaseModel):
                 raise ValueError(f"VOID TOOL ERROR in '{self.name}': Assigned void tool '{proc_name}' to a variable. Call it directly.")
         return self
 
-    @model_validator(mode='after')
-    def validate_no_undefined_variables(self) -> Any:
-        from core.services.ast_compiler import validate_undefined_variables
-        defined = set(self.take_channels)
-        undefined = validate_undefined_variables(self.body_code, defined)
-        if undefined:
-            raise ValueError(f"UNDEFINED VAR in '{self.name}': Variables {', '.join(undefined)} used but not defined in take_channels or locally.")
-        return self
+
 
 class Entrypoint(BaseModel):
     body_code: str = Field(
@@ -262,13 +255,7 @@ class Entrypoint(BaseModel):
         cleaned_body, _ = heal_workflow_body(v)
         return cleaned_body
 
-    @model_validator(mode='after')
-    def validate_no_undefined_variables(self) -> Any:
-        from core.services.ast_compiler import validate_undefined_variables
-        undefined = validate_undefined_variables(self.body_code, set())
-        if undefined:
-            raise ValueError(f"UNDEFINED VAR in entrypoint: Variables {', '.join(undefined)} used but not defined. Did you forget to getSingleInput()?")
-        return self
+
 
 class NextflowPipelineAST(BaseModel):
     reasoning: str | None = Field(None, description="Explain your thought process, what you are fixing, and how you addressed any validation errors. Do NOT place conversational text in the code fields.")
@@ -377,4 +364,24 @@ class NextflowPipelineAST(BaseModel):
             pattern = rf"\b{sw.name}\b\s*\("
             if not re.search(pattern, all_code):
                 raise ValueError(f"UNUSED WORKFLOW: '{sw.name}' is defined but NEVER CALLED.")
+        return self
+
+    @model_validator(mode='after')
+    def validate_no_undefined_variables(self) -> Any:
+        from core.services.ast_compiler import validate_undefined_variables
+        
+        global_vars = {g.name for g in self.globals}
+        
+        # Check Entrypoint
+        undefined_ep = validate_undefined_variables(self.entrypoint.body_code, global_vars)
+        if undefined_ep:
+            raise ValueError(f"UNDEFINED VAR in entrypoint: Variables {', '.join(undefined_ep)} used but not defined. Did you forget to getSingleInput()?")
+            
+        # Check SubWorkflows
+        for sw in self.sub_workflows:
+            defined = set(sw.take_channels) | global_vars
+            undefined_sw = validate_undefined_variables(sw.body_code, defined)
+            if undefined_sw:
+                raise ValueError(f"UNDEFINED VAR in '{sw.name}': Variables {', '.join(undefined_sw)} used but not defined in take_channels or locally.")
+                
         return self
