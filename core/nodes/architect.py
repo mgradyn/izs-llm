@@ -39,7 +39,7 @@ TOOLS:
 3. `validate_body_code(code_snippet, workflow_name)` - Validate a body_code snippet for DSL2 syntax errors.
 
 INCREMENTAL REASONING WORKFLOW (Mandatory):
-Step 1: Use `check_component_channels` to double-check the constraints of any complex components.
+Step 1: Use `check_component_channels` to fetch the EXACT take/emit signature AND the usage example of the components.
 Step 2: Use `verify_dataflow_plan` to propose and test your DataFlow plan. Do NOT proceed until the tool returns "SUCCESS".
 Step 3: Use `validate_body_code` to test any tricky groovy snippets you intend to write.
 Step 4: Once all tests pass, output your final reasoning.
@@ -50,6 +50,8 @@ CRITICAL DSL2 RULES (common mistakes):
 - Void tools must NOT be assigned to variables — call them directly
 - The entrypoint workflow calls sub-workflows: data = my_input(); subworkflow_name(data)
 - The sub-workflow receives data via take_channels, processes it, and emits results via emit_channels
+- DO NOT emit channels from a sub-workflow unless they are EXPLICITLY required by the entrypoint. Be minimal. Avoid blindly emitting everything.
+- Prefer using standard catalog components over custom `inline_processes`. Only write an `InlineProcess` if explicitly instructed or if absolutely necessary.
 
 TASK: Investigate the validation error below. Explain what needs to be fixed before retrying.
 

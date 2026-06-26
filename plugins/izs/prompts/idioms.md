@@ -4,6 +4,7 @@ These idioms are specific to the cohesive-ngsmanager framework and its helper fu
 
 ## Active Data Channels & Parameters
 The framework provides specific helper functions to retrieve inputs. **DO NOT** invent functions or use raw Nextflow params. 
+**CRITICAL**: You have access to dozens of built-in helper functions (e.g. for retrieving FASTQ/FASTA, extracting keys, mapping metadata). ALWAYS use the `search_helper_functions(query)` tool to find the exact function and its usage before writing custom logic or inventing functions.
 
 ## Avoiding Silent No-Ops
 Do **NOT** use `.cross()` or `.combine()` with a reference channel (like `getReference()`) if the downstream tool (e.g., de novo assemblers like SPAdes/Shovill/Unicycler, or annotation tools like ABRicate/Prokka) does **NOT** take a reference. Crossing with an empty reference channel will yield an empty result, causing the pipeline to silently do nothing (`silent_no_op`).

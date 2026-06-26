@@ -10,12 +10,12 @@ from langgraph.store.memory import InMemoryStore
 from core.config import settings
 from core.nodes.architect import architect_generate_node, architect_precheck_node, architect_reason_node
 from core.nodes.consultant import consultant_extract_node, consultant_node
-from core.nodes.diagram import deterministic_diagram_node, diagram_node
+from core.nodes.diagrammer import diagram_reason_node
 from core.nodes.hydrator import hydrator_node
 from core.services.graph_state import GraphState
 from core.services.renderer import renderer_node
 from core.services.repair import repair_node, should_repair
-from core.tool_registry import get_architect_tools, get_consultant_tools
+from core.tool_registry import get_architect_tools, get_consultant_tools, get_diagrammer_tools
 from core.utils.logger import logger
 
 # Safety cap on tool-calling iterations to prevent runaway loops
@@ -233,8 +233,19 @@ def build_execution_subgraph(store: Any = None) -> Any:
     sub.add_node("architect_generate", architect_generate_node)
     sub.add_node("repair", repair_node)
     sub.add_node("renderer", renderer_node)
-    sub.add_node("diagram", diagram_node)
-    sub.add_node("deterministic_diagram", deterministic_diagram_node)
+    sub.add_node("diagram_reason", diagram_reason_node)
+    
+    # LangGraph ToolNode uses the 'messages' key by default. We use 'diagram_messages'.
+    # We will pass 'diagram_messages' as the messages_key if ToolNode supports it, 
+    # but to be safe and backwards compatible, we'll wrap the ToolNode to read/write diagram_messages.
+    base_diagram_tools = ToolNode(get_diagrammer_tools(), handle_tool_errors=True)
+    def diagram_tools_node(state: GraphState) -> Any:
+        # Hacky wrapper to redirect 'messages' to 'diagram_messages' for the tool node
+        temp_state = {"messages": state.get("diagram_messages", [])}
+        res = base_diagram_tools.invoke(temp_state)
+        return {"diagram_messages": res.get("messages", [])}
+    
+    sub.add_node("diagram_tools", diagram_tools_node)
 
     # Inner loop for tool calling
     max_architect_tool_iterations = settings.MAX_ARCHITECT_TOOL_ITERATIONS
@@ -290,14 +301,49 @@ def build_execution_subgraph(store: Any = None) -> Any:
         "renderer",
         check_diagram_generation,
         {
-            "with_diagrams": "deterministic_diagram",
+            "with_diagrams": "diagram_reason",
             "no_diagrams": END,
         }
     )
 
-    # Agentic diagram runs after deterministic diagram to keep ordering predictable.
-    sub.add_edge("deterministic_diagram", "diagram")
-    sub.add_edge("diagram", END)
+    def route_diagram(state: GraphState) -> str:
+        messages = state.get("diagram_messages", [])
+        if not messages:
+            return END
+        last_msg = messages[-1]
+        
+        # If the diagrammer hit the tool loop limit, just end.
+        diagram_tool_count = sum(1 for m in messages if isinstance(m, LCToolMessage))
+        if diagram_tool_count >= 10:  # arbitrary safe limit
+            return END
+            
+        if hasattr(last_msg, "tool_calls") and last_msg.tool_calls:
+            # If the tool call was 'submit_diagram_structure', we stop the loop and end.
+            for tc in last_msg.tool_calls:
+                if tc.get("name") == "submit_diagram_structure":
+                    return "diagram_tools" # Must execute the tool to save the state, then we'll route to END
+            return "diagram_tools"
+        return END
+
+    sub.add_conditional_edges("diagram_reason", route_diagram, {
+        "diagram_tools": "diagram_tools",
+        END: END
+    })
+    
+    # After diagram tools execute, we check if it was a submission
+    def route_after_diagram_tools(state: GraphState) -> str:
+        messages = state.get("diagram_messages", [])
+        if not messages: return "diagram_reason"
+        last_msg = messages[-1]
+        # If the last message was the result of submit_diagram_structure, we are done!
+        if isinstance(last_msg, LCToolMessage) and last_msg.name == "submit_diagram_structure":
+            return END
+        return "diagram_reason"
+
+    sub.add_conditional_edges("diagram_tools", route_after_diagram_tools, {
+        "diagram_reason": "diagram_reason",
+        END: END
+    })
 
     # Pass store so LangGraph can inject it into store-dependent nodes (architect_precheck_node, architect_reason_node)
     return sub.compile(store=store)

@@ -55,6 +55,16 @@ def validate_body_code(code_snippet: str, workflow_name: str) -> dict:  # noqa: 
     from core.catalog_registry import get_registry
     registry = get_registry()
     
+    # Check if .out.X property accesses match the actual component signature
+    out_accesses = re.findall(r'\b([a-zA-Z0-9_]+)\.out\.([a-zA-Z0-9_]+)', code_snippet)
+    for comp, channel in out_accesses:
+        if registry.component_exists(comp):
+            comp_info = check_component_channels.invoke({"component_name": comp})
+            if "error" not in comp_info:
+                valid_emits = comp_info.get("emits", [])
+                if channel not in valid_emits:
+                    issues.append(f"HALLUCINATION: Component '{comp}' does not emit '{channel}'. Valid emits are: {valid_emits}")
+
     if not _is_entrypoint and registry.is_initialized:
         exported_functions = registry.function_exports
         active_calls = []
@@ -216,15 +226,23 @@ def check_component_channels(component_name: str) -> dict:
     if _is_void_tool(component_name):
         emits = ["(VOID TOOL - DOES NOT EMIT)"]
 
+    from core.loader import data_loader
+    usages = data_loader.usage_db.get(component_name, [])
+    usage_snippet = "\n\n".join([f"Example from {u['template_id']}:\n```groovy\n{u['snippet']}\n```" for u in usages[:2]]) if usages else "(No usage examples found)"
+
     return {
         "component": component_name,
         "takes": takes if takes else ["(NONE)"],
         "emits": emits if emits else ["(NONE)"],
+        "usage_examples": usage_snippet
     }
 
+
+from core.services.consultant_tools import search_helper_functions
 
 ARCHITECT_TOOLS = [
     validate_body_code,
     verify_dataflow_plan,
     check_component_channels,
+    search_helper_functions,
 ]

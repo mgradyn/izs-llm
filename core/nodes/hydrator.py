@@ -7,33 +7,6 @@ from core.services.graph_state import GraphState
 from core.utils.logger import logger
 
 
-def _get_component_reference(comp_id: str, store: BaseStore) -> list[str]:
-    """Helper to extract reference code and usages for a component to reduce cyclomatic complexity."""
-    code_item = store.get(("code",), comp_id)
-    source_code = code_item.value.get("content") if code_item else None
-    if not source_code:
-        return []
-
-    parts = [
-        f"[[REFERENCE FOR STEP: {comp_id}]]",
-        f"Component ID: {comp_id}",
-        f"```groovy\n{source_code.strip()}\n```"
-    ]
-
-    usage_item = store.get(("usage",), comp_id)
-    if usage_item:
-        usages = usage_item.value.get("usages", [])
-        shown = 0
-        for u in usages:
-            snippet = u.get("snippet", "")
-            if snippet and "(not found" not in snippet and shown < 2:
-                parts.append(f"  USAGE EXAMPLE (from {u['template_id']}):")
-                parts.append(f"  ```groovy\n  {snippet}\n  ```")
-                shown += 1
-
-    parts.append(f"[[END REFERENCE: {comp_id}]]")
-    return parts
-
 
 def filter_template_logic(code: str, allowed_components: set) -> str:
     lines = code.split('\n')
@@ -78,9 +51,6 @@ def _build_exact_match(used_template_id: str, context_parts: list[str], store: B
             context_parts.append(f"```groovy\n{tmpl_code.strip()}\n```")
             context_parts.append("[[END TEMPLATE SOURCE]]")
 
-        for comp_id in template_def.get('components_used', []):
-            context_parts.extend(_get_component_reference(comp_id, store))
-
 
 def _build_adapted_match(used_template_id: str, component_ids: list[str], context_parts: list[str], store: BaseStore, helper_names: list[str]) -> None:
     context_parts.append(f"### ADAPTED TEMPLATE MODE: Based on {used_template_id}")
@@ -107,15 +77,10 @@ def _build_adapted_match(used_template_id: str, component_ids: list[str], contex
         context_parts.append("INSTRUCTION: Reuse the logic that remains, but FILL THE GAPS using your new components.")
         context_parts.append(f"```groovy\n{filtered_code.strip()}\n```")
 
-    for comp_id in component_ids:
-        if comp_id != used_template_id:
-            context_parts.extend(_get_component_reference(comp_id, store))
-
 
 def _build_custom_match(component_ids: list[str], context_parts: list[str], store: BaseStore) -> None:
     context_parts.append("### CUSTOM BUILD MODE")
-    for comp_id in component_ids:
-        context_parts.extend(_get_component_reference(comp_id, store))
+    context_parts.append("INSTRUCTION: You must build the logic entirely from scratch using the provided components.")
 
 
 def hydrator_node(state: GraphState, store: BaseStore) -> Any:
@@ -144,19 +109,5 @@ def hydrator_node(state: GraphState, store: BaseStore) -> Any:
 
     # Compile the final technical context
     full_context = "\n\n".join(context_parts)
-
-    # Global detection for helper functions across all merged source code
-    detected_helpers = {h for h in helper_names if h in full_context}
-    if plan_text and ("cross" in plan_text or "multiMap" in plan_text):
-        detected_helpers.add("extractKey")
-
-    if detected_helpers:
-        helper_parts = ["\n### AVAILABLE HELPER FUNCTIONS"]
-        for h_name in detected_helpers:
-            res_def = next((r for r in res_list if r['name'] == h_name), None)
-            if res_def:
-                helper_parts.append(f"- {h_name}: {res_def.get('description')}")
-                helper_parts.append(f"  Usage: `{res_def.get('usage')}`")
-        full_context += "\n" + "\n".join(helper_parts)
 
     return {"technical_context": full_context}

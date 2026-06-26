@@ -263,6 +263,9 @@ class DataFlowSubWorkflow(BaseModel):
     emits: list[str] = Field(description="Exact 'emit' parameters produced")
 
 class DataFlowPlan(BaseModel):
+    nodes: list[str] = Field(
+        description="The EXACT list of catalog component IDs and helper functions you will use in this pipeline. This is the One Source of Truth for the diagram."
+    )
     entrypoint_instantiations: list[str] = Field(
         description="List exactly how you will instantiate variables in the entrypoint (e.g., 'trimmed = getSingleInput()'). DO NOT skip this if you need input data!"
     )

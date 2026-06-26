@@ -32,3 +32,5 @@ class GraphState(TypedDict, total=False):
 
     # The add_messages reducer handles our short-term memory trimming
     messages: Annotated[list[BaseMessage], add_messages]
+    diagram_messages: Annotated[list[BaseMessage], add_messages]
+    diagram_data: dict[str, Any] | None

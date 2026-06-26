@@ -17,6 +17,7 @@ class DataLoader:
         self.code_db = {}
         self.comp_db = {}
         self.tmpl_db = {}
+        self.usage_db = {}
         self.res_list = []
 
     def load_all(self, store: Any=None) -> None:
@@ -155,7 +156,8 @@ class DataLoader:
                     "snippet": snippet,
                 })
 
-        # Store in the InMemoryStore
+        # Store in the InMemoryStore and local dictionary
+        self.usage_db = usage_map
         for comp_id, usages in usage_map.items():
             store.put(("usage",), comp_id, {"usages": usages})
 
