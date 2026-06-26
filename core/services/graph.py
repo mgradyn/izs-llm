@@ -243,7 +243,10 @@ def build_execution_subgraph(store: Any = None) -> Any:
         # Hacky wrapper to redirect 'messages' to 'diagram_messages' for the tool node
         temp_state = {"messages": state.get("diagram_messages", [])}
         res = base_diagram_tools.invoke(temp_state)
-        return {"diagram_messages": res.get("messages", [])}
+        updates = dict(res)
+        if "messages" in updates:
+            updates["diagram_messages"] = updates.pop("messages")
+        return updates
     
     sub.add_node("diagram_tools", diagram_tools_node)
 

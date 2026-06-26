@@ -151,7 +151,7 @@ async def chat_with_agent(request: ChatRequest, graph: Any=Depends(get_graph)) -
         nf_code = result.get("nextflow_code")
         ast_json = result.get("ast_json")
         mermaid_agent = result.get("mermaid_agent")
-        mermaid_deterministic = result.get("mermaid_deterministic")
+        mermaid_deterministic = result.get("mermaid_deterministic") or mermaid_agent
 
         # Collect tool calls from the most recent turn (since last human message)
         tool_calls = []
