@@ -26,11 +26,10 @@ def submit_diagram_structure(
         # Render the diagram immediately
         mermaid_string = render_mermaid_from_json(diagram_data)
         
-        return Command(
-            update={
-                "diagram_data": diagram_data.model_dump(),
-                "mermaid_deterministic": mermaid_string
-            }
-        )
+        result_dict = {
+            "diagram_data": diagram_data.model_dump(),
+            "mermaid_deterministic": mermaid_string
+        }
+        return json.dumps(result_dict)
     except Exception as e:
         return f"ERROR: Validation failed. {e!s}"

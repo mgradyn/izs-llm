@@ -245,7 +245,22 @@ def build_execution_subgraph(store: Any = None) -> Any:
         res = base_diagram_tools.invoke(temp_state)
         updates = dict(res)
         if "messages" in updates:
-            updates["diagram_messages"] = updates.pop("messages")
+            msgs = updates.pop("messages")
+            updates["diagram_messages"] = msgs
+            
+            # Extract state updates from successful tool execution
+            for msg in msgs:
+                if isinstance(msg, LCToolMessage) and msg.name == "submit_diagram_structure":
+                    if not msg.content.startswith("ERROR"):
+                        try:
+                            import json
+                            data = json.loads(msg.content)
+                            if "diagram_data" in data:
+                                updates["diagram_data"] = data["diagram_data"]
+                            if "mermaid_deterministic" in data:
+                                updates["mermaid_deterministic"] = data["mermaid_deterministic"]
+                        except Exception:
+                            pass
         return updates
     
     sub.add_node("diagram_tools", diagram_tools_node)
@@ -337,10 +352,16 @@ def build_execution_subgraph(store: Any = None) -> Any:
     def route_after_diagram_tools(state: GraphState) -> str:
         messages = state.get("diagram_messages", [])
         if not messages: return "diagram_reason"
-        last_msg = messages[-1]
-        # If the last message was the result of submit_diagram_structure, we are done!
-        if isinstance(last_msg, LCToolMessage) and last_msg.name == "submit_diagram_structure":
+        
+        if state.get("mermaid_deterministic"):
             return END
+            
+        last_msg = messages[-1]
+        # If the tool executed successfully, its content is a JSON dict (not an ERROR string)
+        if isinstance(last_msg, LCToolMessage) and last_msg.name == "submit_diagram_structure":
+            if not last_msg.content.startswith("ERROR"):
+                return END
+                
         return "diagram_reason"
 
     sub.add_conditional_edges("diagram_tools", route_after_diagram_tools, {

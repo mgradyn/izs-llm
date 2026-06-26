@@ -36,7 +36,7 @@ def diagram_reason_node(state: GraphState) -> dict:
         sys_prompt = load_diagram_prompt()
         diagram_messages = [
             SystemMessage(content=sys_prompt),
-            HumanMessage(content=f"Here is the Architect's Data Flow Plan. Please research the components and submit the diagram structure.\n\n```json\n{plan_context}\n```")
+            HumanMessage(content=f"Here is the Architect's Data Flow Plan. Please research the components and submit the diagram structure.\n\nYou MUST use the `submit_diagram_structure` tool to output the diagram. Do not reply with conversational text.\n\n```json\n{plan_context}\n```")
         ]
 
     # Add tool results or new tool calls if any
@@ -45,7 +45,7 @@ def diagram_reason_node(state: GraphState) -> dict:
     # or append to `diagram_messages`.)
     # ACTUALLY, if we use `diagram_messages`, we need to define it in GraphState.
     
-    llm = get_llm().bind_tools(get_diagrammer_tools())
+    llm = get_llm().bind_tools(get_diagrammer_tools(), tool_choice="any")
     result = llm.invoke(diagram_messages)
 
     return {"diagram_messages": [result]}
