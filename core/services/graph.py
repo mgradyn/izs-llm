@@ -250,6 +250,8 @@ def build_execution_subgraph(store: Any = None) -> Any:
             
             # Extract state updates from successful tool execution
             for msg in msgs:
+                print(f"[DEBUG DIAGRAM] Tool Message Name: {getattr(msg, 'name', 'unknown')}")
+                print(f"[DEBUG DIAGRAM] Tool Message Content: {getattr(msg, 'content', 'empty')}")
                 if isinstance(msg, LCToolMessage) and msg.name == "submit_diagram_structure":
                     if not msg.content.startswith("ERROR"):
                         try:
@@ -259,6 +261,8 @@ def build_execution_subgraph(store: Any = None) -> Any:
                                 updates["diagram_data"] = data["diagram_data"]
                             if "mermaid_deterministic" in data:
                                 updates["mermaid_deterministic"] = data["mermaid_deterministic"]
+                            if "mermaid_agent" in data:
+                                updates["mermaid_agent"] = data["mermaid_agent"]
                         except Exception:
                             pass
         return updates

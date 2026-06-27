@@ -1,16 +1,15 @@
 import json
-from langchain_core.tools import InjectedToolCallId, tool
-from core.models.diagram_structure import DiagramData
-from core.services.consultant_tools import ToolRuntime, lookup_catalog_item, find_component_usage
+from langchain_core.tools import tool
+from core.models.diagram_structure import DiagramData, Node, Edge
+from core.services.consultant_tools import lookup_catalog_item, find_component_usage
 from core.services.renderer import render_mermaid_from_json
 from langgraph.types import Command
 
 @tool
 def submit_diagram_structure(
-    nodes: list[dict],
-    edges: list[dict],
-    runtime: ToolRuntime
-) -> Command:
+    nodes: list[Node],
+    edges: list[Edge]
+) -> str:
     """
     Submits the final JSON structure for the diagram and ends your reasoning phase.
     You MUST call this when you are confident in the diagram structure.
@@ -26,13 +25,12 @@ def submit_diagram_structure(
         # Render the diagram immediately
         mermaid_string = render_mermaid_from_json(diagram_data)
         
-        return Command(
-            update={
-                "diagram_data": diagram_data.model_dump(),
-                "mermaid_deterministic": mermaid_string,
-                "mermaid_agent": mermaid_string
-            }
-        )
+        result_dict = {
+            "diagram_data": diagram_data.model_dump(),
+            "mermaid_deterministic": mermaid_string,
+            "mermaid_agent": mermaid_string
+        }
+        return json.dumps(result_dict)
     except Exception as e:
         # If validation fails, just return string error so the LLM can try again
         return f"ERROR: Validation failed. {e!s}"
