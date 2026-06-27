@@ -10,7 +10,7 @@ def submit_diagram_structure(
     nodes: list[dict],
     edges: list[dict],
     runtime: ToolRuntime
-) -> str:
+) -> Command:
     """
     Submits the final JSON structure for the diagram and ends your reasoning phase.
     You MUST call this when you are confident in the diagram structure.
@@ -26,10 +26,13 @@ def submit_diagram_structure(
         # Render the diagram immediately
         mermaid_string = render_mermaid_from_json(diagram_data)
         
-        result_dict = {
-            "diagram_data": diagram_data.model_dump(),
-            "mermaid_deterministic": mermaid_string
-        }
-        return json.dumps(result_dict)
+        return Command(
+            update={
+                "diagram_data": diagram_data.model_dump(),
+                "mermaid_deterministic": mermaid_string,
+                "mermaid_agent": mermaid_string
+            }
+        )
     except Exception as e:
+        # If validation fails, just return string error so the LLM can try again
         return f"ERROR: Validation failed. {e!s}"

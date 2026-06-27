@@ -43,7 +43,6 @@ helper_imports:
 # Prompts
 prompts:
   domain_context: "prompts/domain_context.md"
-  idioms: "prompts/idioms.md"
   rejection_rules: "prompts/rejection_rules.md"
 
 # Void tool detection

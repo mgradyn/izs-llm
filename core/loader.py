@@ -112,6 +112,15 @@ class DataLoader:
                 if store:
                     store.put(("resources",), "helper_functions", {"list": self.res_list})
                     store.put(("resources",), "containers", {"list": self.containers_list})
+                    
+        # Load Patterns (from patterns.json alongside components.json if present)
+        patterns_path = os.path.join(os.path.dirname(paths["catalog_components"]), "patterns.json")
+        if os.path.exists(patterns_path):
+            with open(patterns_path, encoding="utf-8") as f:
+                patterns_data = json.load(f).get('patterns', [])
+                if store:
+                    for p in patterns_data:
+                        store.put(("patterns",), p["id"], p)
 
         # Build reverse index: component_id → list of templates that use it
         if store:

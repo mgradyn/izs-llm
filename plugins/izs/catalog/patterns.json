@@ -1,0 +1,684 @@
+{
+  "patterns": [
+    {
+      "id": "active_data_channels_and_parameters",
+      "title": "Active Data Channels & Parameters",
+      "description": "The framework provides specific helper functions to retrieve inputs. **DO NOT** invent functions or use raw Nextflow params. \n**CRITICAL**: You have access to dozens of built-in helper functions (e.g. for retrieving FASTQ/FASTA, extracting keys, mapping metadata). ALWAYS use the `search_helper_functions(query)` tool to find the exact function and its usage before writing custom logic or inventing functions."
+    },
+    {
+      "id": "avoiding_silent_no-ops",
+      "title": "Avoiding Silent No-Ops",
+      "description": "Do **NOT** use `.cross()` or `.combine()` with a reference channel (like `getReference()`) if the downstream tool (e.g., de novo assemblers like SPAdes/Shovill/Unicycler, or annotation tools like ABRicate/Prokka) does **NOT** take a reference. Crossing with an empty reference channel will yield an empty result, causing the pipeline to silently do nothing (`silent_no_op`)."
+    },
+    {
+      "id": "host_depletion",
+      "title": "Host Depletion",
+      "description": "Requires **single flat tuple** `[riscd, reads, host]`. Use `.map`, **never** `.multiMap`.\n\n**Conditional:**\n```groovy\ntrimmedReads.cross(host) { extractKey(it) }\n    .map { [ it[0][0], it[0][1], it[1][1] ] }\n    .branch { with_host: it[1][1]; without_host: true }\n    .set { branched }\ndepleted = step_1PP_hostdepl__bowtie(branched.with_host)\nbranched.without_host.mix(depleted).map { it[0,1] }.set { ready }\n```\n\n**Unconditional:**\n```groovy\nreads.cross(host) { extractKey(it) }.map { [ it[0][0], it[0][1], it[1][1] ] }.set { prep }\ndepleted = step_1PP_hostdepl__bowtie(prep)\n```"
+    },
+    {
+      "id": "trimming_and_qc_comparison",
+      "title": "Trimming & QC Comparison",
+      "description": "```groovy\nreadsCheckInput = rawreads.cross(trimmed) { extractKey(it) }.multiMap {\n    rawreads: it[0]; trimmed: it[1]\n}\nmodule_sample_reads_check(readsCheckInput.rawreads, readsCheckInput.trimmed)\n```"
+    },
+    {
+      "id": "double_cross_(nested_tuples)",
+      "title": "Double Cross (Nested Tuples)",
+      "description": "Chained `.cross()` deeply nests \u2014 handle indices carefully:\n```groovy\nassembled.cross(reference) { extractKey(it) }\n    .cross(abricateDb) { extractKey(it) }\n    .multiMap {\n        assembly: it[0][0][0..1]\n        reference: it[0][1]\n        abricateDb: it[1]\n    }.set { cARA }\n```"
+    },
+    {
+      "id": "static_reference_injection",
+      "title": "Static Reference Injection",
+      "description": "Define constants in `globals`, attach with `.multiMap`:\n```groovy\ntrimmed.multiMap {\n    trimmed: it\n    reference: [ referenceRiscd, referenceCode, file(referencePath) ]\n}.set { trAndRef }\nivar_out = step_2AS_mapping__ivar(trAndRef.trimmed, trAndRef.reference)\n```"
+    },
+    {
+      "id": "strict_syntax_rules_(framework_constraints)",
+      "title": "Strict Syntax Rules (Framework Constraints)",
+      "description": "These rules were previously enforced by Python runtime validators. You MUST follow them strictly to prevent syntax crashes:\n1. **NO INLINE CHANNEL JOINS**: You are strictly forbidden from performing channel operations (like `.cross()` or `.combine()`) inline inside a process call. You MUST perform the join on a separate line, use `.set { ... }`, and pass the named output to the process.\n   - **WRONG**: `step_1_dummy(reads.cross(host))`\n   - **RIGHT**: `reads.cross(host).set { joined }; step_1_dummy(joined)`\n2. **NO ACTIVE CHANNELS IN SUBWORKFLOWS**: You MUST NOT define active data channels (e.g. `getInput()`, `getReference()`, `getVCF()`) inside a `workflow { ... }` block (SubWorkflow). Active data channels MUST be instantiated in the global scope or main `entrypoint` and passed down via `take:` declarations.\n3. **REFERENCE SLICING**: When calling `getReference()`, you MUST slice it using `[0]`. E.g., `getReference()[0]`.\n4. **NO NF-CORE IMPORTS**: You are strictly forbidden from importing modules from `nf-core` or external sources. All imports MUST use the local relative paths provided by the context (e.g., `steps/...` or `../functions/...`)."
+    },
+    {
+      "id": "prokka_injection",
+      "title": "Prokka Injection",
+      "description": "Prokka needs `[riscd, assembly, kingdom, riscd_ref, refid, refpath]`:\n```groovy\n// Bacteria:\nstep_4AN_genes__prokka(assembly.map { [ it[0], it[1], 'Bacteria', '-', '-', getEmpty() ] })\n// Viruses (with GenBank ref):\nconsensus.cross(referenceGB) { extractKey(it) }.map {\n    [ it[0][0], it[0][1], 'Viruses', it[1][1], it[1][2], it[1][3] ]\n}.set { prokkaIn }\nstep_4AN_genes__prokka(prokkaIn)\n```"
+    },
+    {
+      "id": "snippy_multi-alignment",
+      "title": "Snippy Multi-Alignment",
+      "description": "Use `.combine()` (not `.cross()`) for shared single reference:\n```groovy\nreads.combine(reference).multiMap { reads: it[0..1]; reference: it[2..4] }.set { input }\nstep_4TY_alignment__snippy(input.reads, input.reference)\n```"
+    },
+    {
+      "id": "technology_branching",
+      "title": "Technology Branching",
+      "description": "```groovy\nrawReads.branch {\n    illumina: isIlluminaPaired(it[1])\n    ion: isIonTorrent(it[1])\n    nanopore: isNanopore(it[1])\n    other: true\n}.set { ch_tech }\nproc_trim = step_1PP_trimming__trimmomatic(ch_tech.illumina)\nproc_fastp = step_1PP_trimming__fastp(ch_tech.ion)\nch_trimmed = proc_trim.trimmed.mix(proc_fastp.trimmed)\n```"
+    },
+    {
+      "id": "coverage_and_depth",
+      "title": "Coverage & Depth",
+      "description": "Use `extractDsRef(it)` for keying:\n```groovy\nminmax_out = coverage_minmax(samtools_out.bam, 'bowtie')\ncoverage_plot(minmax_out.coverage_depth)\ndepth_out = samtools_depth(samtools_out.bam, 'bowtie')\nch_cov_keyed = depth_out.coverage.map { [extractDsRef(it), it] }\nch_con_keyed = consensus.map { [extractDsRef(it), it] }\nch_cov_keyed.cross(ch_con_keyed).map {\n    def cov = it[0][1]; def con = it[1][1]\n    return [ cov[0], con[1], cov[1] ]\n}.set { coverageRefAndConsensus }\ncheck_out = coverage_check(coverageRefAndConsensus, 'bowtie')\n```"
+    },
+    {
+      "id": "segmented_/_multi-reference",
+      "title": "Segmented / Multi-Reference",
+      "description": "Use `getReferences('any')` (plural) with a `prepare_inputs` sub-workflow:\n```groovy\n// prepare_inputs body_code:\nraw_reads.cross(raw_refs) { extractKey(it) }.multiMap {\n    reads: it[0]; refs: it[1][1..3]\n}.set { ch_prepared }\n// entrypoint:\nch_ready = prepare_inputs(ch_in, ch_ref)\nmodule_segmented(ch_ready.reads, ch_ready.refs)\n```"
+    },
+    {
+      "id": "conditional_workflow_execution",
+      "title": "Conditional Workflow Execution Based on Input Parameters",
+      "description": "This pattern demonstrates how to conditionally execute a workflow based on the presence of specific input parameters. It checks if either `--cmp` or `--samplesheet` is provided and exits with a help message if neither is present. This is useful for guiding users on required inputs and ensuring the pipeline runs only when valid parameters are provided.\n\n```groovy\nif (!params.containsKey('cmp') && !params.containsKey('samplesheet')){\n    helpMessage()\n    exit 1\n}\n```"
+    },
+    {
+      "id": "conditional_process_execution_with_optional_params",
+      "title": "Conditional Process Execution Based on Optional Parameters",
+      "description": "This pattern demonstrates how to conditionally execute processes based on the presence of optional parameters. The workflow checks for the existence of optional parameters and only executes certain processes if those parameters are provided. This is useful for making workflows flexible and adaptable to different use cases without requiring all parameters to be specified.\n\n```groovy\nif (optional('multi_clustering__reportree__sample_of_interest') && optional('multi_clustering__reportree__report_threshold')) {\n    find_closest(matrix)\n}\nif (optional('multi_clustering__reportree__HC_threshold')) {\n  reportree_hc(vcfs, metadata)\n  augur(reportree_hc.out.nwk_hc, reportree_hc.out.metadata_hc, geodata)\n}\n```"
+    },
+    {
+      "id": "tuple_unpacking_and_flatmap",
+      "title": "Tuple Unpacking and FlatMap for Channel Transformation",
+      "description": "This pattern shows how to unpack tuples from a channel and transform the data using `flatMap` and `collect`. The input channel is expected to contain tuples, and the second element of each tuple is extracted and collected into a list. This is a common pattern for processing structured data where only specific parts of the data are needed for downstream processes.\n\n```groovy\nvcfs = input.flatMap { it[1] }.collect()\n```"
+    },
+    {
+      "id": "sorted_flattened_input_preparation",
+      "title": "Sorted and Flattened Input Preparation",
+      "description": "This pattern demonstrates how to prepare input data by first mapping to extract relevant elements, sorting them based on a specific key, flattening the structure, and finally collecting the results. This is particularly useful when the input data needs to be processed in a specific order and structure before being passed to downstream processes.\n\n```groovy\nreads = getInput()\n    .map { it[1] }\n    .toSortedList( { a, b -> a[0] <=> b[0] } )\n    .flatten()     \n    .collect()  \n```"
+    },
+    {
+      "id": "flatmap_and_collect_for_channel_transformation",
+      "title": "FlatMap and Collect for Channel Transformation",
+      "description": "This pattern shows how to use `flatMap` and `collect` to transform a channel of tuples into a list of specific elements. The `flatMap` operator is used to flatten the tuples, and `collect` is used to gather the elements into a list. This is useful when you need to extract specific elements from a channel of tuples and process them further.\n\nThe key insight here is the combination of `flatMap` and `collect` to transform the channel data structure. This allows for flexible data manipulation and preparation for downstream processes.\n\n```groovy\nfastas = input.flatMap { it[1] }.collect()\n```"
+    },
+    {
+      "id": "conditional_tuple_unpacking_with_emit",
+      "title": "Conditional Tuple Unpacking with Emit",
+      "description": "This pattern demonstrates how to conditionally unpack tuples and emit specific outputs based on the tuple structure. The `align` process takes a tuple input where the first element is ignored (using `_`), and the second and third elements are used as values and paths respectively. This is useful when you need to handle complex input structures where only certain parts of the tuple are relevant for the process.\n\n```groovy\ninput:\n  path(sequences)\n  tuple val(_), val(ref_code), path(ref_path)\noutput:\n  path '*'\n  path 'alignment.fasta', emit: alignment\n```"
+    },
+    {
+      "id": "multi_output_channel_emission",
+      "title": "Multi-Output Channel Emission",
+      "description": "This pattern shows how to emit multiple outputs from a single process, each with a distinct channel. The `refine` process emits both a tree and branch lengths, which can be consumed independently by downstream processes. This is particularly useful for processes that generate multiple artifacts that need to be processed separately.\n\n```groovy\noutput:\n  path '*'\n  path 'tree.nwk', emit: tree\n  path 'branch_lengths.json', emit: branch_lengths\n```"
+    },
+    {
+      "id": "chained_process_outputs",
+      "title": "Chained Process Outputs",
+      "description": "This pattern illustrates how to chain process outputs directly into subsequent process inputs within the workflow definition. The `multi_clustering__augur` workflow chains the output of `align` into `tree`, then into `refine`, and so on. This creates a clear, linear data flow that is easy to follow and maintain.\n\n```groovy\nalignment = align(fastas, reference).alignment\ntree_raw = tree(alignment).tree_raw\ntree = refine(tree_raw, alignment, metadata).tree\nnt_muts = ancestral(tree, alignment, reference).nt_muts\naa_muts = translate(tree, nt_muts, reference).aa_muts\ntraits = traits(tree, metadata).traits\nexport(tree, metadata, refine.out.branch_lengths, traits, nt_muts, aa_muts, geodata)\n```"
+    },
+    {
+      "id": "channel_aggregation_with_inject",
+      "title": "Channel Aggregation Using inject()",
+      "description": "This pattern shows how to aggregate multiple channels into a single channel using the `inject()` method. It starts with an empty channel and iteratively mixes it with channels returned by `_getAlleles()` for each input value. This is useful when you need to combine multiple data sources into a single channel for downstream processing.\n\nThe key insight is the use of `inject(Channel.empty())` to accumulate channels, with `mix()` to combine them while preserving the channel semantics.\n\n```groovy\ndef getAlleles() {\n    if (!params.containsKey('input')) {\n      exit 2, \"missing required param: input\";\n    }\n    def schema = params.containsKey('schema') ? params.schema : null\n    assert params.input instanceof ArrayList\n    params.input.inject(Channel.empty()) {\n        res, val -> res.mix(_getAlleles(val.cmp, val.riscd, schema))\n    }        \n}\n```"
+    },
+    {
+      "id": "channel_map_collect",
+      "title": "Map and Collect Channel Transformation",
+      "description": "This pattern demonstrates the use of `.map` and `.collect` operators to transform and aggregate channel data. The `.map` operator is used to extract specific elements from each item in the channel, and `.collect` is used to gather all items into a single list. This is particularly useful when you need to process and aggregate data from a channel before passing it to a workflow.\n\n```groovy\nworkflow {\n    getVCFs()\n    .map { it[1] }\n    .collect()\n    .set { inputSet }\n    multi_clustering__vcf2mst(inputSet)\n}\n```"
+    },
+    {
+      "id": "input_tuple_unpacking_and_collection",
+      "title": "Input Tuple Unpacking and Collection",
+      "description": "This pattern demonstrates how to unpack tuples from an input channel, extract specific elements, and collect them into a list. This is useful when the input channel emits tuples, but only certain elements are needed for downstream processing. The `.map { it[1] }` operation extracts the second element of each tuple, and `.collect()` gathers these elements into a list, which is then assigned to a variable for further use.\n\n```groovy\ninput\n    .map { it[1] }\n    .collect()\n    .set { gffs }\n```"
+    },
+    {
+      "id": "conditional_channel_mixing",
+      "title": "Conditional Channel Mixing with Inject",
+      "description": "This pattern demonstrates how to conditionally mix multiple channels into a single channel using `inject` and `mix`. The `getInput` function checks if the input parameter is an ArrayList and iteratively mixes the result of `_getAlleles` for each input value into an initially empty channel. This is useful for dynamically combining multiple data sources into a single channel for downstream processing.\n\n```groovy\ndef getInput() {\n    if (!params.containsKey('input')) {\n      exit 2, \"missing required param: input\";\n    }\n    def schema = params.containsKey('schema') ? params.schema : null\n    assert params.input instanceof ArrayList\n    params.input.inject(Channel.empty()) {\n        res, val -> res.mix(_getAlleles(val.cmp, val.riscd, schema))\n    }\n}\n```"
+    },
+    {
+      "id": "conditional_module_inclusion",
+      "title": "Conditional Module Inclusion Based on Parameter",
+      "description": "This pattern demonstrates how to conditionally include different modules and functions based on a parameter value. It uses a helper function `getReportreeInputType()` to validate and return the parameter value, then includes different modules and input functions depending on the value. This is useful for creating flexible workflows that can handle different types of input data.\n\n```groovy\nif (getReportreeInputType() == 'alleles') {\n  include { multi_clustering__reportree } from \"../multi/multi_clustering__reportree_alleles\"\n  include { getAlleles as inputFn } from \"../multi/multi_clustering__reportree_alleles\"\n} else if (getReportreeInputType() == 'alignment') {\n  include { multi_clustering__reportree } from \"../multi/multi_clustering__reportree_alignment\"\n  include { getInput as inputFn } from '../functions/parameters.nf'\n} else {\n  include { multi_clustering__reportree } from \"../multi/multi_clustering__reportree_vcf\"\n  include { getVCFs as inputFn } from '../functions/parameters.nf'\n}\n\ndef getReportreeInputType() {\n    def res = param('multi_clustering__reportree__input')\n    if (!(res in ['alleles', 'vcf', 'alignment'])) {\n        exit 2, \"params (multi_clustering__reportree__input) not valid\"\n    } \n    return res\n}\n```"
+    },
+    {
+      "id": "multi_map_with_combine",
+      "title": "MultiMap with Combine for Input Structuring",
+      "description": "This pattern demonstrates how to use `.combine()` followed by `.multiMap()` to restructure and flatten input channels into a more manageable format. The `.combine()` operator merges two channels (reads and reference), and `.multiMap()` is used to split the combined tuple into two separate channels (`reads` and `reference`). This is particularly useful when you need to align or restructure data from multiple sources into a format suitable for downstream processes.\n\n```groovy\nreads.combine(reference)\n        .multiMap { \n            reads: it[0..1] // riscd, R[]\n            reference:  it[2..4] // riscd, code, path\n        }.set { input }\n```"
+    },
+    {
+      "id": "conditional_tuple_unpacking",
+      "title": "Conditional Tuple Unpacking for Flexible Input Handling",
+      "description": "This pattern shows how to conditionally unpack a tuple based on whether the input is a collection or a single item. This is useful when a process needs to handle both paired-end and single-end reads dynamically. The ternary operator checks if `reads` is a collection and unpacks it accordingly, ensuring compatibility with different input types.\n\n```groovy\n(r1,r2) = (reads instanceof java.util.Collection) ? reads : [reads, null]\n```"
+    },
+    {
+      "id": "workflow_branching_with_filters",
+      "title": "Workflow Branching with Filters",
+      "description": "This pattern demonstrates how to use workflow-level filtering to route different types of inputs to different sub-workflows. The `.filter()` operator is used to match specific patterns in the input data (e.g., `1PP_*` vs `2AS_*`), allowing the workflow to dynamically select the appropriate processing path. This is a powerful way to handle heterogeneous input data in a single pipeline.\n\n```groovy\nmulti_alignment__snippycore(getInput().filter( ~/^.*\\/1PP_.*/ ), getReferenceUnkeyed('gb'))\nmulti_alignment__snippycore_vcf(getInputFolders().filter( ~/^.*\\/2AS_.*/ ), getReferenceUnkeyed('gb'))\n```"
+    },
+    {
+      "id": "conditional_output_emit",
+      "title": "Conditional Output Emission",
+      "description": "This pattern demonstrates how to conditionally emit different output files based on input parameters. The `ksnp3` process uses a ternary operator to determine the output filename and emits it through a named output channel (`fasta`). This is useful when the same process needs to produce different outputs based on runtime conditions.\n\n```groovy\nprocess ksnp3 {\n    container \"ghcr.io/genpat-it/ksnp3:3.0--addd2c2d0e\"\n    input:\n      path(assembly)\n      val(kmers_size)\n      val(analysis_type)\n    output:\n      path(\"results/${outfile}\"), emit: fasta\n      path '*.sh', hidden: true\n    publishDir mode: 'copy', \"${params.outdir}\", pattern: \"*results/${outfile}\", saveAs: { \"matrix.fasta\" }\n    publishDir mode: 'copy', \"${params.outdir}\", pattern: '*results/*.fasta', saveAs: { filename -> flattenPath(filename) }\n    publishDir mode: 'rellink', \"${params.outdir}/meta\", pattern: '*.log'\n    publishDir mode: 'rellink', \"${params.outdir}/meta\", pattern: '.command.sh', saveAs: { \"ksnp3.cfg\" }\n    script:\n      extra_params = (analysis_type == 'core' ? '-core' : '')\n      outfile = (analysis_type == 'core' ? 'core_SNPs_matrix.fasta' : 'SNPs_all_matrix.fasta')\n      \"\"\"\n        trap \"rm -Rf results/TemporaryFilesToDelete\" EXIT\n        for FILE in ${assembly}; do \\\n          CMP=`echo \\$FILE | sed -E 's/DS[[:digit:]]+-DT[[:digit:]]+_([^_]+)_[[:graph:]]+/\\\\1/' | sed 's/\\\\./-/g'`; \\\n          ln -s \\$FILE \\${CMP}.fasta ; \\\n          echo -e \"`pwd`/\\${CMP}.fasta\\t\\$CMP\" >> input.tsv ; \\\n        done        \n        kSNP3 -in input.tsv -k ${kmers_size} -NJ ${extra_params} -outdir results > ksnp3.log\n      \"\"\"\n}\n```"
+    },
+    {
+      "id": "dynamic_publishdir_saveas",
+      "title": "Dynamic PublishDir saveAs",
+      "description": "This pattern shows how to dynamically rename files during publishing using the `saveAs` directive with closures. The `iqtree` process uses a closure to rename `.treefile` outputs to `.nwk` files. This is particularly useful for standardizing output filenames or adapting them to downstream tools' expectations.\n\n```groovy\nprocess iqtree {\n    container \"quay.io/biocontainers/iqtree:1.6.12--he513fc3_0\"\n    input:\n      path(fasta)\n    output:\n      path '*'\n      path '{*.sh,*.log}', hidden: true\n      path(\"*.treefile\"), emit: nwk\n    publishDir mode: 'copy', \"${params.outdir}\", pattern: '*.treefile', saveAs: { \"matrix.nwk\" }\n    publishDir mode: 'copy', \"${params.outdir}\", pattern: '*.treefile', saveAs: { filename -> filename.replace(\".treefile\", \".nwk\") }\n    publishDir mode: 'rellink', \"${params.outdir}/meta\", pattern: '.command.log', saveAs: { \"iqtree.log\" }\n    publishDir mode: 'rellink', \"${params.outdir}/meta\", pattern: '.command.sh', saveAs: { \"iqtree.cfg\" }\n    script:\n      \"\"\"\n        iqtree -nt AUTO -s ${fasta}\n        sed -i 's/-/./g' *.treefile\n      \"\"\"\n}\n```"
+    },
+    {
+      "id": "input_channel_transformation",
+      "title": "Input Channel Transformation",
+      "description": "This pattern demonstrates how to transform input channels before passing them to processes. The workflow uses `.map` and `.collect()` to extract and collect specific elements from the input channel, creating a new channel (`inputSet`) that is then used by the `ksnp3` process. This is useful for preprocessing input data to match the expected format of downstream processes.\n\n```groovy\nworkflow multi_clustering__ksnp3 {\n    take:\n        input\n        kmers_size\n        analysis_type\n        metadata\n        geodata\n    main:\n        input\n          .map { it[1] }\n          .collect()\n          .set { inputSet }\n        matrix = ksnp3(inputSet, kmers_size, analysis_type).fasta\n        iqtree(matrix)\n        grapetree(matrix)\n        augur(iqtree.out.nwk, metadata, geodata)\n}\n```"
+    },
+    {
+      "id": "conditional_branch_with_multi_predicate",
+      "title": "Conditional Branching with Multiple Predicates",
+      "description": "This pattern demonstrates how to use the `.branch` operator with multiple predicates to route data into different channels based on complex conditions. Each branch uses a different function to evaluate the data, allowing for sophisticated routing logic. This is particularly useful when different processing paths are required for different types of data.\n\n```groovy\ntrimmed.branch {\n    bacteria: isBacterium(it)\n    sarscov2: isSarsCov2(it) || isNegativeControlSarsCov2(it) || isPositiveControlSarsCov2(it)\n    negative_control: isNegativeControl(it)\n    viruses: isVirus(it)\n    wnv: isWNV(it)\n    ampliseq: isAmpliseq(it)\n    other: true\n}\n.set { branched }\n```"
+    },
+    {
+      "id": "cross_with_multiMap_for_data_alignment",
+      "title": "Cross and MultiMap for Data Alignment",
+      "description": "This pattern shows how to use the `.cross` operator combined with `.multiMap` to align and structure data from two different channels. The `cross` operation pairs each item from the first channel with each item from the second channel, and `multiMap` is used to transform these pairs into a structured format. This is useful when you need to combine related data from different processing steps.\n\n```groovy\ncrossedBacteriaData = branched.bacteria.cross(assemblyBacteria) { extractKey(it) }.multiMap { \n  trimmed: it[0]\n  assembly: it[1]\n}\n```"
+    },
+    {
+      "id": "conditional_branch_with_multiple_predicates",
+      "title": "Conditional Branching with Multiple Predicates",
+      "description": "This pattern demonstrates how to use the `.branch` operator with multiple predicates to route data to different channels based on complex conditions. Each branch is defined with a predicate function that evaluates the input data. This is useful for routing different types of samples (e.g., bacteria, viruses) to different processing paths.\n\n```groovy\ntrimmed.branch {\n    bacteria: isBacterium(it)\n    sarscov2: isSarsCov2(it) || isNegativeControlSarsCov2(it) || isPositiveControlSarsCov2(it)\n    negative_control: isNegativeControl(it)\n    viruses: isVirus(it)\n    wnv: isWNV(it)\n    ampliseq: isAmpliseq(it)\n    other: true\n}\n.set { branched }\n```"
+    },
+    {
+      "id": "cross_and_multimap_for_data_alignment",
+      "title": "Cross and MultiMap for Data Alignment",
+      "description": "This pattern shows how to use `.cross()` and `.multiMap()` to align and restructure data from two different channels. The `cross` operation combines each item from the first channel with each item from the second channel, and `multiMap` is used to restructure the resulting tuples into named channels. This is particularly useful when you need to pair related data (e.g., trimmed reads with their corresponding assemblies) for downstream processing.\n\n```groovy\ncrossedBacteriaData = branched.bacteria.cross(assemblyBacteria) { extractKey(it) }.multiMap { \n  trimmed: it[0]\n  assembly: it[1]\n}\n```"
+    },
+    {
+      "id": "conditional_channel_creation_with_cross_value",
+      "title": "Conditional Channel Creation with Cross Value",
+      "description": "This pattern demonstrates how to conditionally create channels with or without a cross value based on whether a keyed parameter is provided. It uses a ternary operator to decide the structure of the emitted data, ensuring compatibility with downstream processes that may or may not expect a cross value.\n\n```groovy\ndef _getParam(paramName, optional, keyed){\n     def crossValue\n     if (keyed) {\n        // CROSSING PARAM\n        if (!params.containsKey('riscd')) {\n            exit 2, \"missing required param: riscd\";\n        }\n        crossValue = parseRISCD(params.riscd).ds\n        if (!crossValue) {\n            exit 2, \"could not get DS from riscd: ${params.riscd}\"\n        }\n    }\n    if (paramName && params.containsKey(paramName) && params[paramName]) {\n        if (crossValue) {\n            return Channel.of( [ crossValue, params[paramName] ] )\n        } else {\n            return Channel.of( params[paramName] )\n        }\n    } else if (optional) {\n        if (crossValue) {\n            return Channel.of( [ crossValue, null ] )\n        } else {\n            return Channel.of( null )\n        }\n    } else {\n        exit 2, \"missing required param: $paramName\";\n    }\n}\n```"
+    },
+    {
+      "id": "dynamic_file_pattern_selection",
+      "title": "Dynamic File Pattern Selection",
+      "description": "This pattern shows how to dynamically select file patterns based on metadata parsed from parameters. It uses conditional logic to determine the appropriate file pattern for different metadata conditions, ensuring the correct files are matched and processed.\n\n```groovy\ndef getAssembly() {\n    def allowedAcc = ['2AS_denovo', '2AS_import', '2AS_mapping']\n    if (!params.containsKey('cmp') || !params.containsKey('riscd')) {\n        exit 2, \"missing required params (cmp,riscd)\";\n    }\n    def cmp = params.cmp.replaceAll(\"-\", \".\")\n    def anno = cmp.substring(0,4)\n    def md = parseRISCD(params.riscd)\n    def path, resChannel\n    if (!(md.acc in allowedAcc)) {\n        exit 2, \"unexpected acc value: ${md.acc}, expected: one of ${allowedAcc}\"\n    }\n    if (md.acc == '2AS_import' || md.acc == '2AS_mapping') {\n        path = \"${params.inputdir}/${anno}/${cmp}/${md.acc}/${md.ds}-${md.dt}_${md.met}/result/*.fasta\"\n        resChannel = Channel.fromPath(\n                path, checkIfExists: params.check_file_existence\n        )\n        .first()\n        .collect()\n        .map { [ params.riscd, it ] }\n\n    } else {\n        def pattern = (md.met == 'shovill' ? \"*.fasta\" : \"*L?00.fasta\")\n        path = \"${params.inputdir}/${anno}/${cmp}/${md.acc}/${md.ds}-${md.dt}_${md.met}/result/${pattern}\"\n        resChannel = Channel.fromPath(\n                path, checkIfExists: params.check_file_existence\n        )\n        .first()\n        .collect()\n        .map { [ params.riscd, it ] }\n    }\n    resChannel.ifEmpty {\n        log.warn(\"file not found: '${path}'\")\n    }\n    return resChannel\n}\n```"
+    },
+    {
+      "id": "multi_reference_channel_aggregation",
+      "title": "Multi-Reference Channel Aggregation",
+      "description": "This pattern demonstrates how to aggregate multiple references into a single channel using `inject` and `concat`. It iterates over a list of references, processes each one individually, and combines the results into a single channel. This is particularly useful for handling multiple input sources or configurations.\n\n```groovy\ndef _getReferences(optional, type, keyed, multi) {\n    def crossValue = \"\"\n    if (keyed) {\n        // CROSSING PARAM\n        if (!params.containsKey('riscd')) {\n            exit 2, \"one of: [ds, riscd] param should be provided\";\n        }\n        crossValue = parseRISCD(params.riscd).ds\n    }\n    if (params.containsKey('references')) {\n        assert params.references instanceof ArrayList\n        if (!params.references && !optional) {\n            exit 2, \"No reference provided\";\n        }\n        def refs = params.references.collect { refOriginal ->\n            def ref = [:]\n            refOriginal.keySet().each {\n                ref[\"ref_${it}\"] = refOriginal[it]\n            }\n            return ref\n        }\n        def result = refs.inject (Channel.empty()) {\n            res, val -> res.concat(_getSingleReference(optional, type, val, crossValue))\n        }\n        if (!multi && params.references.size() > 1) {\n            log.warn \"${params.references.size()} references provided; only the first one will be considered.\"\n        }\n        // never returns more than one reference if multi is false\n        return multi ? result : result.first()\n    } else {\n        _getSingleReference(optional, type, params, crossValue)\n    }\n}\n```"
+    },
+    {
+      "id": "input_channel_mixing",
+      "title": "Input Channel Mixing",
+      "description": "This pattern shows how to mix multiple channels into a single channel using `inject` and `mix`. It is useful for combining multiple input sources into a unified stream for downstream processing. This approach is particularly effective when dealing with multiple input configurations or datasets.\n\n```groovy\ndef getInput() {\n    if (params.containsKey('input')) {\n        assert params.input instanceof ArrayList\n        params.input.inject (Channel.empty()) {\n            res, val -> res.mix(getResult(val.cmp, val.riscd, null))\n        }\n    } else if (params.containsKey('cmp') && params.containsKey('riscd')) {\n        getResult(params.cmp, params.riscd, null)\n    } else {\n        exit 2, \"missing required params (cmp,riscd) or (input)\";\n    }\n}\n```"
+    },
+    {
+      "id": "conditional_metadata_parsing_with_tuple_unpacking",
+      "title": "Conditional Metadata Parsing with Tuple Unpacking",
+      "description": "This pattern demonstrates how to conditionally parse metadata from a file name within a process and unpack a tuple input. The `input` block receives a tuple containing `riscd_input`, `scaffolds`, and `database`, while the `script` block parses metadata from the `scaffolds` file name. This is useful for dynamically extracting metadata during process execution and using it for downstream tasks.\n\n```groovy\nprocess abricate {\n    input:\n      tuple val(riscd_input), path(scaffolds), val(database)\n    output:\n      path '*'\n      tuple val(riscd), path(\"${base}_vdabricate_calls.txt\"), emit: calls\n      path '*.sh', hidden: true\n    script:\n      md = parseMetadataFromFileName(scaffolds.getName())\n      base = \"${md.ds}-${ex.dt}_${md.cmp}\"\n      riscd = getRisCd(md, ex, STEP, METHOD)\n      \"\"\"\n        abricate ${scaffolds} --datadir ${abricateDBDir} -db ${database} &>> ${base}_vdabricate.log >> ${base}_vdabricate_calls.txt\n      \"\"\"\n}\n```"
+    },
+    {
+      "id": "workflow_combine_operator_for_data_preparation",
+      "title": "Workflow Combine Operator for Data Preparation",
+      "description": "This pattern shows the use of the `.combine()` operator to merge a channel with a static list, preparing data for downstream processes. Here, the `getInput()` channel is combined with a list containing the string `'viruses_TREF'`, creating a new channel `scaffoldsAbricatedb` that is then passed to the `step_3TX_species__vdabricate` workflow. This is a powerful way to dynamically pair input data with static parameters.\n\n```groovy\nworkflow {\n    getInput()\n        .combine(['viruses_TREF'])\n        .set { scaffoldsAbricatedb }\n    step_3TX_species__vdabricate(scaffoldsAbricatedb)\n}\n```"
+    },
+    {
+      "id": "metadata_driven_publish_dir",
+      "title": "Metadata-Driven Publish Directory Pattern",
+      "description": "This pattern demonstrates how to dynamically construct output directory paths using metadata extracted from input filenames. The `publishDir` directives use metadata variables (`md.anno`, `md.cmp`, `md.ds`, `ex.dt`) to create structured output paths. This is particularly useful for organizing outputs in a hierarchical manner based on sample metadata.\n\nThe key aspect is the use of metadata variables in the `publishDir` paths, which are resolved at runtime based on the input file's metadata. This allows for flexible and dynamic output organization without hardcoding paths.\n\n```groovy\ndef ex = executionMetadata()\n\nprocess abricate {\n    input:\n      tuple val(riscd_input), path(assembly)\n    output:\n      path '*'\n      path '*.sh', hidden: true\n    afterScript \"echo '${stepInputs(riscd_input, md, ex, STEP, METHOD, null)}' > ${base}_input.json\"\n    publishDir mode: 'rellink', \"${params.outdir}/${md.anno}/${md.cmp}/${STEP}/${md.ds}-${ex.dt}_${METHOD}/meta\", pattern: '{*.log,*.json}'    \n    publishDir mode: 'rellink', \"${params.outdir}/${md.anno}/${md.cmp}/${STEP}/${md.ds}-${ex.dt}_${METHOD}/meta\", pattern: '.command.sh', saveAs: { \"${base}_abricate.cfg\" }\n    publishDir mode: 'rellink', \"${params.outdir}/${md.anno}/${md.cmp}/${STEP}/${md.ds}-${ex.dt}_${METHOD}/result\", pattern: '{*.csv,*.summary,*calls.txt}'    \n    script:\n      md = parseMetadataFromFileName(assembly.getName())\n      base = \"${md.ds}-${ex.dt}_${md.cmp}\"\n      \"\"\"\n        abricate --db vfdb --csv ${assembly} > abricate.csv  \n        abricate ${assembly} -db vfdb &>> ${base}_abricate.log >> ${base}_abricate_calls.txt        \n        abricate --summary ${base}_abricate_calls.txt > ${base}_abricate.summary\n      \"\"\"\n}\n```"
+    },
+    {
+      "id": "conditional_process_execution_with_metadata",
+      "title": "Conditional Process Execution with Metadata Validation",
+      "description": "This pattern demonstrates how to conditionally execute a process based on metadata validation. The `when` clause uses a custom function `isCompatibleWithSeqType` to check if the input reads are compatible with the expected sequencing type ('illumina_paired'). This ensures the process only runs when the data meets specific criteria, which is a powerful way to handle heterogeneous input data in pipelines.\n\n```groovy\nprocess unicycler {\n    container 'docker.io/biocontainers/unicycler:v0.4.7dfsg-2-deb_cv1'\n    tag \"${md?.cmp}/${md?.ds}/${md?.dt}\"\n    memory { taskMemory( 20.GB, task.attempt ) }\n    when:\n      isCompatibleWithSeqType(reads, 'illumina_paired', task.process)\n    input:\n      tuple val(riscd_input), path(reads)\n    output:\n      path '*'\n      path(\"${base}_unicycler_assembly.fasta\"), emit: scaffolds\n      path '*.sh', hidden: true\n    afterScript \"echo '${stepInputs(riscd_input, md, ex, STEP, METHOD, null)}' > ${base}_input.json\"\n    publishDir mode: 'rellink', \"${params.outdir}/${md.anno}/${md.cmp}/${STEP}/${md.ds}-${ex.dt}_${METHOD}/result\", pattern: \"{*.fasta,*.gfa}\"\n    publishDir mode: 'rellink', \"${params.outdir}/${md.anno}/${md.cmp}/${STEP}/${md.ds}-${ex.dt}_${METHOD}/meta\", pattern: '{*.log,*.json}'\n    publishDir mode: 'rellink', \"${params.outdir}/${md.anno}/${md.cmp}/${STEP}/${md.ds}-${ex.dt}_${METHOD}/meta\", pattern: '.command.sh', saveAs: { \"${base}_spades.cfg\" }\n    script:\n      (t1,t2) = reads\n      md = parseMetadataFromFileName(t1.getName())\n      base = \"${md.ds}-${ex.dt}_${md.cmp}\"\n      \"\"\"\n      unicycler -1 ${t1} -2 ${t2} -o . -t 16 > ${base}_unicycler.log 2>&1\n      mv assembly.fasta ${base}_unicycler_assembly.fasta\n      \"\"\"\n}\n```"
+    },
+    {
+      "id": "tuple_unpacking_and_metadata_parsing",
+      "title": "Tuple Unpacking and Metadata Parsing in Process Script",
+      "description": "This pattern shows how to unpack a tuple input (paired-end reads) and parse metadata from the file name within the process script. The tuple `(t1, t2)` is unpacked from the `reads` input, and metadata is extracted from the first file's name using `parseMetadataFromFileName`. This is a common pattern for handling paired-end data and extracting sample information dynamically.\n\n```groovy\nscript:\n  (t1,t2) = reads\n  md = parseMetadataFromFileName(t1.getName())\n  base = \"${md.ds}-${ex.dt}_${md.cmp}\"\n  \"\"\"\n  unicycler -1 ${t1} -2 ${t2} -o . -t 16 > ${base}_unicycler.log 2>&1\n  mv assembly.fasta ${base}_unicycler_assembly.fasta\n  \"\"\"\n```"
+    },
+    {
+      "id": "workflow_chaining_with_named_outputs",
+      "title": "Workflow Chaining with Named Outputs",
+      "description": "This pattern demonstrates how to chain processes in a workflow using named outputs. The `unicycler` process emits a named output `scaffolds`, which is then passed to `assembly_filter`. The output of `assembly_filter` (named `fasta`) is further chained to the `quast` process. This approach improves readability and maintainability by explicitly naming data flows between processes.\n\n```groovy\nworkflow step_2AS_denovo__unicycler {\n    take: data\n    main:\n      unicycler(data).scaffolds\n      assembly_filter(unicycler.out.scaffolds).fasta | quast\n    emit:\n      assembled = assembly_filter.out.fasta\n}\n```"
+    },
+    {
+      "id": "conditional_tuple_unpacking_with_instanceof",
+      "title": "Conditional Tuple Unpacking with Instanceof Check",
+      "description": "This pattern demonstrates how to handle both single and paired-end reads by conditionally unpacking tuples based on whether the input is a collection or not. This is particularly useful when dealing with different sequencing technologies (e.g., Illumina paired-end vs. Ion Torrent single-end).\n\nThe key insight is the use of the `instanceof` operator to check if the input is a collection (paired-end) or a single file (single-end), and then unpacking accordingly.\n\n```groovy\n(r1,r2) = (reads instanceof java.util.Collection) ? reads : [reads, null]\n```\n\nThis pattern is used in multiple processes (`trimmomatic`, `sample_reads_check`, `fastqc`) to handle both single and paired-end reads uniformly."
+    },
+    {
+      "id": "multiMap_with_cross_and_extractKey",
+      "title": "MultiMap with Cross and ExtractKey for Structured Input",
+      "description": "This pattern shows how to use `cross` and `multiMap` to create a structured input channel for downstream processes. The `cross` operator combines two channels (raw reads and trimmed reads), and `multiMap` is used to transform the crossed tuples into a structured object with named fields (`rawreads` and `trimmed`).\n\nThe `extractKey` function is used to ensure that the crossed tuples are aligned correctly, which is essential for maintaining data consistency.\n\n```groovy\nreadsCheckInput = rawreads.cross(trimmed) { extractKey(it) }.multiMap { \n  rawreads: it[0]\n  trimmed: it[1]\n}\n```\n\nThis pattern is particularly useful when you need to pass multiple related inputs to a process in a structured way, ensuring that the inputs are correctly paired."
+    },
+    {
+      "id": "metadata_parsing_and_derivation",
+      "title": "Metadata Parsing and Derivation from Filename",
+      "description": "This pattern shows how to parse metadata from filenames and derive additional metadata (like `riscd` and `base` names) for consistent output naming and tracking. The `parseMetadataFromFileName` function extracts structured metadata from the input filename, which is then used to generate consistent output prefixes and metadata identifiers.\n\n```groovy\nmd = parseMetadataFromFileName(r1.getName())\nbase = \"${md.ds}-${ex.dt}_${md.cmp}_${METHOD}\"\nriscd = getRisCd(md, ex, STEP, METHOD)\n```"
+    },
+    {
+      "id": "parameter_wrapping_for_optional_args",
+      "title": "Parameter Wrapping for Optional Command Arguments",
+      "description": "This pattern demonstrates a clean way to handle optional command-line arguments by using wrapper functions (`paramWrap` and `optWrap`). These functions check if a parameter is provided and format it appropriately for the command line, avoiding manual string concatenation and reducing boilerplate.\n\n```groovy\nquality = paramWrap('step_1PP_trimming__chopper__quality', '--quality {}')\nminlength = paramWrap('step_1PP_trimming__chopper__minlength', '--minlength {}')\nmaxlength = optWrap('step_1PP_trimming__chopper__maxlength', '--maxlength {}')\n```"
+    },
+    {
+      "id": "dynamic_publishdir_with_metadata",
+      "title": "Dynamic PublishDir Paths with Metadata",
+      "description": "This pattern demonstrates how to dynamically construct output directories using metadata and execution context. The `publishDir` directives use metadata (`md`) and execution context (`ex`) to create structured, reproducible output paths that include annotations, component names, dataset identifiers, and timestamps.\n\n```groovy\npublishDir mode: 'rellink', \"${params.outdir}/${md.anno}/${md.cmp}/${STEP}/${md.ds}-${ex.dt}_${METHOD}/result\", pattern: '*.gz'\n```"
+    },
+    {
+      "id": "metadata_parsing_and_publish_dir_pattern",
+      "title": "Metadata Parsing and Dynamic Publish Directory Pattern",
+      "description": "This pattern demonstrates how to parse metadata from filenames and use it to dynamically construct output directories and filenames. The `parseMetadataFromFileName` function extracts metadata from the input file, which is then used to create dynamic paths for `publishDir`. This is particularly useful for organizing outputs in a structured manner based on metadata attributes.\n\n```groovy\ndef ex = executionMetadata()\n\nprocess pangolin {\n    input:\n      tuple val(riscd_input), path(consensus)\n    output:\n      path '*'\n      path '*.sh', hidden: true\n    afterScript \"echo '${stepInputs(riscd_input, md, ex, STEP, METHOD, null)}' > ${base}_input.json\"\n    publishDir mode: 'rellink', \"${params.outdir}/${md.anno}/${md.cmp}/${STEP}/${md.ds}-${ex.dt}_${METHOD}/result\", pattern: 'lineage_report.csv', saveAs: { \"${base}_lineage_report.csv\" }\n    publishDir mode: 'rellink', \"${params.outdir}/${md.anno}/${md.cmp}/${STEP}/${md.ds}-${ex.dt}_${METHOD}/meta\", pattern: '{*.log,*.json}'\n    publishDir mode: 'rellink', \"${params.outdir}/${md.anno}/${md.cmp}/${STEP}/${md.ds}-${ex.dt}_${METHOD}/meta\", pattern: '.command.sh', saveAs: { \"${base}.cfg\" }\n    script:\n      md = parseMetadataFromFileName(consensus.getName())\n      base = \"${md.ds}-${ex.dt}_${md.cmp}_pangolin\"\n      \"\"\"\n          pangolin ${consensus}  > ${base}.log\n      \"\"\"\n}\n```"
+    },
+    {
+      "id": "metadata_parsing_with_tuple_unpacking",
+      "title": "Metadata Parsing with Tuple Unpacking",
+      "description": "This pattern demonstrates how to unpack a tuple input in a process to extract metadata and file paths. The `tuple val(riscd_input), path(calls)` input declaration allows the process to receive both a value and a file path in a single input, which is then unpacked and used within the process script. This is particularly useful for processes that need to handle both metadata and file data simultaneously.\n\n```groovy\ntuple val(riscd_input), path(calls)\n```"
+    },
+    {
+      "id": "dynamic_file_naming_with_metadata",
+      "title": "Dynamic File Naming with Metadata",
+      "description": "This pattern shows how to dynamically generate file names using metadata parsed from the input file name. The `parseMetadataFromFileName` function extracts metadata from the file name, which is then used to construct a base name for output files. This ensures that output files are consistently named based on the input metadata.\n\n```groovy\nmd = parseMetadataFromFileName(calls.getName())\nbase = \"${md.ds}-${ex.dt}_${md.cmp}\"\n```"
+    },
+    {
+      "id": "conditional_file_writing_with_python",
+      "title": "Conditional File Writing with Python",
+      "description": "This pattern illustrates how to use a Python script within a Nextflow process to conditionally write data to a new file based on specific criteria. The script reads the input file, processes each line to check if it meets the coverage and identity thresholds, and writes the qualifying lines to a new file. This is a powerful way to integrate complex data processing logic directly within a Nextflow process.\n\n```groovy\n#!/usr/bin/env python3\n\nnew = open(\"${base}_COV${coverage}_ID${identity}_abricate_calls.txt\", \"w\")\nres = open(\"${calls}\", 'r').readlines()\nnew.write(res[0])\nfor l in res:\n    try:\n        if float(l.split(\"\\t\")[9]) >= ${coverage} and float(l.split(\"\\t\")[10]) >= ${identity}:\n            new.write(l.replace(l.split(\"\\t\")[0],\"${calls}\"))\n    except:\n        pass\nnew.close()\n```"
+    },
+    {
+      "id": "chained_cross_with_extract_key",
+      "title": "Chained Cross with Extract Key",
+      "description": "This pattern demonstrates the use of chained `.cross()` operations combined with the `extractKey` function to merge multiple channels. The first `.cross()` merges the output of `getInput()` with `getKingdom()`, and the second `.cross()` merges the result with `getReferenceOptional('gb')`. The `extractKey` function is used to ensure consistent key extraction across the merged channels. This is followed by a `.map` operation to flatten and restructure the data for downstream processing.\n\n```groovy\nworkflow {\n  getInput()\n      .cross(getKingdom()) { extractKey(it) }\n      .cross(getReferenceOptional('gb')) { extractKey(it) }\n      .map { it.flatten() }  // [ riscd assembly ds kingdom ds riscd_ref refid refpath]\n      .map { \n          [ it[0], it[1], it[3], it[5], it[6], it[7] ]\n      }\n      .set { input }\n  step_4AN_genes__prokka(input)\n}\n```"
+    },
+    {
+      "id": "conditional_process_execution_with_complex_input_validation",
+      "title": "Conditional Process Execution with Complex Input Validation",
+      "description": "This pattern demonstrates how to conditionally execute a process based on complex input validation logic. The `when` clause in the `unicycler` process uses custom functions (`isCompatibleWithSeqType`) to validate that the input data matches specific sequencing types (e.g., Illumina paired reads and Nanopore long reads). This ensures the process only runs when the inputs meet the required criteria, which is crucial for hybrid assembly workflows.\n\nThe pattern is particularly useful in pipelines where processes have strict input requirements, and running them with incompatible data would lead to errors or incorrect results.\n\n```groovy\nprocess unicycler {\n    container 'quay.io/biocontainers/unicycler:0.5.0--py38h5cf8b27_3'\n    tag \"${md?.cmp}/${md?.ds}/${md?.dt}\"\n    cpus params.max_cpus\n    when:\n      isCompatibleWithSeqType(short_reads, 'illumina_paired', \"${ENTRYPOINT} short_reads\") && \n      isCompatibleWithSeqType(long_reads, 'nanopore', \"${ENTRYPOINT} long_reads\")\n    input:\n      tuple val(riscd_input), path(short_reads)\n      tuple val(riscd_input2), path(long_reads)\n    output:\n      path '*'\n      path(\"${base}_assembly.fasta\"), emit: scaffolds\n      path '{*.sh,*.log}', hidden: true\n    afterScript \"echo '${stepInputs([riscd_input,riscd_input2], md, ex, STEP, METHOD, [long_reads:riscd_input2])}' > ${base}_input.json\"\n    publishDir mode: 'rellink', \"${params.outdir}/${md.anno}/${md.cmp}/${STEP}/${md.ds}-${ex.dt}_${METHOD}/result\", pattern: \"*.fasta\"\n    publishDir mode: 'rellink', \"${params.outdir}/${md.anno}/${md.cmp}/${STEP}/${md.ds}-${ex.dt}_${METHOD}/result\", pattern: \"assembly.gfa\", saveAs: { \"${base}.gfa\" }\n    publishDir mode: 'rellink', \"${params.outdir}/${md.anno}/${md.cmp}/${STEP}/${md.ds}-${ex.dt}_${METHOD}/meta\", pattern: '*.json'\n    publishDir mode: 'rellink', \"${params.outdir}/${md.anno}/${md.cmp}/${STEP}/${md.ds}-${ex.dt}_${METHOD}/meta\", pattern: '.command.log', saveAs: { \"${base}.log\" }\n    publishDir mode: 'rellink', \"${params.outdir}/${md.anno}/${md.cmp}/${STEP}/${md.ds}-${ex.dt}_${METHOD}/meta\", pattern: '.command.sh', saveAs: { \"${base}.cfg\" }\n    script:\n      (t1,t2) = short_reads\n      md = parseMetadataFromFileName(t1.getName())\n      base = \"${md.ds}-${ex.dt}_${md.cmp}_${METHOD}\"\n      mode = param('step_2AS_hybrid__unicycler__mode')\n      \"\"\"\n      unicycler -1 ${t1} -2 ${t2} -l ${long_reads} -o . -t ${task.cpus} --mode ${mode}\n      mv assembly.fasta ${base}_assembly.fasta\n      \"\"\"\n}\n```"
+    },
+    {
+      "id": "channel_chaining_with_tuple_unpacking",
+      "title": "Channel Chaining with Tuple Unpacking",
+      "description": "This pattern shows how to chain processes by emitting a tuple from one process and unpacking it into the input of another process. The `centrifuge` process emits a tuple of three paths (genus, species, and KrakenLike reports) through the `reports` channel. These paths are then unpacked and used as inputs to the `import_taxa` process. This is a powerful way to pass multiple outputs from one process to another without intermediate files.\n\n```groovy\nworkflow step_3TX_class__centrifuge {\n    take: reads\n    main: \n      centrifuge(reads).reports | import_taxa\n}\n```"
+    },
+    {
+      "id": "tuple_transformation_with_map",
+      "title": "Tuple Transformation with Map",
+      "description": "This pattern demonstrates how to transform tuples emitted from a process using the `map` operator. The `kmerfinder` process emits a tuple containing `riscd` and a check file path. The `map` operator is then used to transform this tuple into a new tuple that includes the `riscd`, the calculated species from the check file, and the bacterial reference path derived from the check file. This is a powerful way to enrich or transform data as it flows through the workflow.\n\n```groovy\nassigned_species = kmerfinder.out.check.map { [ it[0], getCalculatedSpecies(it[1]), getBacterialReferencePath(it[1]) ] }\n```"
+    },
+    {
+      "id": "conditional_branch_with_when",
+      "title": "Conditional Process Execution with `when` Clause",
+      "description": "This pattern demonstrates the use of a `when` clause to conditionally execute a process based on a function call. The `isSpeciesSupported` function checks if the provided `genus_species` is in the allowed list, and the process only runs if the condition is met. This is useful for filtering inputs dynamically.\n\n```groovy\nprocess staramr {\n    container \"ghcr.io/genpat-it/staramr:0.9.1--8fe6b5a239\"\n    containerOptions = \"--user root\"\n    tag \"${md?.cmp}/${md?.ds}/${md?.dt}\"\n    memory { taskMemory( 2.GB, task.attempt ) }\n    when:\n      isSpeciesSupported(genus_species, GENUS_ALLOWED, assembly, task.process)\n    input:\n      tuple val(riscd_input), path(assembly)\n      val(genus_species)\n    output:\n      path '**'\n      path '{*.sh,*.log}', hidden: true\n    script:\n      md = parseMetadataFromFileName(assembly.getName())\n      base = \"${md.ds}-${ex.dt}_${md.cmp}_staramr\"\n      pointfinder_organism = getPointfinderParam(genus_species, POINFINDER_ORGANISM)\n      \"\"\"\n        sed 's/^>.*/>/g' ${assembly} | awk '{for(i=1;i<=NF;i++){if(\\$i~/^>/){\\$i=\">contig\"++count}}} 1' > ${md.cmp}.fasta\n        staramr search --pointfinder-organism ${pointfinder_organism} -o result ${md.cmp}.fasta\n      \"\"\"\n}\n```"
+    },
+    {
+      "id": "dynamic_publishdir_with_saveas",
+      "title": "Dynamic File Publishing with `saveAs` Closure",
+      "description": "This pattern shows how to dynamically rename files during publishing using the `saveAs` closure. The closure allows for complex transformations of filenames based on metadata and regex patterns, ensuring consistent and meaningful output filenames.\n\n```groovy\npublishDir mode: 'rellink', \"${params.outdir}/${md.anno}/${md.cmp}/${STEP}/${md.ds}-${ex.dt}_${METHOD}/result\", pattern: 'result/hits/*', saveAs: { filename -> \"hits/${base}_hits_${flattenPath(filename) -~ /_DS.+/}.fasta\" }\n```"
+    },
+    {
+      "id": "tuple_unpacking_with_conditional_logic",
+      "title": "Tuple Unpacking with Conditional Logic",
+      "description": "This pattern demonstrates how to unpack a tuple with conditional logic. The `genus_species` string is split into `genus` and `species` if it contains an underscore, otherwise, it defaults to `null` for the species. This is useful for handling variable input formats.\n\n```groovy\ndef getPointfinderParam(gsp, map) {\n   try {\n      def genus_species = gsp ? gsp.toLowerCase() : ''\n      def (genus, species) = genus_species.contains(\"_\") ? genus_species.split('_') : [ genus_species, null ]\n\n      if (map.containsKey(genus)) {\n        return map.get(genus)\n      }\n      exit 1, \"could not find pointfinder param for: ${gsp}\"\n    } catch(Throwable t) {\n        exit 1, \"unexpected exception: ${t.asString()}\"\n    }\n}\n```"
+    },
+    {
+      "id": "metadata_parsing_from_filename",
+      "title": "Dynamic Metadata Extraction from Filename",
+      "description": "This pattern shows how to parse structured metadata from filenames using a custom function (`parseMetadataFromFileName`). The metadata is then used to generate output filenames and directory structures, ensuring consistency across pipeline outputs.\n\n```groovy\nmd = parseMetadataFromFileName(r1.getName())\nbase = \"${md.ds}-${ex.dt}_${md.cmp}_mash\"\n```"
+    },
+    {
+      "id": "multi_pattern_publish_dir",
+      "title": "Multi-Pattern Publish Directory with Dynamic Paths",
+      "description": "This pattern demonstrates how to use multiple `publishDir` directives with different patterns to organize outputs into structured directories. The paths are dynamically constructed using metadata variables, and some files are renamed using `saveAs`.\n\n```groovy\npublishDir mode: 'rellink', \"${params.outdir}/${md.anno}/${md.cmp}/${STEP}/${md.ds}-${ex.dt}_${METHOD}/result\", pattern: '*.tsv'\npublishDir mode: 'rellink', \"${params.outdir}/${md.anno}/${md.cmp}/${STEP}/${md.ds}-${ex.dt}_${METHOD}/meta\", pattern: '*_input.json'\npublishDir mode: 'rellink', \"${params.outdir}/${md.anno}/${md.cmp}/${STEP}/${md.ds}-${ex.dt}_${METHOD}/meta\", pattern: '.command.log', saveAs: { \"${base}.log\" }\npublishDir mode: 'rellink', \"${params.outdir}/${md.anno}/${md.cmp}/${STEP}/${md.ds}-${ex.dt}_${METHOD}/meta\", pattern: '.command.sh', saveAs: { \"${base}.cfg\" }\n```"
+    },
+    {
+      "id": "conditional_channel_operator_with_tuple_unpacking",
+      "title": "Conditional Channel Operator with Tuple Unpacking",
+      "description": "This pattern demonstrates the use of a conditional operator to determine the value of a variable based on the input channel's content. The `isIlluminaPaired` function checks if the reads are paired, and based on that, the `options` variable is set. Additionally, tuple unpacking is used to handle the paired reads.\n\n```groovy\n(t1,t2) = reads\nmd = parseMetadataFromFileName(t1.getName())\nbase = \"${md.ds}-${ex.dt}_${md.cmp}\"\noptions = isIlluminaPaired(reads) ? ' --paired ' : ''\noptions += t1.getName().endsWith(\".gz\") ? \" --gzip-compressed \" : \"\"\n```"
+    },
+    {
+      "id": "multiple_publish_dir_with_patterns",
+      "title": "Multiple Publish Directories with Patterns",
+      "description": "This pattern shows how to use multiple `publishDir` directives with different patterns to organize output files into specific directories. This is particularly useful for separating metadata, logs, and results into distinct folders.\n\n```groovy\npublishDir mode: 'rellink', \"${params.outdir}/${md.anno}/${md.cmp}/${STEP}/${md.ds}-${ex.dt}_${METHOD}/meta\", pattern: '{*.log,*.json}'\npublishDir mode: 'rellink', \"${params.outdir}/${md.anno}/${md.cmp}/${STEP}/${md.ds}-${ex.dt}_${METHOD}/meta\", pattern: '.command.sh', saveAs: { \"${base}_kraken.cfg\" }\npublishDir mode: 'rellink', \"${params.outdir}/${md.anno}/${md.cmp}/${STEP}/${md.ds}-${ex.dt}_${METHOD}/result\", pattern: '{*.tsv,*.gz}'\n```"
+    },
+    {
+      "id": "workflow_chaining_with_emit",
+      "title": "Workflow Chaining with Emit",
+      "description": "This pattern demonstrates how to chain processes within a workflow and emit specific outputs. The `kraken2` process emits a `report` channel, which is then used as input for the `braken2` process. The `braken2` process emits a `genus_report` channel, which is then emitted by the workflow.\n\n```groovy\nworkflow step_3TX_class__kraken2 {\n    take: reads\n    main:\n      report = kraken2(reads).report\n      braken2(report)\n     emit:\n       genus_report = braken2.out.genus_report\n}\n```"
+    },
+    {
+      "id": "host_depletion_cross",
+      "title": "Host Depletion Cross Product",
+      "description": "This pattern demonstrates how to combine two channels using the `.combine()` operator to create a cross product of inputs. This is particularly useful when you need to process each input with multiple hosts, ensuring all combinations are processed. The `getSingleInput()` channel provides the input reads, and `getHostUnkeyed()` provides the host references. The `.combine()` operator merges these channels, creating tuples where each input is paired with each host.\n\n```groovy\ninput = getSingleInput()\n  .combine(getHostUnkeyed())\nstep_1PP_hostdepl__bowtie(input)\n```"
+    },
+    {
+      "id": "dynamic_options_construction",
+      "title": "Dynamic Construction of Command Options",
+      "description": "This pattern shows how to dynamically construct command-line options based on input file properties. The `options` variable is built by checking if the reads are paired and if the input file is gzip-compressed. This approach ensures that the correct flags are passed to the tool without hardcoding them.\n\n```groovy\noptions = isIlluminaPaired(reads) ? ' --paired ' : ''\noptions += t1.getName().endsWith(\".gz\") ? \" --gzip-compressed \" : \"\"\n```"
+    },
+    {
+      "id": "metadata_parsing_and_base_naming",
+      "title": "Metadata Parsing and Base Naming Convention",
+      "description": "This pattern involves parsing metadata from the input file name and constructing a base name for output files. The `parseMetadataFromFileName` function extracts metadata from the file name, and the base name is constructed using this metadata along with execution metadata. This ensures consistent naming of output files.\n\n```groovy\nmd = parseMetadataFromFileName(t1.getName())\nbase = \"${md.ds}-${ex.dt}_${md.cmp}\"\n```"
+    },
+    {
+      "id": "cross_multiMap_tuple_unpacking",
+      "title": "Cross Product with Tuple Unpacking and multiMap Transformation",
+      "description": "This pattern demonstrates an advanced use of the `.cross()` operator combined with `.multiMap()` to create a cross product of two channels and then transform the resulting tuples into a structured format. The `getSingleInput()` channel is crossed with the `getReference('fa')` channel, and the resulting tuples are processed by `extractKey(it)` to extract relevant metadata. The `.multiMap()` operator then transforms each tuple into a structured map with named keys (`reads` and `refs`), where `refs` is a sublist of the original tuple (elements 1 to 3). This pattern is useful for organizing and structuring data before passing it to downstream processes.\n\n```groovy\ngetSingleInput().cross(getReference('fa')) { extractKey(it) }\n  .multiMap { \n      reads: it[0]\n      refs:  it[1][1..3] // riscd, code, path\n  }.set { input }\n```"
+    },
+    {
+      "id": "metadata_parsing_with_tuple_input",
+      "title": "Metadata Parsing with Tuple Input",
+      "description": "This pattern demonstrates how to use a tuple input in a process to pass both metadata and file paths, then parse the metadata from the file name within the process. This is useful for dynamically generating output file names and paths based on input metadata.\n\n```groovy\ntuple val(riscd_input), path(assembly)\nscript:\n  md = parseMetadataFromFileName(assembly.getName())\n  base = \"${md.ds}-${ex.dt}_${md.cmp}_fasta2fastq\"\n```"
+    },
+    {
+      "id": "multiple_publishdir_with_patterns",
+      "title": "Multiple PublishDir with Patterns",
+      "description": "This pattern shows how to use multiple `publishDir` directives with different patterns to organize output files into specific directories. This is particularly useful for separating results, logs, and metadata files into distinct folders.\n\n```groovy\npublishDir mode: 'rellink', \"${params.outdir}/${md.anno}/${md.cmp}/${STEP}/${md.ds}-${ex.dt}_${METHOD}/result\", pattern: 'results/*.gz', saveAs: { filename -> flattenPath(filename) }\npublishDir mode: 'rellink', \"${params.outdir}/${md.anno}/${md.cmp}/${STEP}/${md.ds}-${ex.dt}_${METHOD}/meta\", pattern: '*_input.json'\npublishDir mode: 'rellink', \"${params.outdir}/${md.anno}/${md.cmp}/${STEP}/${md.ds}-${ex.dt}_${METHOD}/meta\", pattern: '.command.log', saveAs: { \"${base}.log\" }\npublishDir mode: 'rellink', \"${params.outdir}/${md.anno}/${md.cmp}/${STEP}/${md.ds}-${ex.dt}_${METHOD}/meta\", pattern: '.command.sh', saveAs: { \"${base}.cfg\" }\n```"
+    },
+    {
+      "id": "conditional_process_execution",
+      "title": "Conditional Process Execution Based on Read Type",
+      "description": "This pattern demonstrates how to conditionally execute different commands within a process based on the type of input reads (Illumina paired-end or Ion Torrent). The `when` clause ensures the process only runs for compatible read types, and the script block uses conditional logic to execute the appropriate command.\n\n```groovy\nwhen:\n  isCompatibleWithSeqType(reads, ['ion','illumina_paired'], task.process)\n\nif (isIlluminaPaired(reads)) {  \n  \"\"\"\n  spades.py --plasmid --only-assembler --careful -k 21,33,55,77 -t ${task.cpus}  -o spades -1 ${t1} -2 ${t2}\n  mv spades/scaffolds.fasta ${base}_scaffolds.fasta ;\n  mv spades/contigs.fasta ${base}_contigs.fasta ;\n  \"\"\"\n} else if (isIonTorrent(reads)) {\n  \"\"\"\n    spades.py --plasmid --iontorrent --careful -o spades -s $t1 -t ${task.cpus}  \n    mv spades/scaffolds.fasta ${base}_scaffolds.fasta ;\n    mv spades/contigs.fasta ${base}_contigs.fasta ;\n  \"\"\"\n}\n```"
+    },
+    {
+      "id": "conditional_process_execution_with_when",
+      "title": "Conditional Process Execution Using 'when' Clause",
+      "description": "This pattern demonstrates how to conditionally execute a process based on a dynamic condition evaluated at runtime. The `when` clause is used to check if the species is supported before running the process. This is particularly useful for filtering inputs dynamically without explicitly branching channels.\n\n```groovy\nprocess mlst_flaa {\n    container \"ghcr.io/genpat-it/mlst-w-db:2.23.0--60b8b2e3dd_231219.124455\"\n    containerOptions = \"-v ${workflow.projectDir}/scripts/${ENTRYPOINT}:/scripts:ro\"\n    tag \"${md?.cmp}/${md?.ds}/${md?.dt}\"\n    memory { taskMemory( 4.GB, task.attempt ) }\n    cpus { [8, params.max_cpus as int].min() }\n    when:\n      isSpeciesSupported(genus_species, GENUS_ALLOWED, scaffolds200, task.process)\n    input:\n      tuple val(riscd_input), path(scaffolds200)\n      val genus_species\n    output:\n      path '*'\n      path '*.sh', hidden: true\n    afterScript \"echo '${stepInputs(riscd_input, md, ex, STEP, METHOD, null)}' > ${base}_input.json\"\n    publishDir mode: 'rellink', \"${params.outdir}/${md.anno}/${md.cmp}/${STEP}/${md.ds}-${ex.dt}_${METHOD}/result\", pattern: '{*.csv,*.tsv}'\n    publishDir mode: 'rellink', \"${params.outdir}/${md.anno}/${md.cmp}/${STEP}/${md.ds}-${ex.dt}_${METHOD}/meta\", pattern: '{*.log,*.json}'\n    publishDir mode: 'rellink', \"${params.outdir}/${md.anno}/${md.cmp}/${STEP}/${md.ds}-${ex.dt}_${METHOD}/meta\", pattern: '.command.sh', saveAs: { \"${base}_mlst_flaa.cfg\" }\n    script:\n      md = parseMetadataFromFileName(scaffolds200.getName())\n      base = \"${md.ds}-${ex.dt}_${md.cmp}\"\n      \"\"\"\n        mlst --threads ${task.cpus} --scheme ${MLST_SCHEMA_NAME} ${scaffolds200} > ${base}_mbn_flaA.tsv 2> ${base}_mbn_flaA.log\n        /scripts/process-mlst-result.py ${base}_mbn_flaA.tsv ${base}_mbn_flaa_cc.csv /NGStools/mlst/db/pubmlst\n      \"\"\"\n}\n```"
+    },
+    {
+      "id": "tuple_input_with_metadata_parsing",
+      "title": "Tuple Input with Metadata Parsing",
+      "description": "This pattern demonstrates how to handle tuple inputs in a process, where one element is a value (`riscd_input`) and the other is a file path (`scaffolds200`). The process then parses metadata from the file name, which is used to construct output file names and directories. This is a common pattern for workflows that need to dynamically generate output names based on input file metadata.\n\n```groovy\ninput:\n  tuple val(riscd_input), path(scaffolds200)\n  val genus_species\nscript:\n  md = parseMetadataFromFileName(scaffolds200.getName())\n  base = \"${md.ds}-${ex.dt}_${md.cmp}\"\n```"
+    },
+    {
+      "id": "conditional_tuple_unpacking_in_process",
+      "title": "Conditional Tuple Unpacking in Process",
+      "description": "This pattern demonstrates how to conditionally unpack a tuple in a process based on the type of input. The snippet checks if the input is a collection and unpacks it accordingly, which is useful for handling both paired-end and single-end reads in a unified process.\n\n```groovy\n(r1,r2) = (reads instanceof java.util.Collection) ? reads : [reads, null]\n```"
+    },
+    {
+      "id": "multi_step_data_flow_with_combine_and_group",
+      "title": "Multi-Step Data Flow with Combine and Group",
+      "description": "This pattern shows a complex data flow where a channel is combined with another channel, processed through multiple steps, and then grouped. The `combine` operator is used to merge the reads with references, and the `groupTuple` operator is used to group the outputs from the `samtools_depth` process.\n\n```groovy\nreferences = getWNVReferences()\ncomb = reads.combine(references)\nbam = snippy(comb).bam\ncoverages = samtools_depth(bam).coverage.groupTuple()\nlineage = lineage_selection(coverages).lineage\n```"
+    },
+    {
+      "id": "conditional_filtering_with_custom_function",
+      "title": "Conditional Filtering with Custom Function",
+      "description": "This pattern demonstrates how to filter a channel based on a custom function. The `isValidLineage` function is used to filter out invalid lineage results, ensuring only valid data proceeds further in the workflow.\n\n```groovy\nlineage = lineage.filter { isValidLineage(it) }\n```"
+    },
+    {
+      "id": "dynamic_publishdir_with_patterns",
+      "title": "Dynamic Output Publishing with Multiple Patterns",
+      "description": "This pattern illustrates how to dynamically publish multiple output files to different directories based on file patterns. The `publishDir` directives use glob patterns to selectively publish files to specific subdirectories (`result` and `meta`), with custom naming via `saveAs`.\n\n```groovy\npublishDir mode: 'rellink', \"${params.outdir}/${md.anno}/${md.cmp}/${STEP}/${md.ds}-${ex.dt}_${METHOD}/result\", pattern: '{*.txt,*.fsa,*_format_*.json}', saveAs: { f -> \"${base}_${f}\" }\npublishDir mode: 'rellink', \"${params.outdir}/${md.anno}/${md.cmp}/${STEP}/${md.ds}-${ex.dt}_${METHOD}/meta\", pattern: '*_input.json'\npublishDir mode: 'rellink', \"${params.outdir}/${md.anno}/${md.cmp}/${STEP}/${md.ds}-${ex.dt}_${METHOD}/meta\", pattern: '.command.log', saveAs: { \"${base}.log\" }\npublishDir mode: 'rellink', \"${params.outdir}/${md.anno}/${md.cmp}/${STEP}/${md.ds}-${ex.dt}_${METHOD}/meta\", pattern: '.command.sh', saveAs: { \"${base}.cfg\" }\n```"
+    },
+    {
+      "id": "conditional_output_emission_with_optional",
+      "title": "Conditional Output Emission with Optional Flag",
+      "description": "This pattern demonstrates how to conditionally emit an output channel using the `optional: true` flag. This is useful when a process may or may not produce a specific output, allowing the workflow to handle both cases gracefully. The `emit` directive is used to explicitly name the output channel, making it easier to reference in downstream processes.\n\n```groovy\noutput:\n  path '**'\n  tuple val(riscd), path(\"output/*.fasta\"), emit: plasmids, optional: true\n  path '{*.sh,*.log}', hidden: true\n```"
+    },
+    {
+      "id": "conditional_channel_branching_with_cross_and_multimap",
+      "title": "Conditional Channel Branching with Cross and MultiMap",
+      "description": "This pattern demonstrates how to use `cross` and `multiMap` to conditionally branch and reshape data channels. The `getSingleInput().cross(getReference('fa'))` creates a Cartesian product of inputs and references, which is then reshaped using `multiMap` to separate reads and references into distinct channels. This is particularly useful for workflows that require pairing different types of inputs dynamically.\n\n```groovy\ngetSingleInput().cross(getReference('fa')) { extractKey(it) }\n  .multiMap {  \n      reads: it[0] // riscd, R[]\n      refs:  it[1][1..3] // riscd, code, path\n  }.set { input }\n```"
+    },
+    {
+      "id": "dynamic_channel_crossing_with_tuple_unpacking",
+      "title": "Dynamic Channel Crossing with Tuple Unpacking",
+      "description": "This pattern shows how to dynamically cross channels and unpack tuples to reshape data for downstream processes. The `coverage.cross(medaka.out.consensus)` operation combines coverage and consensus data, and the subsequent `map` operation unpacks and restructures the tuples to align with the expected input format for the `coverage_check` process.\n\n```groovy\ncoverage = samtools_depth(medaka.out.bam, METHOD).coverage\ncoverage.cross(medaka.out.consensus) { extractDsRef(it) }.map {  \n    return [ it[0][0], it[1][1], it[0][1] ]\n}.set { coverageRefAndConsensus }\n```"
+    },
+    {
+      "id": "multi_stage_channel_reshaping_with_cross_and_map",
+      "title": "Multi-Stage Channel Reshaping with Cross and Map",
+      "description": "This pattern illustrates a multi-stage approach to reshaping channels using `cross` and `map`. The `coverage_minmax.out.coverage_extra.cross(coverageBasic)` operation combines two channels, and the subsequent `map` operation restructures the data to create a unified tuple for further processing. This is useful for merging and transforming data from multiple sources.\n\n```groovy\ncrossedChecks = coverage_minmax.out.coverage_extra.cross(coverageBasic) { it[0] + \"-\" + it[1] }\n  .map { [ it[0][0], it[0][1], it[0][2], it[1][2] ] }\n```"
+    },
+    {
+      "id": "multi_map_cross_extraction",
+      "title": "MultiMap with Cross and Key Extraction",
+      "description": "This pattern demonstrates the use of `.cross()` to combine two channels (reads and references) and then `.multiMap` to restructure the resulting tuples into named channels (`reads` and `refs`). The `extractKey` function is applied to the cross result to ensure proper key-based alignment. This is useful for aligning reads to references while maintaining metadata consistency.\n\n```groovy\ngetSingleInput().cross(getReference('fa')) { extractKey(it) }\n  .multiMap { \n      reads: it[0] // riscd, R[]\n      refs:  it[1][1..3] // riscd, code, path\n  }.set { input }\n```"
+    },
+    {
+      "id": "conditional_schema_selection",
+      "title": "Conditional Schema Selection with Fallback Logic",
+      "description": "This pattern demonstrates a complex conditional logic for selecting a schema based on genus_species input. It first checks if the full genus_species string exists in the SPECIES_SCHEMA map, then falls back to checking just the genus part. If no schema is provided, it defaults to the first allowed schema. This is particularly useful for handling flexible input parameters with multiple fallback options.\n\nThe key aspects are:\n1. String manipulation to split genus_species into components\n2. Nested conditional checks with fallback logic\n3. Graceful handling of missing or incompatible schemas\n\n```groovy\ndef getSchema(gsp, schema) {\n  try {\n    def genus_species = gsp ? gsp.toLowerCase() : ''\n    def (genus, species) = genus_species.contains(\"_\") ? genus_species.split('_') : [ genus_species, null ]\n\n    def allowedSchemas = []\n    if (SPECIES_SCHEMA.containsKey(genus_species)) {\n      allowedSchemas =  SPECIES_SCHEMA.get(genus_species)\n    } else if (SPECIES_SCHEMA.containsKey(genus)) {\n      allowedSchemas = SPECIES_SCHEMA.get(genus)\n    }\n    if (!allowedSchemas) {\n      log.debug \"no compatible schemas found for genus_species: ${genus_species}\"\n      return null\n    }\n    if (!schema) {\n      return allowedSchemas[0] //at this stage, use the first allowed schema\n    }\n    if (allowedSchemas.contains(schema)) {\n      return schema\n    }\n    log.warn \"schema ${schema} not compatible with genus_species: ${genus_species}\"\n    return null;\n  } catch(Throwable t) {\n      exit 1, \"unexpected exception: ${t.asString()}\"\n  }\n}\n```"
+    },
+    {
+      "id": "parameterized_conditional_processing",
+      "title": "Parameterized Conditional Processing with Equipment-Specific Parameters",
+      "description": "This pattern shows how to conditionally select processing parameters based on equipment type (Ion Torrent vs others) and schema compatibility. It demonstrates a clean way to handle equipment-specific configurations while maintaining a single code path. The function uses nested conditionals to first check the equipment type, then verify schema compatibility before returning the appropriate parameters.\n\nKey aspects:\n1. Equipment-type detection (Ion Torrent vs others)\n2. Schema-specific parameter lookup\n3. Graceful fallback to empty string if no parameters found\n\n```groovy\ndef getExtraParams(schema) {\n  try {\n    if (isIonTorrent(null)) {\n      if (CHEWBBACA_SINGLE_END_PARAMS.containsKey(schema)) {\n        return CHEWBBACA_SINGLE_END_PARAMS[schema]\n      }\n    } else {\n      if (CHEWBBACA_PAIRED_END_PARAMS.containsKey(schema)) {\n        return CHEWBBACA_PAIRED_END_PARAMS[schema]\n      }\n    }\n    return ''\n  } catch(Throwable t) {\n      exit 1, \"getExtraParams, unexpected exception: ${t.asString()}\"\n  }\n}\n```"
+    },
+    {
+      "id": "multi_output_process_with_tuple_unpacking",
+      "title": "Multi-Output Process with Tuple Unpacking and Conditional Emission",
+      "description": "This pattern demonstrates a process with multiple output channels using tuple unpacking and conditional emission. The chewbbaca process emits different outputs to different channels based on the output declaration. The workflow then selectively uses these outputs in downstream processes.\n\nKey aspects:\n1. Multiple output declarations with different emission patterns\n2. Tuple unpacking in output declarations\n3. Selective use of outputs in downstream processes\n4. Hidden outputs for metadata files\n\n```groovy\nprocess chewbbaca {\n    // ... process definition ...\n    output:\n      path '**'\n      path(\"${base}_results_statistics.tsv\"), emit: stats\n      tuple path(\"${base}_results_alleles.tsv\"), path('schema/'), emit: alleles\n      tuple path(\"${base}_results_alleles.tsv\"), path(\"${base}_new_alleles.txt\"), val(schemaName), emit: alleles_with_new\n      path '{*.sh,*.log}', hidden: true\n    // ... rest of process ...\n}\n\nworkflow step_4TY_cgMLST__chewbbaca {\n    take:\n      assembly\n      genus_species\n      schema\n    main:\n      chewbbaca_result = chewbbaca(assembly, genus_species, schema)\n      hashing(chewbbaca_result.alleles)\n      chewbbaca_check(chewbbaca_result.stats).check\n}\n```"
+    },
+    {
+      "id": "cross_multiMap_key_extraction",
+      "title": "Cross Product with Key Extraction and MultiMap Transformation",
+      "description": "This pattern demonstrates a complex channel operation where two channels are crossed, a key is extracted from the resulting tuples, and then the data is reshaped using `multiMap`. This is particularly useful when you need to combine data from two sources and then restructure it for downstream processing.\n\nThe key steps are:\n1. `getKrakenResults().cross(getTrimmedReads(false))` creates a cross product of two channels\n2. `{ extractKey(it) }` applies a function to extract a key from each tuple\n3. `.multiMap { kraken: it[0], trimmed: it[1] }` reshapes the data into a named tuple structure\n\nThis pattern is excellent for scenarios where you need to combine and reorganize data from multiple sources while maintaining clear data structure for downstream processes.\n\n```groovy\ngetKrakenResults().cross(getTrimmedReads(false)) { extractKey(it) }.multiMap { \n  kraken: it[0]\n  trimmed: it[1]\n}.set { krakenAndTrimmed }\n```"
+    },
+    {
+      "id": "multi_map_tuple_unpacking",
+      "title": "MultiMap Tuple Unpacking for Complex Input Handling",
+      "description": "This pattern demonstrates how to use `multiMap` to unpack and restructure tuples from a cross product. The `cross` operator combines two channels (reads and reference), and `multiMap` is used to selectively extract and rename elements from the resulting tuple. This is particularly useful when you need to transform the structure of your data before passing it to downstream processes.\n\nThe `multiMap` operator takes a closure that receives each tuple from the cross product and returns a map with named keys. This allows for clear and explicit data shaping, making the code more readable and maintainable.\n\n```groovy\ngetSingleInput().cross(getReference('any')) { extractKey(it) }\n  .multiMap { \n      reads: it[0] // riscd, R[]\n      refs:  it[1][1..3] // riscd, code, path\n  }.set { input }\n```"
+    },
+    {
+      "id": "dynamic_metadata_parsing",
+      "title": "Dynamic Metadata Parsing from Filename",
+      "description": "This pattern shows how to dynamically parse metadata from filenames within a process. The metadata is extracted from the filename and used to generate output filenames and directory structures. This is a common pattern in bioinformatics pipelines where sample information is encoded in filenames.\n\n```groovy\nmd = parseMetadataFromFileName(r1.getName())\nmd_input = parseRISCD(riscd_input)\nbase = \"${md.ds}-${ex.dt}_${md.cmp}\"\n```"
+    },
+    {
+      "id": "chained_process_output",
+      "title": "Chained Process Output for Sequential Processing",
+      "description": "This pattern shows how to chain the output of one process to the input of another process. The `nanoplot` process emits a `stats` output which is then used as input for the `nanopore_reads_check` process. This is a common pattern for creating sequential processing workflows.\n\n```groovy\nnanoplot(data).stats | nanopore_reads_check\n```"
+    },
+    {
+      "id": "conditional_channel_cross_with_key_extraction",
+      "title": "Conditional Channel Cross with Key Extraction",
+      "description": "This pattern demonstrates how to conditionally cross two channels and extract a key from the resulting tuple. The `getSingleInput()` and `getReference('fa')` channels are crossed, and the `extractKey` function is applied to each tuple to extract a key. This is useful for ensuring that the inputs are compatible before processing.\n\n```groovy\ngetSingleInput().cross(getReference('fa')) { extractKey(it) }\n  .multiMap {  \n      reads: it[0] // riscd, R[]\n      refs:  it[1][1..3] // riscd, code, path\n  }.set { input }\n```"
+    },
+    {
+      "id": "multi_output_channel_merging_with_cross",
+      "title": "Multi-Output Channel Merging with Cross",
+      "description": "This pattern shows how to merge outputs from multiple processes using the `cross` operator. The `coverage_minmax.out.coverage_extra` and `coverageBasic` channels are crossed, and a key is generated by concatenating elements from the tuples. This is useful for combining related outputs from different processes.\n\n```groovy\ncrossedChecks = coverage_minmax.out.coverage_extra.cross(coverageBasic) { it[0] + \"-\" + it[1] }\n  .map { [ it[0][0], it[0][1], it[0][2], it[1][2] ] }\n```"
+    },
+    {
+      "id": "tuple_unpacking_and_mapping",
+      "title": "Tuple Unpacking and Mapping",
+      "description": "This pattern demonstrates how to unpack tuples from crossed channels and map them to a new structure. The `coverage` and `consensus` channels are crossed, and the `extractDsRef` function is applied to each tuple. The resulting tuples are then mapped to a new structure.\n\n```groovy\ncoverage.cross(consensus) { extractDsRef(it) }.map {  \n    return [ it[0][0], it[1][1], it[0][1] ] \n}.set { coverageRefAndConsensus }\n```"
+    },
+    {
+      "id": "conditional_channel_aggregation",
+      "title": "Conditional Channel Aggregation with Validation",
+      "description": "This pattern demonstrates a complex conditional aggregation of channels where data is validated before being processed. The `canBeAggregated` function checks if the input references match expected values and size, ensuring data integrity before aggregation. This is particularly useful in workflows where multiple references need to be combined in a specific order.\n\nThe key aspects are:\n1. Validation of input size and content against expected values\n2. Conditional aggregation only when validation passes\n3. Use of `eachWithIndex` to reorder files based on a predefined reference order\n\n```groovy\ndef canBeAggregated(actual) {\n    try {\n      expected = getReferenceCodes()\n      if (expected.size() < 2) {\n          return false\n      }\n      if (actual.size() != expected.size()) {\n        log.warn \"expected ${expected.size()} references, got: ${actual.size()}\"\n        return false\n      }\n      if (actual.any {!expected.contains(it)}) {\n        log.warn \"there is some unexpected value in ${actual} (values should be: ${expected})\"\n        return false\n      }\n      return true\n    } catch(Throwable t) {\n        log.warn \"canBeAggregated: unexpected exception: ${t.asString()}\"\n        return false\n    }\n}\n\nprocess aggregate {\n  container \"ubuntu:20.04\"\n  tag \"${md?.cmp}/${md?.ds}/${md?.dt}\"\n  memory { taskMemory( 200.MB, task.attempt ) }\n  when:\n    isSegmentedMapping() && canBeAggregated(references)\n  input:\n    tuple val(riscd_input), val(references), path(consensus)\n  output:\n    path '*'\n    path '*.sh', hidden: true\n  publishDir mode: 'rellink', \"${params.outdir}/${md.anno}/${md.cmp}/${STEP}/${md.ds}-${ex.dt}_${METHOD}/meta\", pattern: '.command.sh', saveAs: { \"${base}_${METHOD}_aggregate.cfg\" }\n  publishDir mode: 'rellink', \"${params.outdir}/${md.anno}/${md.cmp}/${STEP}/${md.ds}-${ex.dt}_${METHOD}/result\", pattern: '*.fasta'\n  publishDir mode: 'rellink', \"${params.outdir}/${md.anno}/${md.cmp}/${STEP}/${md.ds}-${ex.dt}_${METHOD}/meta\", pattern: \"*.json\"\n  afterScript \"echo '${stepInputs(riscd_input, md, ex, STEP, METHOD, [references:referenceOrdered])}' > ${base}_input.json\"\n  script:\n    md = parseMetadataFromFileName(consensus[0].getName())\n    base = \"${md.ds}-${ex.dt}_${md.cmp}\"\n    sorted = []\n    referenceOrdered = getReferenceCodes()\n    references.eachWithIndex{ ref, index ->\n        sorted[referenceOrdered.indexOf(ref)] = consensus[index]\n    }\n    \"\"\"\n      for f in ${sorted.join(\" \")} ; do \n        if [ \"0\" -ne \"`grep -cve '^\\s*\\$' -e \">\" \\${f}`\" ] ;\n            then\n                cat \"\\${f}\" | awk 1 >> ${base}_${METHOD}_aggregate.fasta\n        fi\n      done\n    \"\"\"\n}\n```"
+    },
+    {
+      "id": "multi_map_channel_splitting",
+      "title": "MultiMap Channel Splitting for Parallel Processing",
+      "description": "This pattern shows how to use `multiMap` to split a single input channel into multiple output channels, enabling parallel processing of different components. The input is a tuple containing metadata and references, which is split into separate channels for reads and reference data.\n\nKey aspects:\n1. Uses `multiMap` to create named output channels from a single input\n2. Enables parallel processing of different data components\n3. Maintains relationship between components through shared metadata\n\n```groovy\nworkflow {\n    getSingleInput().cross(getReferences('any')) { extractKey(it) }\n      .multiMap { \n          reads: it[0] // riscd, R[]\n          refs:  it[1][1..3] // riscd, code, path\n      }.set { input }\n\n    step_2AS_mapping__ivar(input.reads, input.refs)\n}\n```"
+    },
+    {
+      "id": "complex_channel_crossing_with_grouping",
+      "title": "Complex Channel Crossing with Grouping",
+      "description": "This pattern demonstrates a sophisticated use of channel operators including `cross`, `groupTuple`, and `map` to combine and transform data from multiple sources. The workflow crosses coverage data with consensus files, then groups them by dataset for downstream processing.\n\nKey aspects:\n1. Uses `cross` to combine data from different processes\n2. Applies `groupTuple` to aggregate data by key\n3. Uses `map` to transform and restructure the data\n4. Demonstrates chaining of multiple channel operators\n\n```groovy\ncoverage.cross(consensus) { extractDsRef(it) }.map { \n    return [ it[0][0], it[1][2], it[0][1] ]\n}.set { coverageRefAndConsensus }\n\ncoverageBasic = coverage_check(coverageRefAndConsensus, 'ivar').coverage_basic\n\ncrossedChecks = coverage_minmax.out.coverage_extra.cross(coverageBasic) { it[0] + \"-\" + it[1] }\n.map { [ it[0][0], it[0][1], it[0][2], it[1][2] ] }\n\ncoverage_check_group(coverage_check_merge(crossedChecks, 'vdsnippy').coverage_merged | groupTuple, 'vdsnippy')\n```"
+    },
+    {
+      "id": "tuple_unpacking_with_metadata_parsing",
+      "title": "Tuple Unpacking with Metadata Parsing",
+      "description": "This pattern demonstrates how to unpack a tuple input in a process and parse metadata from the file name. The `reads` input is a tuple containing two paths, which are unpacked into `r1` and `r2`. The metadata is then parsed from the first file name using a custom function `parseMetadataFromFileName`. This is a common pattern when dealing with paired-end sequencing data where metadata needs to be extracted from file names for downstream processing.\n\n```groovy\n(r1,r2) = reads\nmd = parseMetadataFromFileName(r1.getName())\nbase = \"${md.ds}-${ex.dt}_${md.cmp}_bbnorm_k${k}_t${target}\"\n```"
+    },
+    {
+      "id": "tuple_unpacking_in_process_inputs",
+      "title": "Tuple Unpacking in Process Inputs",
+      "description": "This pattern showcases how to handle multiple inputs in a process by unpacking tuples. The process `filter` receives three tuples as inputs, each containing a value and a path or another value. This approach is useful for organizing related data and maintaining clarity in the process definition.\n\nThe tuples are unpacked directly in the input declaration, making it easy to reference individual components in the process script or other directives.\n\n```groovy\ninput:\n  tuple val(riscd_input), path(calls)\n  tuple val(riscd_input2),  path(l200)\n  tuple val(riscd_ref), val(reference), path(referencePath)\n```\n\nThis allows the process to access the unpacked values (e.g., `riscd_input`, `calls`, `l200`, `reference`) directly in the script or other sections of the process."
+    },
+    {
+      "id": "dynamic_output_filename_generation",
+      "title": "Dynamic Output Filename Generation",
+      "description": "This pattern demonstrates how to dynamically generate output filenames based on input metadata and process logic. The output filename is constructed by combining parts of the input filenames and other metadata, ensuring uniqueness and traceability.\n\nIn the `filter` process, the output filename is derived from the `l200` input filename, with modifications based on the `reference` value. This approach is useful for maintaining consistency and clarity in output naming conventions.\n\n```groovy\noutput = l200?.getName().replace(\".fasta\", \"_${reference.replace('_', '')}.fasta\")\n```\n\nThis ensures that the output filename reflects the input data and processing parameters, making it easier to track and manage results."
+    },
+    {
+      "id": "multiMap_with_cross_and_key_extraction",
+      "title": "MultiMap with Cross and Key Extraction",
+      "description": "This pattern shows how to use `multiMap` to restructure data after a `cross` operation. The `cross` operation combines two channels, and `multiMap` is used to split the resulting tuple into separate channels for reads and references. This is particularly useful for preparing data for downstream processes that require distinct input channels.\n\n```groovy\ngetSingleInput().cross(getReference('fa')) { extractKey(it) }\n  .multiMap { \n      reads: it[0] // riscd, R[]\n      refs:  it[1][1..3] // riscd, code, path\n  }.set { input }\n```"
+    },
+    {
+      "id": "cross_with_tuple_restructuring",
+      "title": "Cross with Tuple Restructuring",
+      "description": "This pattern demonstrates the use of `cross` to combine two channels followed by a `map` operation to restructure the resulting tuples. The `cross` operation is used to combine coverage and consensus data, and the `map` operation is used to reorder and select specific elements from the resulting tuples.\n\n```groovy\ncoverage.cross(consensus) { extractDsRef(it) }.map { \n    return [ it[0][0], it[1][1], it[0][1] ]\n}.set { coverageRefAndConsensus }\n```"
+    },
+    {
+      "id": "groupTuple_for_aggregation",
+      "title": "GroupTuple for Aggregation",
+      "description": "This pattern shows how to use `groupTuple` to aggregate data by a key. The `groupTuple` operator is used to group coverage data by a key, which is useful for downstream processes that require aggregated data.\n\n```groovy\ncoverage_check_group(coverage_check_merge(crossedChecks, 'bowtie').coverage_merged | groupTuple, 'bowtie')\n```"
+    },
+    {
+      "id": "conditional_parameter_handling",
+      "title": "Conditional Parameter Handling with Default Fallback",
+      "description": "This pattern demonstrates how to handle optional parameters with a fallback default. The `param('step_4TY_MLST__mlst___excluded_schemas')` function call retrieves a parameter, and if it is not provided, it falls back to a default value (implicitly handled by the `param` function). This ensures robustness in workflows where certain parameters may not always be specified.\n\n```groovy\nexcluded_schemas = param('step_4TY_MLST__mlst___excluded_schemas')\n```\n\nThis idiom is reusable in workflows where parameters may be optional, and a default behavior is desired."
+    },
+    {
+      "id": "multi_process_output_mixing",
+      "title": "Mixing Outputs from Multiple Processes",
+      "description": "This pattern shows how to combine outputs from multiple processes (shovill for paired-end and shovill_se for single-end) using the `.mix()` operator. This allows for a unified downstream processing path regardless of the input data type. The pattern is useful when you have alternative processes for different input types but want to maintain a single workflow path.\n\n```groovy\ncontigs_from_pe = shovill(rawreads).assembly\ncontigs_from_se = shovill_se(rawreads).assembly\ncontigs = contigs_from_pe.mix(contigs_from_se)\n```"
+    },
+    {
+      "id": "conditional_branching_with_custom_predicates",
+      "title": "Conditional Branching with Custom Predicates",
+      "description": "This pattern demonstrates advanced use of the `.branch` operator with custom predicate functions to route data through different processing paths. The branching logic is based on metadata inspection (e.g., sequencing technology, organism type) rather than simple channel operations. This is particularly useful for creating flexible pipelines that adapt to different input characteristics.\n\nThe key aspects are:\n1. Multi-level branching with custom functions (`hasFastqData`, `isIlluminaPaired`, etc.)\n2. Chaining of branch operators to create decision trees\n3. Use of `.mix()` to combine channels from different processing paths\n\n```groovy\nrawReads.branch {\n    with_data: hasFastqData(it[1])\n    no_reads: true\n}\n.set { rawreads_branched }\n\nrawreads_branched.with_data.branch {\n    illumina: isIlluminaPaired(it[1])\n    ion: isIonTorrent(it[1])\n    nanopore: isNanopore(it[1])\n    other: true\n}\n.set { trimming_by_seqtype }\n\ntrimming_by_seqtype.illumina.branch {\n    bacteria: isBacterium(it)\n    other: true\n}\n.set { trimming_illumina }\n```"
+    },
+    {
+      "id": "selective_channel_mixing_for_processing",
+      "title": "Selective Channel Mixing for Processing",
+      "description": "This pattern shows how to strategically combine channels from different branches using `.mix()` to feed into specific processing steps. The example demonstrates routing Illumina bacterial samples through fastp while keeping ion torrent samples separate, then combining them for downstream processing.\n\nKey aspects:\n1. Using `.mix()` to combine channels from different branching paths\n2. Applying different processing steps to different channel subsets\n3. Maintaining separation of concerns while enabling shared downstream processing\n\n```groovy\n// fastp processes both ion torrent and illumina bacterial samples\ntrimmed_by_fastp = step_1PP_trimming__fastp(trimming_by_seqtype.ion.mix(trimming_illumina.bacteria)).trimmed\n\n// Combine results from different trimming tools for downstream processing\ntrimmed_by_trimmomatic.mix(trimmed_by_fastp).branch {\n    with_data: hasEnoughFastqData(it[1])\n    insufficient_number_of_reads: true\n}\n.set { trimmed_branched }\n```"
+    },
+    {
+      "id": "conditional_host_depletion_branch",
+      "title": "Conditional Host Depletion Branch",
+      "description": "This pattern demonstrates a conditional branching strategy for host depletion. The `trimmedReads` channel is crossed with the `host` channel, and the resulting tuples are branched based on the presence of a host. The `with_host` branch undergoes host depletion, while the `without_host` branch bypasses this step. The two branches are later merged using `.mix()`.\n\n```groovy\ntrimmedReads.cross(host) { extractKey(it) }\n    .map { [ it[0][0], it[0][1], it[1][1] ] } //riscd, reads, host\n    .branch {\n        with_host: it[1][1]\n        without_host: true\n    }\n.set { branchedTrimmed }\n\ndepleted = step_1PP_hostdepl__bowtie(branchedTrimmed.with_host)\n\nbranchedTrimmed.without_host\n    .mix(depleted)\n    .map { it[0,1] }\n    .set { trimmedOrDepleted }\n```"
+    },
+    {
+      "id": "multi_reference_mapping",
+      "title": "Multi-Reference Mapping with multiMap",
+      "description": "This pattern shows how to prepare reads and references for mapping using `.multiMap()`. The `trimmedOrDepleted` channel is crossed with the `reference` channel, and the resulting tuples are split into two separate channels: one for reads and another for references. This allows for efficient downstream processing where reads and references can be handled independently.\n\n```groovy\ntrimmedOrDepleted.cross(reference) { extractKey(it) }\n.multiMap { \n    reads: it[0] // riscd, reads\n    refs:  it[1][1..3] // riscd, code, path\n}.set { readsAndReferences }\n```"
+    },
+    {
+      "id": "chained_cross_with_extractkey_and_multimap",
+      "title": "Chained Cross with ExtractKey and MultiMap for Complex Data Wiring",
+      "description": "This pattern demonstrates a sophisticated use of chained `.cross()` operations combined with a custom `extractKey` function and `.multiMap()` to restructure and wire complex data flows. The first `.cross()` combines `assembled` and `abricatedatabase` channels, using `extractKey` to align data by a common key. The result is then mapped to a simplified tuple. A second `.cross()` combines this result with the `assembled` channel again, followed by a third `.cross()` with the `reference` channel. Finally, `.multiMap()` is used to destructure the nested tuples into named channels (`calls`, `assembly`, `reference`), making the data easily accessible for downstream processes.\n\nThis pattern is particularly useful for scenarios where multiple data sources need to be aligned by a common key and then restructured into a more accessible format for subsequent processing steps.\n\n```groovy\nassembled.cross(abricatedatabase) { extractKey(it) }\n    .map { \n        [ it[0][0], it[0][1], it[1][1] ] //scaffolds, db\n    }.set { scaffoldsAndDatabase }\ncalls = step_3TX_species__vdabricate(scaffoldsAndDatabase)\ncalls\n    .cross(assembled) { extractKey(it) } // [ [riscd, calls], [riscd, assembly] ]\n    .cross(reference) { extractKey(it) } // [ [ [riscd, calls], [riscd, assembly] ], [ key, riscd, refid refpath ] ]\n    .multiMap { \n        calls: it[0][0]\n        assembly: it[0][1]\n        reference: it[1][1..3]\n    }.set { filt }\n```"
+    },
+    {
+      "id": "cross_map_tuple_reconstruction",
+      "title": "Cross with Map and Tuple Reconstruction",
+      "description": "This pattern shows how to cross two channels and then use `map` to reconstruct a new tuple with a specific structure. Here, the `consensus` channel is crossed with `referenceGB`, and the resulting tuple is transformed into a new list with a predefined order of elements. This is useful for reshaping data to fit the input requirements of downstream processes.\n\n```groovy\nconsensus.cross(referenceGB) { extractKey(it) }.map { \n    [ it[0][0], it[0][1], PROKKA_KINGDOM, it[1][1], it[1][2], it[1][3] ] // riscd assembly kingdom riscd_ref refid refpath]\n}.set { consensusKingdomReference }\n```"
+    },
+    {
+      "id": "multiMap_tuple_unpacking",
+      "title": "MultiMap Tuple Unpacking for Parallel Channel Branching",
+      "description": "This pattern demonstrates the use of `multiMap` to unpack a tuple into named channels, enabling parallel processing of different components of the same input. The `multiMap` operator is used to split a tuple into two separate channels (`riscd` and `plasmids`), which are then combined later in the workflow. This is particularly useful when different parts of a tuple need to be processed independently before being recombined.\n\n```groovy\nplasmids.multiMap { it ->\n    riscd: it[0]\n    plasmids: it[1]\n}.set { branched }\n\ninput = branched.riscd.combine(branched.plasmids.flatten())\n```"
+    },
+    {
+      "id": "conditional_mix_pattern",
+      "title": "Conditional Mix Pattern",
+      "description": "This pattern shows how to conditionally mix data from two different channels. The `without_host` branch of the previously branched channel is mixed with the output of a process (`depleted`). The `mix` operator combines the two channels, and the `map` operator is used to reshape the resulting tuples. This is useful for workflows that need to merge data from different processing paths.\n\n```groovy\nbranchedTrimmed.without_host\n    .mix(depleted)\n    .map { it[0,1] }\n    .set{ denovoInput }\n```"
+    },
+    {
+      "id": "channel_collect_and_forward",
+      "title": "Channel Collection and Forwarding",
+      "description": "This pattern shows how to collect all elements from a channel and forward them to another process. The `quast` process emits a channel of TSV files, which are collected into a list and then passed to the `summary` process. This is a common pattern for aggregating results before further processing.\n\n```groovy\nquast(input).tsv.collect() | summary\n```"
+    },
+    {
+      "id": "dynamic_publishdir_with_filename_transform",
+      "title": "Dynamic PublishDir with Filename Transformation",
+      "description": "This pattern shows dynamic output publishing with filename transformation using closures. The `publishDir` directives use patterns to select files and closures to transform filenames, incorporating metadata and execution timestamps. This is particularly useful for organizing outputs in a structured way while maintaining traceability.\n\n```groovy\npublishDir mode: 'rellink', \"${params.outdir}/result\", pattern: '{*.txt,*.html}', saveAs: { filename -> filename.replaceFirst(\"-DT\\d+_\", \"-${ex.dt}_\") }\npublishDir mode: 'rellink', \"${params.outdir}/meta\", pattern: '.command.log', saveAs: { \"${base}.log\" }\npublishDir mode: 'rellink', \"${params.outdir}/meta\", pattern: '.command.sh', saveAs: { \"${base}.cfg\" }\n```"
+    },
+    {
+      "id": "cross_with_extract_key_and_multiMap",
+      "title": "Cross with Extract Key and MultiMap Transformation",
+      "description": "This pattern demonstrates a complex data-shaping idiom where a channel is crossed with another channel, followed by a transformation using `extractKey` and then reshaped using `multiMap`. The `cross` operator combines each item from the `assembly` channel with each item from the `genus_species` channel. The `extractKey` function is applied to each combined item, and the result is then transformed into a structured map with keys `assembly` and `species` using `multiMap`. This is useful for preparing data for downstream processes that require specific input structures.\n\n```groovy\nassembly.cross(genus_species) { extractKey(it) }\n    .multiMap { \n        assembly: it[0]\n        species: it[1]\n    }.set { assemblyAndSpecies }\n```"
+    },
+    {
+      "id": "conditional_output_emission",
+      "title": "Conditional Output Emission Based on Input Parameters",
+      "description": "This pattern demonstrates how to conditionally emit different output files based on input parameters. The `ksnp3` process uses a ternary operator to determine the output filename and extra parameters based on the `analysis_type` input. This is useful when a single process needs to handle multiple analysis modes with different output requirements.\n\n```groovy\nprocess ksnp3 {\n    input:\n      path(assembly)\n      val(kmers_size)\n      val(analysis_type)\n    output:\n      path(\"results/${outfile}\"), emit: fasta\n      path '*.sh', hidden: true\n    script:\n      extra_params = (analysis_type == 'core' ? '-core' : '')\n      outfile = (analysis_type == 'core' ? 'core_SNPs_matrix.fasta' : 'SNPs_all_matrix.fasta')\n      \"\"\"\n        kSNP3 -in input.tsv -k ${kmers_size} -NJ ${extra_params} -outdir results > ksnp3.log\n      \"\"\"\n}\n```"
+    },
+    {
+      "id": "workflow_chaining_with_intermediate_output",
+      "title": "Workflow Chaining with Intermediate Output",
+      "description": "This pattern demonstrates how to chain workflows by passing intermediate outputs from one process to another. The `vcf2mst` process emits a named output `matrix`, which is then used as input for the `dists` process. This is a common pattern for creating modular and reusable workflows where the output of one process serves as the input for another.\n\n```groovy\nworkflow multi_clustering__vcf2mst {\n    take: \n        input\n    main:\n        matrix=vcf2mst(input).matrix\n        dists(matrix)\n}\n```"
+    },
+    {
+      "id": "channel_manipulation_with_map_and_collect",
+      "title": "Channel Manipulation with map and collect",
+      "description": "This pattern shows how to manipulate channels using `map` and `collect` operators. The `getVCFs()` function returns a channel, which is then transformed using `map` to extract the second element of each tuple (`it[1]`). The `collect` operator is used to gather all elements into a list, which is then set as `inputSet`. This is useful for preparing data for downstream processes.\n\n```groovy\nworkflow {\n    getVCFs()\n    .map { it[1] }\n    .collect()\n    .set { inputSet }\n    multi_clustering__vcf2mst(inputSet)\n}\n```"
+    },
+    {
+      "id": "multi_map_reference_injection",
+      "title": "MultiMap for Reference Data Injection",
+      "description": "This pattern demonstrates how to use `multiMap` to inject reference data (metadata and file paths) alongside input data in a workflow. The `multiMap` operator creates a channel that emits tuples with both the original input and the reference data, allowing downstream processes to access both seamlessly. This is particularly useful for workflows where multiple processes need consistent reference data without redundant file operations.\n\n```groovy\ntrimmed.multiMap {\n    trimmed: it\n    reference: [ referenceRiscd, referenceCode, file(referencePath) ]\n}.set { trAndRef }\n```\n\n**Key Insight**: The `multiMap` operator is used to create a structured channel where each input item is paired with a fixed set of reference data. This avoids the need to pass references separately and ensures they are consistently available to all downstream processes. The `.set` operator then assigns this structured channel to a variable (`trAndRef`) for further use."
+    },
+    {
+      "id": "conditional_docker_image_selection",
+      "title": "Conditional Docker Image Selection",
+      "description": "This pattern shows how to conditionally select a Docker image based on a parameter value. If the parameter value is not valid, the workflow exits with an error. This is useful for ensuring that the correct Docker image is used based on the specified version.\n\n```groovy\ndef DOCKER_IMAGE = IMAGES[param('multi_clustering__cfsan__version')] ?: (exit 2, \"params (multi_clustering__cfsan__version) not valid\");\n```"
+    },
+    {
+      "id": "multi_map_channel_deconstruction",
+      "title": "MultiMap Channel Deconstruction",
+      "description": "This pattern demonstrates the use of `.combine()` followed by `.multiMap()` to deconstruct and restructure input channels. The `.combine()` operator merges two channels (reads and reference), and `.multiMap()` is used to split the combined tuple into two separate channels (`reads` and `reference`). This is particularly useful when you need to process multiple inputs in a structured way, ensuring that related data stays aligned.\n\n```groovy\nreads.combine(reference)\n        .multiMap { \n            reads: it[0..1] // riscd, R[]\n            reference:  it[2..4] // riscd, code, path\n        }.set { input }\n```"
+    },
+    {
+      "id": "conditional_channel_filtering",
+      "title": "Conditional Channel Filtering",
+      "description": "This pattern shows how to use `.filter()` with a regular expression to conditionally route data through different workflows. Here, the `getInput()` channel is filtered to match paths containing `1PP_`, and `getInputFolders()` is filtered to match paths containing `2AS_`. This allows for dynamic routing of data based on pattern matching, which is useful for handling different types of inputs in a single pipeline.\n\n```groovy\nmulti_alignment__snippycore(getInput().filter( ~/^.*\\/1PP_.*/ ), getReferenceUnkeyed('gb'))\nmulti_alignment__snippycore_vcf(getInputFolders().filter( ~/^.*\\/2AS_.*/ ), getReferenceUnkeyed('gb'))\n```"
+    },
+    {
+      "id": "cross_multiMap_with_extractKey",
+      "title": "Cross and MultiMap with ExtractKey for Dynamic Reference Selection",
+      "description": "This pattern demonstrates how to use `cross` to combine two channels (reads and lineage) and then apply `multiMap` to dynamically select a reference based on the lineage result. The `extractKey` function is used to process the crossed tuple, and `getReferenceForLineage` fetches the appropriate reference for downstream processing. This is useful for workflows where the reference genome depends on the lineage classification of the input reads.\n\n```groovy\nreads.cross(lineage) { extractKey(it) }.multiMap { \n    reads: it[0]\n    reference: getReferenceForLineage(it[1][1])\n}.set { readsAndRef }\n```"
+    },
+    {
+      "id": "assembly_reference_cross",
+      "title": "Assembly Reference Cross Pattern",
+      "description": "This pattern showcases the chaining of `.cross()` operators followed by `.multiMap()` to create a structured channel. The `denovoOut.assembled` channel is crossed with `reference` and `abricateDatabase` channels, each processed by the `extractKey` function. The resulting tuples are then transformed into a structured map using `.multiMap()`, which organizes the data into named components (`assembly`, `reference`, `abricateDatabase`). This pattern is particularly useful for preparing inputs for processes that require multiple, distinct inputs in a structured format.\n\n```groovy\ndenovoOut.assembled\n    .cross(reference) { extractKey(it) }\n    .cross(abricateDatabase) { extractKey(it) }.multiMap { \n        assembly: it[0][0][0..1]\n        reference: it[0][1]\n        abricateDatabase: it[1]\n    }.set { cARA }\n```"
+    },
+    {
+      "id": "metadata_enrichment_with_afterscript",
+      "title": "Metadata Enrichment via AfterScript for Input Tracking",
+      "description": "This pattern uses the `afterScript` directive to generate a JSON file capturing input metadata, process metadata, and execution metadata. This ensures that all relevant information is logged for traceability and debugging. The `stepInputs` function aggregates metadata from multiple sources, providing a comprehensive record of the process execution.\n\n```groovy\nafterScript \"echo '${stepInputs(riscd_input, md2, [dt: md2.dt], md2.acc, md2.met, [seq_type:seq_type])}' > ${base}_input.json\"\n```"
+    },
+    {
+      "id": "tuple_unpacking_with_reference",
+      "title": "Tuple Unpacking with Reference Handling",
+      "description": "This pattern demonstrates how to handle a tuple input where the first element is ignored (using `_`), the second element is used as a reference code, and the third element is the actual reference path. This is particularly useful when dealing with reference sequences in bioinformatics workflows where metadata about the reference is needed but not directly used in the process.\n\n```groovy\ninput:\n  tuple val(_), val(ref_code), path(ref_path)\n```"
+    },
+    {
+      "id": "metadata_transformation_with_sed",
+      "title": "Metadata Transformation Using Sed",
+      "description": "This pattern illustrates how to transform metadata columns using `sed` commands within a Nextflow process. This is particularly useful for preparing metadata files for downstream tools that require specific column names or formats.\n\n```groovy\nscript:\n  \"\"\"\n     cat ${metadata} | sed 's/${SAMPLE_COLUMN}/name/i' | sed -E 's/${SUMMARY_DATE_ALIASES}/date/i' > augur_metadata.tsv\n  \"\"\"\n```"
+    },
+    {
+      "id": "dynamic_metadata_list_generation",
+      "title": "Dynamic Metadata List Generation",
+      "description": "This pattern demonstrates how to dynamically generate a list of metadata columns from the header of a metadata file. This is useful for tools that require a list of columns to be specified, ensuring that the workflow can adapt to different metadata formats.\n\n```groovy\nscript:\n  \"\"\"\n    METADATA_LIST=\\$(head -n 1 ${metadata} | tr \\$'\\t' ' ')\n    augur export v2 \\\n        --tree ${tree} \\\n        --metadata ${metadata} \\\n        --color-by-metadata \\${METADATA_LIST} \\\n        --output auspice.json ${extra}\n  \"\"\"\n```"
+    },
+    {
+      "id": "conditional_branch_with_multi_map",
+      "title": "Conditional Branching with MultiMap for Data Alignment",
+      "description": "This pattern demonstrates how to use a `.branch` operator to categorize data into different channels based on conditions, followed by a `.cross` and `.multiMap` to align and restructure the data for downstream processing. The `.branch` operator routes items into different channels based on predicate functions, while `.cross` and `.multiMap` are used to combine and restructure the data for further processing.\n\n```groovy\ntrimmed.branch {\n    bacteria: isBacterium(it)\n    sarscov2: isSarsCov2(it) || isNegativeControlSarsCov2(it) || isPositiveControlSarsCov2(it)\n    negative_control: isNegativeControl(it)\n    viruses: isVirus(it)\n    wnv: isWNV(it)\n    ampliseq: isAmpliseq(it)\n    other: true\n}\n.set { branched }\n\n/* bacteria stuff here */\nassemblyBacteria = module_wgs_bacteria(branched.bacteria)\ncrossedBacteriaData = branched.bacteria.cross(assemblyBacteria) { extractKey(it) }.multiMap { \n  trimmed: it[0]\n  assembly: it[1]\n}\nmodule_typing_bacteria(crossedBacteriaData.trimmed, crossedBacteriaData.assembly)\n```"
+    },
+    {
+      "id": "dynamic_workflow_selection",
+      "title": "Dynamic Workflow Selection Based on Input Type",
+      "description": "This pattern shows how to dynamically select and execute different workflows based on the type of input data. The `pipeline_ngsmanager` workflow checks the input type using helper functions and then invokes the appropriate workflow (`ngsmanager_fastq` or `ngsmanager_fasta`).\n\n```groovy\nworkflow pipeline_ngsmanager {\n  if (isFastqRiscd(param('riscd'))){\n    ngsmanager_fastq(getSingleInput())\n  } else if (isFastaRiscd(param('riscd'))){\n    ngsmanager_fasta(getSingleInput())\n  } else {\n    exit 2, \"unexpected riscd provided: ${param('riscd')}\"\n  }\n}\n```"
+    },
+    {
+      "id": "conditional_cross_multimap",
+      "title": "Conditional Cross with MultiMap for Dynamic Channel Creation",
+      "description": "This pattern demonstrates a conditional workflow branch where a `.cross()` operator is chained with `.multiMap()` to dynamically create a new channel structure based on a runtime condition. The `trimmed` channel is crossed with `assigned_species`, and the resulting tuples are transformed into a structured channel with named components (`trimmed`, `species`, `referencePath`). This is particularly useful for dynamically wiring data based on runtime parameters.\n\n```groovy\nif (!params.skip_bestref_mapping) {\n  trimmed.cross(assigned_species) { extractKey(it) }.multiMap { \n    trimmed: it[0]\n    species: it[1][1]\n    referencePath: it[1][2]\n  }.set { trimAndAndSpecies }\n  step_2AS_mapping__bowtie(trimAndAndSpecies.trimmed, trimAndAndSpecies.referencePath)\n}\n```"
+    },
+    {
+      "id": "assembly_species_cross_multimap",
+      "title": "Cross and MultiMap for Assembly and Species Pairing",
+      "description": "This pattern shows how to use `.cross()` to pair items from the `assembly` channel with items from the `assigned_species` channel, followed by `.multiMap()` to restructure the resulting tuples into a named channel (`assemblyAndSpecies`). This is useful for ensuring that downstream processes receive both the assembly data and its corresponding species information in a structured format.\n\n```groovy\nassembly.cross(assigned_species) { extractKey(it) }.multiMap { \n  assembly: it[0]\n  species: it[1][1]\n}.set { assemblyAndSpecies }\n\nstep_4AN_AMR__staramr(assemblyAndSpecies.assembly, assemblyAndSpecies.species)\nstep_4TY_MLST__mlst(assemblyAndSpecies.assembly)\nstep_4TY_flaA__flaA(assemblyAndSpecies.assembly, assemblyAndSpecies.species)\nstep_4TY_cgMLST__chewbbaca(assemblyAndSpecies.assembly, assemblyAndSpecies.species, '')\n```"
+    },
+    {
+      "id": "conditional_publish_dir_pattern",
+      "title": "Conditional Publish Directory Pattern",
+      "description": "This pattern demonstrates how to conditionally publish different types of output files to different directories using the `publishDir` directive with specific patterns. This is useful for organizing outputs into structured directories based on file types or patterns.\n\nThe key aspect here is the use of multiple `publishDir` directives with different `pattern` and `saveAs` options to route files to appropriate subdirectories. This ensures that log files, configuration files, and main output files are neatly organized in separate folders.\n\n```groovy\npublishDir mode: 'rellink', \"${params.outdir}/${ref}/fasta/result\", pattern: '*.bt*'    \npublishDir mode: 'rellink', \"${params.outdir}/${ref}/fasta/meta\", pattern: '*.log'\npublishDir mode: 'rellink', \"${params.outdir}/${ref}/fasta/meta\", pattern: '.command.sh', saveAs: { \"${ref}.cfg\" }\n```"
+    },
+    {
+      "id": "conditional_branch_with_regex",
+      "title": "Conditional Branching with Regex Patterns",
+      "description": "This pattern demonstrates how to use the `.branch` operator with regex conditions to route input data to different channels based on specific patterns. This is particularly useful for categorizing inputs into distinct processing paths.\n\nThe example below shows how a list of NCBI codes is branched into four categories: GCF (RefSeq assemblies), GCA (GenBank assemblies), SRA (sequence read archives), and a default nuccore category. Each branch uses a regex pattern to filter the input data accordingly.\n\n```groovy\ngetNCBICodes().branch {\n    gcf: it ==~ /(?i)^GCF.+/\n    gca: it ==~ /(?i)^GCA.+/\n    sra: it ==~ /(?i)^SRR.+|(?i)^ERR.+|(?i)^DRR.+/\n    nuccore: true\n}.set { branched }\n```"
+    },
+    {
+      "id": "multi_format_processing",
+      "title": "Multi-Format Processing with Each Input",
+      "description": "This pattern illustrates how to handle multiple input formats within a single process using the `each` qualifier. This allows the process to iterate over a list of formats, processing each one independently.\n\nIn the example, the `ncbi_nuccore` process takes a reference code and a list of formats (e.g., 'fasta', 'gb'). The `each format` input directive ensures that the process runs once for each format, enabling flexible and reusable processing logic.\n\n```groovy\ninput:\n  val(ref)\n  each format\n```"
+    }
+  ]
+}

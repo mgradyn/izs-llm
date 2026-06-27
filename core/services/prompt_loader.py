@@ -146,13 +146,6 @@ def load_architect_prompt() -> str:
     content = content.replace("%%void_tools%%", tables["void_tools"])
     content = content.replace("%%emitting_tools_table%%", tables["emitting_tools_table"])
 
-    # Inject plugin idioms
-    idioms = _load_file(plugin_prompts / "idioms.md", escape=False)
-    if "%%domain_idioms%%" in content:
-        content = content.replace("%%domain_idioms%%", idioms)
-    elif idioms:
-        content = content + "\n\n" + idioms
-
     return _escape_braces(content)
 
 

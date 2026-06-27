@@ -56,8 +56,9 @@ tool_dual(prep.data, prep.config)
 ## 1F. Pre-Shaped Data
 If data was already joined upstream, do **not** `.cross()`/`.combine()` again. Pass directly.
 
-%%domain_idioms%%
-
+## 1G. Domain-Specific Data Shaping
+Different laboratories and plugins use very specific data-shaping conventions (e.g. Host Depletion tuples, double-crossing logic, or referencing databases).
+**CRITICAL**: You MUST NOT guess complex data-shaping logic. If you are unsure how to wire domain-specific components, instruct the Consultant to use the `search_design_patterns` tool to retrieve production-tested DSL idioms from the knowledge base. The Consultant will provide you with the exact logic.
 
 # 2. Tool Reference
 

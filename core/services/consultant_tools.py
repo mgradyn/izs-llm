@@ -683,6 +683,60 @@ def search_helper_functions(query: str, runtime: ToolRuntime) -> list:
 
 
 # ──────────────────────────────────────────────────────────────────────────────
+# TOOL 9: Search design patterns
+# ──────────────────────────────────────────────────────────────────────────────
+
+@tool
+def search_design_patterns(query: str, runtime: ToolRuntime) -> list:
+    """Search for domain-specific data-shaping design patterns by keyword.
+    Use this when you are unsure how to wire domain-specific components 
+    (e.g., 'host depletion', 'coverage mapping', 'dynamic branching').
+    
+    Args:
+        query: Search terms describing the pattern (e.g., 'host depletion').
+    """
+    store = runtime.store
+    # The patterns are stored individually in the store under ("patterns",)
+    # Since we can't iterate the store keys easily here, we search the loaded list or we can fetch all.
+    # We will search through the store items if possible.
+    
+    # Actually `InMemoryStore.search` exists in LangGraph.
+    items = store.search(("patterns",))
+    if not items:
+        return [{"error": "No design patterns found in the catalog."}]
+
+    query_tokens = [q.lower() for q in re.split(r'[^a-z0-9]', query.lower()) if q]
+    if not query_tokens:
+        return [{"error": "Invalid search query."}]
+
+    results = []
+    for item in items:
+        p = item.value
+        score = 0
+        name = p.get('title', '').lower()
+        desc = p.get('description', '').lower()
+        
+        for q in query_tokens:
+            if len(q) < 3: continue
+            if q in name: score += 10
+            if q in desc: score += 5
+            
+        if score > 0:
+            results.append((score, p))
+            
+    results.sort(key=lambda x: x[0], reverse=True)
+    
+    if not results:
+        return [{"warning": "No design patterns matched your query."}]
+        
+    return [
+        {
+            "title": p.get('title'),
+            "description": p.get('description')
+        } for _, p in results[:3]
+    ]
+
+# ──────────────────────────────────────────────────────────────────────────────
 # EXPORT: Tool list for ToolNode registration
 # ──────────────────────────────────────────────────────────────────────────────
 
@@ -692,4 +746,5 @@ CONSULTANT_TOOLS = [
     check_plan_logic,
     find_component_usage,
     search_helper_functions,
+    search_design_patterns,
 ]
