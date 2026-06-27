@@ -5,7 +5,8 @@ from core.config import settings
 from core.services.graph_state import GraphState
 from core.services.llm import get_llm
 from core.services.prompt_loader import load_diagram_prompt
-from core.tool_registry import get_diagrammer_tools
+from core.models.diagram_structure import DiagramData
+from core.services.renderer import render_mermaid_from_json
 from core.utils.logger import logger
 
 def diagram_reason_node(state: GraphState) -> dict:
@@ -36,7 +37,7 @@ def diagram_reason_node(state: GraphState) -> dict:
         sys_prompt = load_diagram_prompt()
         diagram_messages = [
             SystemMessage(content=sys_prompt),
-            HumanMessage(content=f"Here is the Architect's Data Flow Plan. Please research the components and submit the diagram structure.\n\nYou MUST use the `submit_diagram_structure` tool to output the diagram. Do not reply with conversational text.\n\n```json\n{plan_context}\n```")
+            HumanMessage(content=f"Here is the Architect's Data Flow Plan. Please submit the final diagram structure.\n\n```json\n{plan_context}\n```")
         ]
 
     # Add tool results or new tool calls if any
@@ -45,7 +46,18 @@ def diagram_reason_node(state: GraphState) -> dict:
     # or append to `diagram_messages`.)
     # ACTUALLY, if we use `diagram_messages`, we need to define it in GraphState.
     
-    llm = get_llm().bind_tools(get_diagrammer_tools(), tool_choice="any")
-    result = llm.invoke(diagram_messages)
-
-    return {"diagram_messages": [result]}
+    llm = get_llm().with_structured_output(DiagramData)
+    
+    try:
+        diagram_data = llm.invoke(diagram_messages)
+        mermaid_string = render_mermaid_from_json(diagram_data)
+        
+        return {
+            "diagram_messages": diagram_messages + [AIMessage(content="Diagram generated.")],
+            "diagram_data": diagram_data.model_dump(),
+            "mermaid_deterministic": mermaid_string,
+            "mermaid_agent": mermaid_string
+        }
+    except Exception as e:
+        logger.error(f"Failed to generate structured diagram: {e}")
+        return {"error": str(e)}

@@ -234,40 +234,7 @@ def build_execution_subgraph(store: Any = None) -> Any:
     sub.add_node("repair", repair_node)
     sub.add_node("renderer", renderer_node)
     sub.add_node("diagram_reason", diagram_reason_node)
-    
-    # LangGraph ToolNode uses the 'messages' key by default. We use 'diagram_messages'.
-    # We will pass 'diagram_messages' as the messages_key if ToolNode supports it, 
-    # but to be safe and backwards compatible, we'll wrap the ToolNode to read/write diagram_messages.
-    base_diagram_tools = ToolNode(get_diagrammer_tools(), handle_tool_errors=True)
-    def diagram_tools_node(state: GraphState) -> Any:
-        # Hacky wrapper to redirect 'messages' to 'diagram_messages' for the tool node
-        temp_state = {"messages": state.get("diagram_messages", [])}
-        res = base_diagram_tools.invoke(temp_state)
-        updates = dict(res)
-        if "messages" in updates:
-            msgs = updates.pop("messages")
-            updates["diagram_messages"] = msgs
-            
-            # Extract state updates from successful tool execution
-            for msg in msgs:
-                print(f"[DEBUG DIAGRAM] Tool Message Name: {getattr(msg, 'name', 'unknown')}")
-                print(f"[DEBUG DIAGRAM] Tool Message Content: {getattr(msg, 'content', 'empty')}")
-                if isinstance(msg, LCToolMessage) and msg.name == "submit_diagram_structure":
-                    if not msg.content.startswith("ERROR"):
-                        try:
-                            import json
-                            data = json.loads(msg.content)
-                            if "diagram_data" in data:
-                                updates["diagram_data"] = data["diagram_data"]
-                            if "mermaid_deterministic" in data:
-                                updates["mermaid_deterministic"] = data["mermaid_deterministic"]
-                            if "mermaid_agent" in data:
-                                updates["mermaid_agent"] = data["mermaid_agent"]
-                        except Exception:
-                            pass
-        return updates
-    
-    sub.add_node("diagram_tools", diagram_tools_node)
+    # diagram_reason uses structured output, no need for diagram_tools_node
 
     # Inner loop for tool calling
     max_architect_tool_iterations = settings.MAX_ARCHITECT_TOOL_ITERATIONS
@@ -328,50 +295,7 @@ def build_execution_subgraph(store: Any = None) -> Any:
         }
     )
 
-    def route_diagram(state: GraphState) -> str:
-        messages = state.get("diagram_messages", [])
-        if not messages:
-            return END
-        last_msg = messages[-1]
-        
-        # If the diagrammer hit the tool loop limit, just end.
-        diagram_tool_count = sum(1 for m in messages if isinstance(m, LCToolMessage))
-        if diagram_tool_count >= 10:  # arbitrary safe limit
-            return END
-            
-        if hasattr(last_msg, "tool_calls") and last_msg.tool_calls:
-            # If the tool call was 'submit_diagram_structure', we stop the loop and end.
-            for tc in last_msg.tool_calls:
-                if tc.get("name") == "submit_diagram_structure":
-                    return "diagram_tools" # Must execute the tool to save the state, then we'll route to END
-            return "diagram_tools"
-        return END
-
-    sub.add_conditional_edges("diagram_reason", route_diagram, {
-        "diagram_tools": "diagram_tools",
-        END: END
-    })
-    
-    # After diagram tools execute, we check if it was a submission
-    def route_after_diagram_tools(state: GraphState) -> str:
-        messages = state.get("diagram_messages", [])
-        if not messages: return "diagram_reason"
-        
-        if state.get("mermaid_deterministic"):
-            return END
-            
-        last_msg = messages[-1]
-        # If the tool executed successfully, its content is a JSON dict (not an ERROR string)
-        if isinstance(last_msg, LCToolMessage) and last_msg.name == "submit_diagram_structure":
-            if not last_msg.content.startswith("ERROR"):
-                return END
-                
-        return "diagram_reason"
-
-    sub.add_conditional_edges("diagram_tools", route_after_diagram_tools, {
-        "diagram_reason": "diagram_reason",
-        END: END
-    })
+    sub.add_edge("diagram_reason", END)
 
     # Pass store so LangGraph can inject it into store-dependent nodes (architect_precheck_node, architect_reason_node)
     return sub.compile(store=store)

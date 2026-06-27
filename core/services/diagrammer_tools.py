@@ -6,21 +6,16 @@ from core.services.renderer import render_mermaid_from_json
 from langgraph.types import Command
 
 @tool
-def submit_diagram_structure(
-    nodes: list[Node],
-    edges: list[Edge]
-) -> str:
+def submit_diagram_structure(data: DiagramData) -> str:
     """
     Submits the final JSON structure for the diagram and ends your reasoning phase.
     You MUST call this when you are confident in the diagram structure.
     
     Args:
-        nodes: A list of dicts matching the Node schema (id, label, shape, subgraph).
-        edges: A list of dicts matching the Edge schema (source, target, label).
+        data: The complete diagram data containing nodes and edges.
     """
     try:
-        # Validate against the DiagramData schema
-        diagram_data = DiagramData(nodes=nodes, edges=edges)
+        diagram_data = data
         
         # Render the diagram immediately
         mermaid_string = render_mermaid_from_json(diagram_data)
