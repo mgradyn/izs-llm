@@ -37,12 +37,16 @@ TOOLS:
 1. `check_component_channels(component_name)` - Look up a specific component's EXACT take/emit signature.
 2. `verify_dataflow_plan(entrypoint_instantiations, sub_workflows)` - Test your dataflow mapping to see if you forgot to instantiate any variables.
 3. `validate_body_code(code_snippet, workflow_name)` - Validate a body_code snippet for DSL2 syntax errors.
+4. `find_component_usage(component_id)` - See REAL production code showing how a component is wired in existing templates.
+5. `search_helper_functions(query)` - Find built-in helper functions (e.g. getSingleInput, getReference).
+6. `search_design_patterns(query)` - Find reusable data-shaping patterns (e.g. host depletion branching, cross+multiMap).
 
 INCREMENTAL REASONING WORKFLOW (Mandatory):
-Step 1: Use `check_component_channels` to fetch the EXACT take/emit signature AND the usage example of the components.
-Step 2: Use `verify_dataflow_plan` to propose and test your DataFlow plan. Do NOT proceed until the tool returns "SUCCESS".
-Step 3: Use `validate_body_code` to test any tricky groovy snippets you intend to write.
-Step 4: Once all tests pass, output your final reasoning.
+Step 1: Use `find_component_usage` to see how the failing components are wired in REAL production code.
+Step 2: Use `check_component_channels` to fetch the EXACT take/emit signature of the components involved in the error.
+Step 3: Use `verify_dataflow_plan` to propose and test your DataFlow plan. Do NOT proceed until the tool returns "SUCCESS".
+Step 4: Use `validate_body_code` to test any tricky groovy snippets you intend to write.
+Step 5: Once all tests pass, output your final reasoning.
 
 CRITICAL DSL2 RULES (common mistakes):
 - body_code must NOT contain 'workflow name {{}}', 'take:', 'main:', or 'emit:' keywords — the rendering template handles these automatically
@@ -50,8 +54,10 @@ CRITICAL DSL2 RULES (common mistakes):
 - Void tools must NOT be assigned to variables — call them directly
 - The entrypoint workflow calls sub-workflows: data = my_input(); subworkflow_name(data)
 - The sub-workflow receives data via take_channels, processes it, and emits results via emit_channels
-- DO NOT emit channels from a sub-workflow unless they are EXPLICITLY required by the entrypoint. Be minimal. Avoid blindly emitting everything.
-- Prefer using standard catalog components over custom `inline_processes`. Only write an `InlineProcess` if explicitly instructed or if absolutely necessary.
+- DO NOT emit channels from a sub-workflow unless they are EXPLICITLY required by the entrypoint. Be minimal.
+- .branch {{ name: predicate }} creates named output channels accessible as result.name — you MUST assign the branch result to use the names
+- .multiMap {{ name: expr }} creates named output channels similarly
+- Prefer using standard catalog components over custom `inline_processes`
 
 TASK: Investigate the validation error below. Explain what needs to be fixed before retrying.
 

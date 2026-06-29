@@ -158,6 +158,31 @@ def validate_undefined_variables(body_code: str, defined_vars: set) -> list[str]
     sets = re.findall(r'\.set\s*\{\s*([a-zA-Z0-9_]+)\s*\}', body_code)
     local_vars.update(sets)
     
+    # Extract .branch { name: ...; name: ... } — creates named output channels
+    branch_blocks = re.findall(r'\.branch\s*\{([^}]+)\}', body_code, re.DOTALL)
+    for block in branch_blocks:
+        branch_names = re.findall(r'(\b[a-zA-Z_][a-zA-Z0-9_]*)\s*:', block)
+        local_vars.update(branch_names)
+    
+    # Extract .multiMap { name: ...; name: ... } — creates named output channels
+    multimap_blocks = re.findall(r'\.multiMap\s*\{([^}]+)\}', body_code, re.DOTALL)
+    for block in multimap_blocks:
+        multimap_names = re.findall(r'(\b[a-zA-Z_][a-zA-Z0-9_]*)\s*:', block)
+        local_vars.update(multimap_names)
+    
+    # Extract destructuring tuple assignment: (var1, var2) = ... or def (v1, v2) = ...
+    tuple_assigns = re.findall(r'(?:def\s+)?\(([^)]+)\)\s*=', body_code)
+    for group in tuple_assigns:
+        for v in group.split(','):
+            v = v.strip()
+            if re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', v):
+                local_vars.update([v])
+    
+    # Extract component.out.channel references — the result var is the LHS of the full expression
+    # e.g. step_foo(x) creates step_foo.out which is valid
+    component_calls = re.findall(r'\b([a-zA-Z_][a-zA-Z0-9_]*)\s*\([^)]*\)', body_code)
+    local_vars.update(component_calls)
+    
     used_vars = set()
     
     # Find variables used before a dot: var.method()
@@ -177,7 +202,7 @@ def validate_undefined_variables(body_code: str, defined_vars: set) -> list[str]
             if re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', base_var):
                 used_vars.add(base_var)
                 
-    builtins = {'true', 'false', 'null', 'it', 'Channel', 'file', 'param', 'get', 'def', 'workflow', 'process', 'log', 'error', 'exit', 'println', 'env'}
+    builtins = {'true', 'false', 'null', 'it', 'Channel', 'file', 'param', 'get', 'def', 'workflow', 'process', 'log', 'error', 'exit', 'println', 'env', 'out'}
     
     undefined = []
     for var in used_vars:

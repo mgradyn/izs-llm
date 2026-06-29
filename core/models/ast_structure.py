@@ -200,6 +200,26 @@ class WorkflowBlock(BaseModel):
         sets = re.findall(r'\.set\s*\{\s*([a-zA-Z0-9_]+)\s*\}', self.body_code)
         valid_vars.update(sets)
 
+        # Catch .branch { name: ... } — creates named output channels
+        branch_blocks = re.findall(r'\.branch\s*\{([^}]+)\}', self.body_code, re.DOTALL)
+        for block in branch_blocks:
+            branch_names = re.findall(r'(\b[a-zA-Z_][a-zA-Z0-9_]*)\s*:', block)
+            valid_vars.update(branch_names)
+
+        # Catch .multiMap { name: ... } — creates named output channels
+        multimap_blocks = re.findall(r'\.multiMap\s*\{([^}]+)\}', self.body_code, re.DOTALL)
+        for block in multimap_blocks:
+            multimap_names = re.findall(r'(\b[a-zA-Z_][a-zA-Z0-9_]*)\s*:', block)
+            valid_vars.update(multimap_names)
+
+        # Catch destructuring tuple assignment: (var1, var2) = ...
+        tuple_assigns = re.findall(r'(?:def\s+)?\(([^)]+)\)\s*=', self.body_code)
+        for group in tuple_assigns:
+            for v in group.split(','):
+                v = v.strip()
+                if re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', v):
+                    valid_vars.add(v)
+
         process_calls = re.findall(r'\b([a-zA-Z0-9_]+)\s*\(', self.body_code)
         valid_vars.update(process_calls)
 

@@ -58,7 +58,7 @@ If data was already joined upstream, do **not** `.cross()`/`.combine()` again. P
 
 ## 1G. Domain-Specific Data Shaping
 Different laboratories and plugins use very specific data-shaping conventions (e.g. Host Depletion tuples, double-crossing logic, or referencing databases).
-**CRITICAL**: You MUST NOT guess complex data-shaping logic. If you are unsure how to wire domain-specific components, instruct the Consultant to use the `search_design_patterns` tool to retrieve production-tested DSL idioms from the knowledge base. The Consultant will provide you with the exact logic.
+**CRITICAL**: You MUST NOT guess complex data-shaping logic. The Consultant's plan should provide the structural logic. If you encounter validation errors due to incorrect data shaping, you MUST use the `search_design_patterns` tool during your repair loop to retrieve production-tested DSL idioms.
 
 # 2. Tool Reference
 
