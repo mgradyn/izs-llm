@@ -12,7 +12,7 @@ from langchain_core.tools import tool
 
 from core.services.consultant_tools import _parse_nextflow_channels
 from core.catalog_registry import get_registry
-from core.state import ToolRuntime
+from langchain.tools import ToolRuntime
 
 @tool
 def validate_body_code(code_snippet: str, workflow_name: str) -> dict:  # noqa: C901
