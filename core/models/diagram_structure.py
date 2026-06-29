@@ -60,9 +60,14 @@ class Edge(BaseModel):
             return str(v).strip().replace('"', "'").replace('\n', ' ')
         return ""
 
+class Operation(BaseModel):
+    step_name: str = Field(description="The name of the step or operation (e.g. 'Data Branching', 'Cross Mapping').")
+    description: str = Field(description="A plain English description of what happened to the data here, so scientists know what the code is doing.")
+
 class DiagramData(BaseModel):
     nodes: list[Node] = Field(min_length=1, description="All nodes in the pipeline.")
     edges: list[Edge] = Field(default_factory=list, description="All connections between nodes.")
+    operations: list[Operation] = Field(default_factory=list, description="Textual descriptions of the complex data operations that occur in the code.")
 
     @model_validator(mode='after')
     def validate_graph_integrity(self) -> 'DiagramData':

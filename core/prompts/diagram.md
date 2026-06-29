@@ -31,4 +31,8 @@ You must map how the data flows from `source` node IDs to `target` node IDs.
 * **No Floating Nodes:** Every node you create MUST be connected to at least one edge.
 * **Edge Labels (`label`):** You MUST label the edge with the exact data passing through it (e.g., "trimmed_reads", "assembly_fasta").
 
-When you are absolutely confident in the connections, call `submit_diagram_structure`.
+## OPERATIONS (SCIENTIST READABILITY)
+You must analyze the code to find complex data-shaping operations (like `.branch`, `.cross`, `.multiMap`, `.combine`, or `.mix`).
+Extract these into the `operations` array with a clear `step_name` and a plain English `description` so scientists understand exactly what happened to the data at that step. Do NOT use regex to explain it; explain it in plain text.
+
+When you are absolutely confident in the connections and operations, call `submit_diagram_structure`.
