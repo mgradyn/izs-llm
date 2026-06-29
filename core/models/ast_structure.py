@@ -159,6 +159,8 @@ class WorkflowBlock(BaseModel):
             else:
                 cleaned = emit_str.strip()
                 if cleaned and not re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', cleaned):
+                    if '.' in cleaned:
+                        raise ValueError(f"EMIT ERROR: '{cleaned}' is invalid. If emitting a component output, you MUST assign it a name: e.g. 'my_channel = {cleaned}'")
                     raise ValueError(f"EMIT ERROR: '{cleaned}' is invalid identifier.")
         return v
 
