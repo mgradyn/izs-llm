@@ -239,18 +239,18 @@ def check_component_channels(component_name: str) -> dict:
 
 
 
-from langchain_core.runnables import RunnableConfig
+from langchain.tools import ToolRuntime
 from core.services.consultant_tools import find_component_usage
 
 @tool
-def search_helper_functions(query: str, config: RunnableConfig) -> list:
+def search_helper_functions(query: str, runtime: ToolRuntime) -> list:
     """Search for available helper functions by keyword (e.g., 'input', 'reference', 'metadata').
     Use this to find built-in data retrieval and formatting functions.
     
     Args:
         query: Search terms describing the helper function (e.g., 'retrieve fastq', 'parse riscd').
     """
-    store = config.get("configurable", {}).get("store")
+    store = runtime.store
     res_item = store.get(("resources",), "helper_functions")
     res_list = res_item.value.get("list", []) if res_item else []
     
@@ -293,14 +293,14 @@ def search_helper_functions(query: str, config: RunnableConfig) -> list:
     ]
 
 @tool
-def search_design_patterns(query: str, config: RunnableConfig) -> list:
+def search_design_patterns(query: str, runtime: ToolRuntime) -> list:
     """Search for domain-specific data-shaping design patterns by keyword.
     Use this when you are unsure how to wire domain-specific components
     
     Args:
         query: Search terms describing the pattern (e.g., 'host depletion').
     """
-    store = config.get("configurable", {}).get("store")
+    store = runtime.store
     items = store.search(("patterns",))
     if not items:
         return [{"error": "No design patterns found in the catalog."}]
