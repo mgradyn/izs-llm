@@ -37,20 +37,12 @@ def diagram_reason_node(state: GraphState) -> dict:
         logger.warning(f"diagrammer missing valid data_flow_plan: {e}")
         plan_context = json.dumps(ast_json.get("data_flow_plan", {}))
 
-    # We use a separate subset of messages for the diagrammer so it doesn't get confused by Architect's tools
-    diagram_messages = state.get("diagram_messages", [])
-    if not diagram_messages:
-        sys_prompt = load_diagram_prompt()
-        diagram_messages = [
-            SystemMessage(content=sys_prompt),
-            HumanMessage(content=f"Here is the Architect's Data Flow Plan and the FINAL GENERATED CODE. Please read the code to understand the exact data operations, then submit the final diagram structure and detailed operation descriptions.\n\n### DATA FLOW PLAN (Component IDs)\n```json\n{plan_context}\n```\n\n### FINAL PIPELINE CODE\n```groovy\n{code_context}\n```")
-        ]
-
-    # Add tool results or new tool calls if any
-    # (LangGraph ToolNode automatically appends ToolMessages to whatever message key it receives, if configured correctly, 
-    # but wait, we need to make sure `diagram_messages` is mapped correctly in State. Let's just use `messages` for simplicity,
-    # or append to `diagram_messages`.)
-    # ACTUALLY, if we use `diagram_messages`, we need to define it in GraphState.
+    # Build a fresh prompt every time since diagramming is a one-shot process per pipeline build
+    sys_prompt = load_diagram_prompt()
+    diagram_messages = [
+        SystemMessage(content=sys_prompt),
+        HumanMessage(content=f"Here is the Architect's Data Flow Plan and the FINAL GENERATED CODE. Please read the code to understand the exact data operations, then submit the final diagram structure and detailed operation descriptions.\n\n### DATA FLOW PLAN (Component IDs)\n```json\n{plan_context}\n```\n\n### FINAL PIPELINE CODE\n```groovy\n{code_context}\n```")
+    ]
     
     llm = get_llm().with_structured_output(DiagramData)
     
@@ -59,7 +51,6 @@ def diagram_reason_node(state: GraphState) -> dict:
         mermaid_string = render_mermaid_from_json(diagram_data)
         
         return {
-            "diagram_messages": diagram_messages + [AIMessage(content="Diagram generated.")],
             "diagram_data": diagram_data.model_dump(),
             "mermaid_deterministic": mermaid_string,
             "mermaid_agent": mermaid_string
