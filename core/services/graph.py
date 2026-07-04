@@ -227,9 +227,12 @@ def build_execution_subgraph(store: Any = None) -> Any:
     sub = StateGraph(GraphState)
     sub.add_node("hydrator", hydrator_node)
     sub.add_node("architect_precheck", architect_precheck_node)
+    
+    # State-Aware Reasoning Node (Handles both Research and Repair)
     sub.add_node("architect_reason", architect_reason_node)
     sub.add_node("architect_tools", ToolNode(get_architect_tools(), handle_tool_errors=True))
     sub.add_node("sanitize_architect", sanitize_orphaned_tool_calls)
+    
     sub.add_node("architect_generate", architect_generate_node)
     sub.add_node("repair", repair_node)
     sub.add_node("renderer", renderer_node)
@@ -241,7 +244,7 @@ def build_execution_subgraph(store: Any = None) -> Any:
 
     sub.set_entry_point("hydrator")
     sub.add_edge("hydrator", "architect_precheck")  # Deterministic channel/void check
-    sub.add_edge("architect_precheck", "architect_generate")  # Then generate
+    sub.add_edge("architect_precheck", "architect_reason")  # Route directly to state-aware reasoning node
 
     # Architect generate → check if valid
     sub.add_conditional_edges(

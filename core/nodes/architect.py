@@ -28,7 +28,9 @@ def architect_reason_node(state: GraphState) -> Any:
     from core.services.architect_tools import ARCHITECT_TOOLS
     llm_with_tools = llm.bind_tools(ARCHITECT_TOOLS)
 
-    system_template = """You are a Nextflow DSL2 code architect. You previously attempted to generate a pipeline AST but validation failed. You now have tools to investigate and fix the issue.
+    if validation_error:
+        # REPAIR MODE
+        system_template = """You are a Nextflow DSL2 code architect. You previously attempted to generate a pipeline AST but validation failed. You now have tools to investigate and fix the issue.
 
 You have access to the TECHNICAL CONTEXT below which contains all the source code of the components. You DO NOT need to look them up.
 Read the VALIDATION ERROR, the PLAN, and the TECHNICAL CONTEXT, and explain what needs to be fixed.
@@ -69,20 +71,52 @@ PLAN:
 
 TECHNICAL CONTEXT:
 {tech_context}"""
+    else:
+        # PLANNING/RESEARCH MODE
+        system_template = """You are a Nextflow DSL2 code architect preparing to generate a pipeline AST.
+You must use your tools to research how to implement the Consultant's plan before generating code.
+
+You have access to the TECHNICAL CONTEXT below which contains all the source code of the components. You DO NOT need to look them up.
+Read the PLAN and the TECHNICAL CONTEXT, and determine if you need to look up helper functions or design patterns.
+
+TOOLS:
+1. `check_component_channels(component_name)` - Look up a specific component's EXACT take/emit signature.
+2. `verify_dataflow_plan(entrypoint_instantiations, sub_workflows)` - Test your dataflow mapping.
+3. `validate_body_code(code_snippet, workflow_name)` - Validate a body_code snippet for DSL2 syntax errors.
+4. `find_component_usage(component_id)` - See REAL production code showing how a component is wired in existing templates.
+5. `search_helper_functions(query)` - Find built-in helper functions (e.g. getSingleInput, getReference).
+6. `search_design_patterns(query)` - Find reusable data-shaping patterns (e.g. host depletion branching, cross+multiMap).
+
+MANDATORY RESEARCH WORKFLOW:
+Step 1: Use `search_helper_functions` to find the exact syntax for fetching the input data described in the plan.
+Step 2: Use `search_design_patterns` to understand how to route data if the plan contains complex logic.
+Step 3: Once you have all the necessary syntax and logic, output a detailed summary of your research findings.
+
+PLAN:
+{plan}
+
+TECHNICAL CONTEXT:
+{tech_context}"""
 
     system_content = system_template.replace("{validation_error}", str(validation_error)).replace("{plan}", str(plan)).replace("{tech_context}", str(tech_context))
 
     state_messages = state.get("messages", [])
+    relevant_messages = []
+    
+    if validation_error:
+        # Extract the conversation history specifically for the current repair loop
+        for msg in reversed(state_messages):
+            relevant_messages.insert(0, msg)
+            if isinstance(msg, HumanMessage) and "**VALIDATION FAILED**" in msg.content:
+                break
+    else:
+        # Extract the conversation history specifically for the current research loop
+        for msg in reversed(state_messages):
+            if isinstance(msg, HumanMessage) and "APPROVED PLAN" in msg.content:
+                break
+            relevant_messages.insert(0, msg)
 
-    # Extract the conversation history specifically for the current repair loop
-    repair_messages = []
-    for msg in reversed(state_messages):
-        repair_messages.insert(0, msg)
-        # Stop traversing once we hit the start of this specific repair attempt
-        if isinstance(msg, HumanMessage) and "**VALIDATION FAILED**" in msg.content:
-            break
-
-    messages = [SystemMessage(content=system_content), *repair_messages]
+    messages = [SystemMessage(content=system_content), *relevant_messages]
 
     try:
         result = llm_with_tools.invoke(messages)
@@ -110,7 +144,7 @@ def architect_generate_node(state: GraphState) -> Any:
             continue
 
         content_lower = msg.content.lower()
-        if any(kw in content_lower for kw in ("channel", "emit", "take", "connection", "validation")):
+        if any(kw in content_lower for kw in ("channel", "emit", "take", "connection", "validation", "helper", "design", "pattern", "syntax", "research")):
             architect_findings = msg.content
             break
 
@@ -119,7 +153,7 @@ def architect_generate_node(state: GraphState) -> Any:
 
     human_msg = f"APPROVED PLAN:\n{plan_text}\n\nTECHNICAL CONTEXT (Available Tools & Code):\n{tech_context}"
     if architect_findings:
-        human_msg += f"\n\nPREVIOUS ATTEMPT ANALYSIS (fix these issues):\n{architect_findings}"
+        human_msg += f"\n\nRESEARCH & ANALYSIS FINDINGS:\n{architect_findings}"
 
     gen_messages = [
         SystemMessage(content=ARCHITECT_SYSTEM_PROMPT),
