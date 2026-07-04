@@ -89,9 +89,11 @@ TOOLS:
 6. `search_design_patterns(query)` - Find reusable data-shaping patterns (e.g. host depletion branching, cross+multiMap).
 
 MANDATORY RESEARCH WORKFLOW:
-Step 1: Use `search_helper_functions` to find the exact syntax for fetching the input data described in the plan.
-Step 2: Use `search_design_patterns` to understand how to route data if the plan contains complex logic.
-Step 3: Once you have all the necessary syntax and logic, output a detailed summary of your research findings.
+Step 1: Use `check_component_channels` on the components listed in the plan to get their EXACT take/emit signatures.
+Step 2: Use `find_component_usage` to see how these components are typically wired in real pipelines.
+Step 3: Use `search_helper_functions` to find the exact syntax for fetching the input data described in the plan.
+Step 4: Use `search_design_patterns` to understand how to route data if the plan contains complex logic.
+Step 5: Once you have all the necessary syntax and logic, output a detailed summary of your research findings.
 
 PLAN:
 {plan}
