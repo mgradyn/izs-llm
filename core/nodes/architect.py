@@ -139,6 +139,12 @@ TECHNICAL CONTEXT:
 
     messages = [SystemMessage(content=system_content), *relevant_messages]
 
+    # Enforce mandatory tool calling on the first pass of the loop
+    # If there is only 1 relevant message, it means the LLM hasn't used any tools yet in this phase.
+    if len(relevant_messages) == 1 and isinstance(relevant_messages[0], HumanMessage):
+        from core.tool_registry import get_architect_tools
+        llm_with_tools = llm.bind_tools(get_architect_tools(), tool_choice="any")
+        logger.info("architect_reason_mandatory_tool_enforced")
     try:
         result = llm_with_tools.invoke(messages)
         logger.info("architect_reason_tool_calls", count=len(result.tool_calls) if result.tool_calls else 0)
@@ -274,12 +280,22 @@ def architect_precheck_node(state: GraphState, store: BaseStore) -> Any:
     if missing_code:
         warnings.append(f"NO SOURCE CODE: {missing_code}. Rely on catalog metadata for channel names.")
 
+    from core.loader import data_loader
     channel_map_lines = []
     for mid in component_ids:
         parsed = _get_channels_for_component(mid, store)
         e = "VOID" if _is_void_tool(mid) else ", ".join(parsed["emits"]) or "unknown"
         t = ", ".join(parsed["takes"]) or "unknown"
-        channel_map_lines.append(f"- {mid}: take=[{t}] emit=[{e}]")
+        
+        line = f"- {mid}: take=[{t}] emit=[{e}]"
+        
+        usages = data_loader.usage_db.get(mid, [])
+        if usages:
+            snippet_lines = usages[0]['snippet'].strip().split('\n')
+            indented_snippet = "\n".join(f"    {l}" for l in snippet_lines)
+            line += f"\n  Usage Example:\n    ```groovy\n{indented_snippet}\n    ```"
+            
+        channel_map_lines.append(line)
 
     if warnings or channel_map_lines:
         precheck_block = "\n## CHANNEL MAP (verified from code store)\n"

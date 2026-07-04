@@ -196,23 +196,26 @@ def _get_component_channels_internal(component_name: str) -> dict:
     """Internal (non-tool) helper: read take/emit channels from the registry.
     Used by validate_body_code to avoid a tool-inside-tool call.
     """
+    from core.loader import data_loader
+    from core.catalog_registry import get_registry
+
     registry = get_registry()
     if component_name not in registry.valid_components:
         return {"error": f"Component '{component_name}' not found in catalog."}
 
-    comp = registry.get_component(component_name)
-    code = ""
-    if comp:
-        with open(comp.file_path, "r") as f:
-            code = f.read()
-    else:
-        for p in registry.plugins.values():
-            if component_name in p.templates:
-                with open(p.templates[component_name], "r") as f:
-                    code = f.read()
-                break
-
+    code = data_loader.code_db.get(component_name, "")
     parsed = _parse_nextflow_channels(code)
+
+    if not parsed["takes"]:
+        meta = data_loader.comp_db.get(component_name) or data_loader.tmpl_db.get(component_name)
+        if meta:
+            parsed["takes"] = meta.get("input_channels", meta.get("input_types", [])) or []
+
+    if not parsed["emits"]:
+        meta = data_loader.comp_db.get(component_name) or data_loader.tmpl_db.get(component_name)
+        if meta:
+            parsed["emits"] = meta.get("output_channels", meta.get("out", [])) or []
+
     return {"takes": parsed["takes"], "emits": parsed["emits"]}
 
 
