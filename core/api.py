@@ -137,14 +137,6 @@ async def chat_with_agent(request: ChatRequest, graph: Any=Depends(get_graph)) -
                 error=str(result["error"])
             )
 
-        # Get the AI reply from the messages list safely
-        messages = result.get("messages", [])
-        ai_reply = "No response generated."
-        for msg in reversed(messages):
-            if isinstance(msg, AIMessage) and msg.content:
-                ai_reply = msg.content
-                break
-
         # Get the status and final codes
         status = result.get("consultant_status", "CHATTING")
         nf_code = result.get("nextflow_code")
@@ -152,6 +144,24 @@ async def chat_with_agent(request: ChatRequest, graph: Any=Depends(get_graph)) -
         mermaid_agent = result.get("mermaid_agent")
         mermaid_deterministic = result.get("mermaid_deterministic") or mermaid_agent
 
+        # Get the AI reply from the messages list safely
+        messages = result.get("messages", [])
+        ai_reply = "No response generated."
+        
+        if status == "APPROVED":
+            if result.get("error"):
+                ai_reply = f"I encountered an error while building the pipeline: {result.get('error')}"
+            elif result.get("validation_error"):
+                ai_reply = f"I could not fix the pipeline validation errors after multiple attempts. The last error was:\n\n{result.get('validation_error')}"
+            else:
+                ai_reply = "I have successfully generated and validated the Nextflow pipeline based on your approved plan."
+        else:
+            for msg in reversed(messages):
+                if isinstance(msg, AIMessage) and msg.content:
+                    if msg.additional_kwargs.get("internal_agent"):
+                        continue
+                    ai_reply = msg.content
+                    break
         # Collect tool calls from the most recent turn (since last human message)
         tool_calls = []
         seen = set()

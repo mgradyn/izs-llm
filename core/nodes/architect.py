@@ -147,6 +147,8 @@ TECHNICAL CONTEXT:
         logger.info("architect_reason_mandatory_tool_enforced")
     try:
         result = llm_with_tools.invoke(messages)
+        # Tag this message as internal so the API doesn't send it to the user chat
+        result.additional_kwargs["internal_agent"] = "architect"
         logger.info("architect_reason_tool_calls", count=len(result.tool_calls) if result.tool_calls else 0)
         return {"messages": [result]}
     except Exception as e:
