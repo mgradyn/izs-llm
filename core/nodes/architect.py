@@ -33,7 +33,9 @@ def architect_reason_node(state: GraphState) -> Any:
         # REPAIR MODE
         system_template = """You are a Nextflow DSL2 code architect. You previously attempted to generate a pipeline AST but validation failed. You now have tools to investigate and fix the issue.
 
-You have access to the TECHNICAL CONTEXT below which contains all the source code of the components. You DO NOT need to look them up.
+You have access to the TECHNICAL CONTEXT below which contains the source code for the components. 
+**CRITICAL**: The TECHNICAL CONTEXT ONLY contains component source code. It DOES NOT contain helper functions or design patterns. You MUST use your tools to find those.
+
 Read the VALIDATION ERROR, the PLAN, and the TECHNICAL CONTEXT, and explain what needs to be fixed.
 
 TOOLS:
@@ -41,7 +43,7 @@ TOOLS:
 2. `verify_dataflow_plan(entrypoint_instantiations, sub_workflows)` - Test your dataflow mapping to see if you forgot to instantiate any variables.
 3. `validate_body_code(code_snippet, workflow_name)` - Validate a body_code snippet for DSL2 syntax errors.
 4. `find_component_usage(component_id)` - See REAL production code showing how a component is wired in existing templates.
-5. `search_helper_functions(query)` - Find built-in helper functions (e.g. getSingleInput, getReference).
+5. `search_helper_functions(query)` - Find built-in helper functions.
 6. `search_design_patterns(query)` - Find reusable data-shaping patterns (e.g. host depletion branching, cross+multiMap).
 
 INCREMENTAL REASONING WORKFLOW (Mandatory):
@@ -73,19 +75,20 @@ PLAN:
 TECHNICAL CONTEXT:
 {tech_context}"""
     else:
-        # PLANNING/RESEARCH MODE
         system_template = """You are a Nextflow DSL2 code architect preparing to generate a pipeline AST.
 You must use your tools to research how to implement the Consultant's plan before generating code.
 
-You have access to the TECHNICAL CONTEXT below which contains all the source code of the components. You DO NOT need to look them up.
-Read the PLAN and the TECHNICAL CONTEXT, and determine if you need to look up helper functions or design patterns.
+You have access to the TECHNICAL CONTEXT below which contains the source code for the components. 
+**CRITICAL**: The TECHNICAL CONTEXT ONLY contains component source code. It DOES NOT contain helper functions or design patterns. You MUST use your tools to find those.
+
+Read the PLAN and the TECHNICAL CONTEXT, and determine what tools you need to call to find helper functions or design patterns.
 
 TOOLS:
 1. `check_component_channels(component_name)` - Look up a specific component's EXACT take/emit signature.
 2. `verify_dataflow_plan(entrypoint_instantiations, sub_workflows)` - Test your dataflow mapping.
 3. `validate_body_code(code_snippet, workflow_name)` - Validate a body_code snippet for DSL2 syntax errors.
 4. `find_component_usage(component_id)` - See REAL production code showing how a component is wired in existing templates.
-5. `search_helper_functions(query)` - Find built-in helper functions (e.g. getSingleInput, getReference).
+5. `search_helper_functions(query)` - Find built-in helper functions.
 6. `search_design_patterns(query)` - Find reusable data-shaping patterns (e.g. host depletion branching, cross+multiMap).
 
 MANDATORY RESEARCH WORKFLOW:
