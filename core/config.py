@@ -53,7 +53,7 @@ class Settings(BaseSettings):
     # Graph & Agent Iteration Limits
     MAX_TOOL_ITERATIONS: int = 15
     MAX_TOOL_ITERATIONS_APPROVAL: int = 5
-    MAX_ARCHITECT_TOOL_ITERATIONS: int = 4
+    MAX_ARCHITECT_TOOL_ITERATIONS: int = 8
     MAX_REPAIR_RETRIES: int = 5
     MAX_DIAGRAM_RETRIES: int = 3
 
