@@ -3,6 +3,7 @@ import re
 from typing import Any
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.messages import ToolMessage as LCToolMessage
 from langgraph.store.base import BaseStore
 
 from core.config import settings
@@ -112,9 +113,13 @@ TECHNICAL CONTEXT:
     else:
         # Extract the conversation history specifically for the current research loop
         for msg in reversed(state_messages):
-            if isinstance(msg, HumanMessage) and "APPROVED PLAN" in msg.content:
+            if getattr(msg, "tool_calls", None) or isinstance(msg, LCToolMessage):
+                relevant_messages.insert(0, msg)
+            else:
                 break
-            relevant_messages.insert(0, msg)
+        
+        # Prepend a HumanMessage to satisfy LLM API requirements (Must have a HumanMessage before AI tool loops)
+        relevant_messages.insert(0, HumanMessage(content="Please research the necessary helper functions and design patterns for the provided plan. Call tools to investigate, or output your findings if you are done."))
 
     messages = [SystemMessage(content=system_content), *relevant_messages]
 
