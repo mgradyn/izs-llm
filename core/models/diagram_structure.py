@@ -1,5 +1,5 @@
 import re
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -11,7 +11,7 @@ class Node(BaseModel):
     shape: Literal['input', 'process', 'operator', 'output', 'global'] = Field(
         description="Visual shape: 'input' (params), 'process' (tools), 'operator' (.map/.cross), 'output' (emits), 'global' (constants)."
     )
-    subgraph: str | None = Field(default=None, description="The name of the workflow this node belongs to (e.g., entrypoint).")
+    subgraph: str | None = Field(default=None, description="The alphanumeric ID of the workflow this node belongs to (e.g., entrypoint, quality_control). NO spaces allowed.")
 
     @field_validator('id')
     @classmethod
@@ -36,15 +36,19 @@ class Node(BaseModel):
 
         return str(v).strip().replace('"', "'").replace('\n', ' ')
 
-    @field_validator('subgraph')
+    @field_validator('subgraph', mode='before')
     @classmethod
-    def validate_subgraph(cls, v: str | None) -> str | None:
-        if v:
+    def validate_subgraph(cls, v: Any) -> Any:
+        if isinstance(v, str) and v:
             v = v.strip()
-            if not re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', v):
-                raise ValueError(f"INVALID SUBGRAPH ID: '{v}'. Must be alphanumeric with no spaces.")
+            v = v.replace(' ', '_')
+            v = re.sub(r'[^a-zA-Z0-9_]', '', v)
+            if v and not re.match(r'^[a-zA-Z_]', v):
+                v = 'sg_' + v
             if v in MERMAID_KEYWORDS:
-                raise ValueError(f"INVALID SUBGRAPH ID: '{v}' is a reserved keyword.")
+                v = v + '_'
+            if not v:
+                return None
         return v
 
 class Edge(BaseModel):
