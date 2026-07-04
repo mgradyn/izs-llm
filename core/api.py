@@ -114,9 +114,9 @@ async def chat_with_agent(request: ChatRequest, graph: Any=Depends(get_graph)) -
                 logger.info("idempotency_cache_hit", key=request.idempotency_key)
                 return cached_resp
 
-        # Set up the thread ID so the agent remembers the chat
-        config = {"configurable": {"thread_id": request.session_id}}
-
+        from core.services.graph import global_store
+        # Set up the thread ID so the agent remembers the chat, and inject the store for tools
+        config = {"configurable": {"thread_id": request.session_id, "store": global_store}}
         # Run the graph with async, applying a 10-minute timeout
         result = await asyncio.wait_for(
             graph.ainvoke(
