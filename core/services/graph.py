@@ -39,15 +39,23 @@ def sanitize_orphaned_tool_calls(state: GraphState) -> Any:
     if not messages:
         return {}
 
+    # Find the start of the current phase: last HumanMessage in state
+    phase_start = 0
+    for i in range(len(messages) - 1, -1, -1):
+        if isinstance(messages[i], HumanMessage):
+            phase_start = i
+            break
+    phase_messages = messages[phase_start:]
+
     # Collect IDs of tool calls that already have a ToolMessage response
     answered_ids = set()
-    for msg in messages:
+    for msg in phase_messages:
         if isinstance(msg, LCToolMessage):
             answered_ids.add(msg.tool_call_id)
 
     # Walk the messages and find unanswered tool calls
     stub_messages = []
-    for msg in messages:
+    for msg in phase_messages:
         if isinstance(msg, AIMessage) and getattr(msg, "tool_calls", None):
             for tc in msg.tool_calls:
                 tc_id = tc.get("id") or tc.get("tool_call_id")
@@ -281,16 +289,15 @@ def build_execution_subgraph(store: Any = None) -> Any:
             return "architect_tools"
         return "architect_generate"
 
-    # Wrapper: execute architect tools and increment the phase counter
-    def architect_tools_and_count(state: GraphState) -> Any:
-        tool_node = ToolNode(get_architect_tools(), handle_tool_errors=True)
-        result = tool_node.invoke(state)
-        current = state.get("arch_tool_iterations", 0)
-        if isinstance(result, dict):
-            result["arch_tool_iterations"] = current + 1
-        return result
+    # Standard ToolNode — registered normally so LangGraph runtime injects the store
+    # into ToolRuntime for all store-reading tools. DO NOT call .invoke() directly.
+    sub.add_node("architect_tools", ToolNode(get_architect_tools(), handle_tool_errors=True))
 
-    sub.add_node("architect_tools", architect_tools_and_count)
+    # Tiny node that bumps arch_tool_iterations after each tool round.
+    # Kept separate so it doesn't touch ToolNode's store injection path.
+    def _incr_arch_iters(state: GraphState) -> Any:
+        return {"arch_tool_iterations": state.get("arch_tool_iterations", 0) + 1}
+    sub.add_node("incr_arch_iters", _incr_arch_iters)
 
     sub.add_conditional_edges("architect_reason", route_architect_reason, {
         "architect_tools": "architect_tools",
@@ -298,8 +305,9 @@ def build_execution_subgraph(store: Any = None) -> Any:
         "architect_generate": "architect_generate"
     })
 
-    # After architect tools, loop back to architect reason
-    sub.add_edge("architect_tools", "architect_reason")
+    # After architect tools, increment counter then loop back to reason
+    sub.add_edge("architect_tools", "incr_arch_iters")
+    sub.add_edge("incr_arch_iters", "architect_reason")
     sub.add_edge("sanitize_architect", "architect_generate")
     sub.add_conditional_edges(
         "renderer",

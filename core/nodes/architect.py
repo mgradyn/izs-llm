@@ -125,6 +125,13 @@ TECHNICAL CONTEXT:
             if isinstance(msg, HumanMessage) and "**VALIDATION FAILED**" not in msg.content:
                 break  # found the real user-turn boundary
 
+        # Strip any trailing AIMessages that are NOT followed by tool results.
+        # This is CRITICAL: on the first call into the executor the last state message
+        # is the consultant's final AIMessage (approval reply). Including it makes the
+        # LLM API reject the sequence with "got assistant" (last role must be user/tool).
+        while relevant_messages and isinstance(relevant_messages[-1], AIMessage) and not getattr(relevant_messages[-1], 'tool_calls', None):
+            relevant_messages.pop()
+
         # If we still have no HumanMessage anchor, prepend a synthetic one so the LLM API
         # doesn't reject the sequence.
         if not relevant_messages or not isinstance(relevant_messages[0], HumanMessage):
@@ -152,8 +159,10 @@ def architect_generate_node(state: GraphState) -> Any:
     architect_findings = ""
     messages = state.get("messages", [])
 
-    # Extract the last substantive reasoning response from the Architect
-    for msg in reversed(messages[-settings.CONTEXT_WINDOW_REASON:]):
+    # Extract the last substantive reasoning response from the Architect.
+    # Use a wide window: a full CUSTOM_BUILD research loop can produce 30+ messages
+    # (tool call + result pairs), so CONTEXT_WINDOW_REASON alone is far too narrow.
+    for msg in reversed(messages[-settings.CONTEXT_WINDOW_REASON * 4:]):
         if not isinstance(msg, AIMessage) or not msg.content or getattr(msg, 'tool_calls', None):
             continue
 
