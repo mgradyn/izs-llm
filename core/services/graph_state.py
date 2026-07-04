@@ -29,6 +29,7 @@ class GraphState(TypedDict, total=False):
     error: str | None
     validation_error: str | None
     retries: int
+    arch_tool_iterations: int  # Resets each repair phase; counts architect tool calls
 
     # The add_messages reducer handles our short-term memory trimming
     messages: Annotated[list[BaseMessage], add_messages]

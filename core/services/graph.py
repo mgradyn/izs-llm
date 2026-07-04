@@ -230,7 +230,6 @@ def build_execution_subgraph(store: Any = None) -> Any:
     
     # State-Aware Reasoning Node (Handles both Research and Repair)
     sub.add_node("architect_reason", architect_reason_node)
-    sub.add_node("architect_tools", ToolNode(get_architect_tools(), handle_tool_errors=True))
     sub.add_node("sanitize_architect", sanitize_orphaned_tool_calls)
     
     sub.add_node("architect_generate", architect_generate_node)
@@ -241,6 +240,7 @@ def build_execution_subgraph(store: Any = None) -> Any:
 
     # Inner loop for tool calling
     max_architect_tool_iterations = settings.MAX_ARCHITECT_TOOL_ITERATIONS
+    max_architect_tool_iterations_custom = settings.MAX_ARCHITECT_TOOL_ITERATIONS_CUSTOM_BUILD
 
     sub.set_entry_point("hydrator")
     sub.add_edge("hydrator", "architect_precheck")  # Deterministic channel/void check
@@ -261,24 +261,36 @@ def build_execution_subgraph(store: Any = None) -> Any:
     sub.add_edge("repair", "architect_reason")
 
     # Architect reason routing: tool calls → tools loop, else → generate
+    # Uses state-tracked arch_tool_iterations counter (reset to 0 by repair_node each repair cycle)
     def route_architect_reason(state: GraphState) -> str:
         messages = state.get("messages", [])
         if not messages:
             return "architect_generate"
         last_msg = messages[-1]
         if hasattr(last_msg, "tool_calls") and last_msg.tool_calls:
-            # Count architect tool messages (since last repair/human message)
-            arch_tool_count = 0
-            for m in reversed(messages):
-                if isinstance(m, HumanMessage):
-                    break
-                if isinstance(m, LCToolMessage):
-                    arch_tool_count += 1
-            if arch_tool_count >= max_architect_tool_iterations:
-                logger.info(f"--- [NODE] GRAPH architect tool limit reached ({arch_tool_count}). proceeding to generate")
+            arch_tool_count = state.get("arch_tool_iterations", 0)
+            strategy = state.get("strategy_selector", "CUSTOM_BUILD")
+            effective_limit = (
+                max_architect_tool_iterations_custom
+                if strategy == "CUSTOM_BUILD"
+                else max_architect_tool_iterations
+            )
+            if arch_tool_count >= effective_limit:
+                logger.info(f"--- [NODE] GRAPH architect tool limit reached ({arch_tool_count}/{effective_limit}, strategy={strategy}). proceeding to generate")
                 return "sanitize_architect"
             return "architect_tools"
         return "architect_generate"
+
+    # Wrapper: execute architect tools and increment the phase counter
+    def architect_tools_and_count(state: GraphState) -> Any:
+        tool_node = ToolNode(get_architect_tools(), handle_tool_errors=True)
+        result = tool_node.invoke(state)
+        current = state.get("arch_tool_iterations", 0)
+        if isinstance(result, dict):
+            result["arch_tool_iterations"] = current + 1
+        return result
+
+    sub.add_node("architect_tools", architect_tools_and_count)
 
     sub.add_conditional_edges("architect_reason", route_architect_reason, {
         "architect_tools": "architect_tools",

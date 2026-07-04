@@ -54,6 +54,7 @@ class Settings(BaseSettings):
     MAX_TOOL_ITERATIONS: int = 15
     MAX_TOOL_ITERATIONS_APPROVAL: int = 5
     MAX_ARCHITECT_TOOL_ITERATIONS: int = 8
+    MAX_ARCHITECT_TOOL_ITERATIONS_CUSTOM_BUILD: int = 16  # CUSTOM_BUILD needs more research
     MAX_REPAIR_RETRIES: int = 5
     MAX_DIAGRAM_RETRIES: int = 3
 

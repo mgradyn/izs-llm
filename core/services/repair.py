@@ -38,7 +38,7 @@ HINT: This process produces no output channels. Call it directly without assigni
 Investigate this error using your tools. Look up the components involved and explain what needs to be fixed. Do NOT attempt to output the JSON AST yet. Just explain the fix.
 """
 
-    return {"messages": [HumanMessage(content=repair_instruction.strip())]}
+    return {"messages": [HumanMessage(content=repair_instruction.strip())], "arch_tool_iterations": 0}
 
 def should_repair(state: GraphState) -> str:
     # If a fatal error was set by any node, abort the repair loop immediately

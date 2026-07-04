@@ -10,8 +10,7 @@ instead of relying solely on bulk RAG context injection.
 
 import re
 
-from langchain.tools import ToolRuntime
-from langchain_core.tools import tool
+from langchain.tools import tool, ToolRuntime
 
 from core.config import settings
 from core.loader import data_loader
@@ -615,11 +614,117 @@ def find_component_usage(component_id: str, runtime: ToolRuntime) -> dict:
         "count": len(results),
     }
 
+
+# ──────────────────────────────────────────────────────────────────────────────
+# TOOL 8: Search helper functions (architect + consultant shared)
+# ──────────────────────────────────────────────────────────────────────────────
+
+@tool
+def search_helper_functions(query: str, runtime: ToolRuntime) -> list:
+    """Search for available helper functions by keyword (e.g., 'input', 'reference', 'metadata').
+    Use this to find built-in data retrieval and formatting functions.
+
+    Args:
+        query: Search terms describing the helper function (e.g., 'retrieve fastq', 'parse riscd').
+    """
+    store = runtime.store
+    res_item = store.get(("resources",), "helper_functions")
+    res_list = res_item.value.get("list", []) if res_item else []
+
+    if not res_list:
+        return [{"error": "No helper functions found in the catalog."}]
+
+    query_tokens = [q.lower() for q in re.split(r'[^a-z0-9]', query.lower()) if q]
+    if not query_tokens:
+        return [{"error": "Invalid search query."}]
+
+    results = []
+    for h in res_list:
+        score = 0
+        name = h.get('name', '').lower()
+        desc = h.get('description', '').lower()
+        keywords = [k.lower() for k in h.get('keywords', [])]
+        aliases = [a.lower() for a in h.get('aliases', [])]
+
+        for q in query_tokens:
+            if len(q) < 3: continue
+            if q in name: score += 10
+            if q in desc: score += 5
+            if any(q in k for k in keywords): score += 8
+            if any(q in a for a in aliases): score += 8
+
+        if score > 0:
+            results.append((score, h))
+
+    results.sort(key=lambda x: x[0], reverse=True)
+
+    if not results:
+        return [{"warning": "No helper functions matched your query."}]
+
+    return [
+        {
+            "name": h.get('name'),
+            "description": h.get('description'),
+            "usage": h.get('usage')
+        } for _, h in results[:5]
+    ]
+
+
+@tool
+def search_design_patterns(query: str, runtime: ToolRuntime) -> list:
+    """Search for domain-specific data-shaping design patterns by keyword.
+    Use this when you are unsure how to wire domain-specific components
+
+    Args:
+        query: Search terms describing the pattern (e.g., 'host depletion').
+    """
+    store = runtime.store
+    items = store.search(("patterns",))
+    if not items:
+        return [{"error": "No design patterns found in the catalog."}]
+
+    query_tokens = [q.lower() for q in re.split(r'[^a-z0-9]', query.lower()) if q]
+    if not query_tokens:
+        return [{"error": "Invalid search query."}]
+
+    results = []
+    for item in items:
+        p = item.value
+        score = 0
+        name = p.get('title', '').lower()
+        desc = p.get('description', '').lower()
+        use_cases = str(p.get('use_cases', '')).lower()
+        code = str(p.get('groovy_code', '')).lower()
+
+        for q in query_tokens:
+            if len(q) < 3: continue
+            if q in name: score += 10
+            if q in desc: score += 5
+            if q in use_cases: score += 5
+            if q in code: score += 3
+
+        if score > 0:
+            results.append((score, p))
+
+    results.sort(key=lambda x: x[0], reverse=True)
+
+    if not results:
+        return [{"warning": "No design patterns matched your query."}]
+
+    return [
+        {
+            "title": p.get('title'),
+            "description": p.get('description'),
+            "use_cases": p.get('use_cases', []),
+            "groovy_code": p.get('groovy_code', ''),
+            "caveats": p.get('caveats', []),
+        } for _, p in results[:3]
+    ]
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # EXPORT: Tool list for ToolNode registration
 # ──────────────────────────────────────────────────────────────────────────────
-
-from core.services.architect_tools import search_helper_functions, search_design_patterns
 
 CONSULTANT_TOOLS = [
     lookup_catalog_item,

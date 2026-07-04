@@ -26,8 +26,8 @@ def architect_reason_node(state: GraphState) -> Any:
     plan = state.get('design_plan', 'No plan provided.')
     tech_context = state.get('technical_context', 'No context provided.')
 
-    from core.services.architect_tools import ARCHITECT_TOOLS
-    llm_with_tools = llm.bind_tools(ARCHITECT_TOOLS)
+    from core.tool_registry import get_architect_tools
+    llm_with_tools = llm.bind_tools(get_architect_tools())
 
     if validation_error:
         # REPAIR MODE
@@ -116,15 +116,19 @@ TECHNICAL CONTEXT:
             if isinstance(msg, HumanMessage) and "**VALIDATION FAILED**" in msg.content:
                 break
     else:
-        # Extract the conversation history specifically for the current research loop
-        for msg in reversed(state_messages):
-            if getattr(msg, "tool_calls", None) or isinstance(msg, LCToolMessage):
-                relevant_messages.insert(0, msg)
-            else:
-                break
-        
-        # Prepend a HumanMessage to satisfy LLM API requirements (Must have a HumanMessage before AI tool loops)
-        relevant_messages.insert(0, HumanMessage(content="Please research the necessary helper functions and design patterns for the provided plan. Call tools to investigate, or output your findings if you are done."))
+        # Research mode: collect all messages from the end of the consultant turn onward.
+        # Walk backwards until we hit a real HumanMessage that is NOT a repair instruction,
+        # then include it as the anchor. This preserves the full tool loop even when the LLM
+        # produces intermediate text responses mid-loop.
+        for msg in reversed(state_messages[-settings.CONTEXT_WINDOW_REASON * 3:]):
+            relevant_messages.insert(0, msg)
+            if isinstance(msg, HumanMessage) and "**VALIDATION FAILED**" not in msg.content:
+                break  # found the real user-turn boundary
+
+        # If we still have no HumanMessage anchor, prepend a synthetic one so the LLM API
+        # doesn't reject the sequence.
+        if not relevant_messages or not isinstance(relevant_messages[0], HumanMessage):
+            relevant_messages.insert(0, HumanMessage(content="Please research the necessary helper functions and design patterns for the provided plan. Call tools to investigate, or output your findings if you are done."))
 
     messages = [SystemMessage(content=system_content), *relevant_messages]
 
