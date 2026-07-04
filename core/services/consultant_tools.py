@@ -10,7 +10,7 @@ instead of relying solely on bulk RAG context injection.
 
 import re
 
-from langchain.tools import ToolRuntime
+from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import tool
 
 from core.config import settings
@@ -27,7 +27,7 @@ from core.services.query_normalizer import (
 # ──────────────────────────────────────────────────────────────────────────────
 
 @tool
-def lookup_catalog_item(item_id: str, include_code: bool, runtime: ToolRuntime) -> dict:
+def lookup_catalog_item(item_id: str, include_code: bool, config: RunnableConfig) -> dict:
     """Look up a component or template from the knowledge base to get its exact details.
     Use this to get metadata, inputs, outputs, and optionally the source code or template logic.
     This replaces separate calls for verifying IDs or fetching code.
@@ -36,7 +36,7 @@ def lookup_catalog_item(item_id: str, include_code: bool, runtime: ToolRuntime) 
         item_id: The exact ID to look up (e.g. 'process_data_prep' or 'my_pipeline_template')
         include_code: Set to True to also fetch the source code or template logic flow.
     """
-    store = runtime.store
+    store = config.get("configurable", {}).get("store")
 
     # Check components
     comp_item = store.get(("components",), item_id)
@@ -93,15 +93,14 @@ def lookup_catalog_item(item_id: str, include_code: bool, runtime: ToolRuntime) 
 # ──────────────────────────────────────────────────────────────────────────────
 
 @tool
-def search_components(query: str, runtime: ToolRuntime) -> list:  # noqa: C901
-    """Search for available components and templates by keyword with semantic matching.
-    Use this to find what tools are available for a specific domain-specific task.
-    ALWAYS call this first when the user asks about a new analysis type.
+def search_components(query: str, config: RunnableConfig) -> list:  # noqa: C901
+    """Search for catalog components using natural language or semantic descriptions.
+    Use this when you don't know the exact ID but know what the component should do.
 
     Args:
-        query: Search terms describing the analysis need (e.g. 'data preprocessing', 'feature extraction', 'report generation')
+        query: Description of what the component should do (e.g. "trim fastq reads").
     """
-    store = runtime.store
+    store = config.get("configurable", {}).get("store")
     results = []
     warnings = []
     found_ids = set()
@@ -386,21 +385,15 @@ def _parse_include_statements(code: str) -> list:
 # ──────────────────────────────────────────────────────────────────────────────
 
 @tool
-def check_plan_logic(component_ids: list, template_id: str, runtime: ToolRuntime) -> dict:  # noqa: C901
-    """Validate a proposed pipeline plan by checking:
-    1. All component IDs exist in the catalog
-    2. Channel flow is consistent between consecutive steps
-    3. If a template is referenced, compare the plan against the template's declared steps
-    4. Parse template source code to detect include statements and find missing components
-
-    Call this BEFORE finalizing any APPROVED plan to catch issues early.
-    Pass template_id as empty string "" if no template is used.
+def check_plan_logic(component_ids: list, template_id: str, config: RunnableConfig) -> dict:  # noqa: C901
+    """Validate that the components selected exist and that the plan aligns with a reference template.
+    Use this as a final sanity check before writing your formal plan.
 
     Args:
-        component_ids: List of component IDs in execution order
-        template_id: Template ID to compare against. keep it empty if there is no template
+        component_ids: List of component IDs you plan to use.
+        template_id: The base template ID you are using for design inspiration.
     """
-    store = runtime.store
+    store = config.get("configurable", {}).get("store")
     issues = []
     warnings = []
 
@@ -582,19 +575,14 @@ def check_plan_logic(component_ids: list, template_id: str, runtime: ToolRuntime
 # ──────────────────────────────────────────────────────────────────────────────
 
 @tool
-def find_component_usage(component_id: str, runtime: ToolRuntime) -> dict:
-    """Find which templates/modules use a specific component and HOW it is wired.
-    Returns real production code snippets showing the component's calling context
-    (what channels feed it, what comes before/after it in the workflow).
-
-    Use this to understand the conventional way to connect a component,
-    especially when building custom pipelines with components you haven't used before.
+def find_component_usage(component_id: str, config: RunnableConfig) -> dict:
+    """Find real examples of how a specific component is used inside existing templates.
+    Use this to see what channels it typically takes, what helpers it uses, etc.
 
     Args:
-        component_id: The exact component ID (e.g. 'process_my_component')
+        component_id: The exact ID of the component (e.g. 'process_my_component')
     """
-    store = runtime.store
-
+    store = config.get("configurable", {}).get("store")
     # Check the component exists first
     comp = store.get(("components",), component_id)
     tmpl = store.get(("templates",), component_id) if not comp else None
@@ -631,9 +619,13 @@ def find_component_usage(component_id: str, runtime: ToolRuntime) -> dict:
 # EXPORT: Tool list for ToolNode registration
 # ──────────────────────────────────────────────────────────────────────────────
 
+from core.services.architect_tools import search_helper_functions, search_design_patterns
+
 CONSULTANT_TOOLS = [
     lookup_catalog_item,
     search_components,
     check_plan_logic,
     find_component_usage,
+    search_helper_functions,
+    search_design_patterns,
 ]
