@@ -31,3 +31,9 @@ cohesive-llm-benchmark-eval-full/
 
 # AI IDE skills
 .agents/
+
+sn-article-template/
+downloads/
+implementation_details_paper_publishing/
+scratch/
+bmc_bioinformatics_strategy.md
