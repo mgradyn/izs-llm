@@ -24,6 +24,8 @@ class OpenAIAdapter(LLMAdapter):
         base_url: str | None = None,
         max_retries: int = 5,
         timeout: float = 180.0,
+        model_kwargs: dict = None,
+        extra_body: dict = None,
     ):
         from langchain_openai import ChatOpenAI
 
@@ -36,6 +38,10 @@ class OpenAIAdapter(LLMAdapter):
         )
         if base_url:
             kwargs["base_url"] = base_url
+        if model_kwargs:
+            kwargs["model_kwargs"] = model_kwargs
+        if extra_body:
+            kwargs["extra_body"] = extra_body
         self._model_name = model
         self.model = ChatOpenAI(**kwargs)
         logger.debug("adapter_created", adapter="openai", model=model)
@@ -85,6 +91,8 @@ class LocalLLMAdapter(LLMAdapter):
         temperature: float = 0.2,
         max_retries: int = 5,
         timeout: float = 180.0,
+        model_kwargs: dict = None,
+        extra_body: dict = None,
     ):
         from langchain_openai import ChatOpenAI
 
@@ -95,7 +103,7 @@ class LocalLLMAdapter(LLMAdapter):
             or "not-needed"
         )
         self._model_name = model
-        self.model = ChatOpenAI(
+        kwargs = dict(
             model=model,
             base_url=base_url,
             api_key=api_key,
@@ -103,6 +111,11 @@ class LocalLLMAdapter(LLMAdapter):
             max_retries=max_retries,
             timeout=timeout,
         )
+        if model_kwargs:
+            kwargs["model_kwargs"] = model_kwargs
+        if extra_body:
+            kwargs["extra_body"] = extra_body
+        self.model = ChatOpenAI(**kwargs)
         logger.debug("adapter_created", adapter="local", model=model, base_url=base_url)
 
     def get_model(self) -> BaseChatModel:

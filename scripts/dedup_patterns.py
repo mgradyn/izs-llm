@@ -110,7 +110,8 @@ def deduplicate(patterns: list[dict], threshold: float) -> tuple[list[dict], lis
     texts = []
     for p in patterns:
         code_text = p.get("groovy_code", "")[:500]
-        texts.append(f"{p.get('title', '')} {p.get('use_cases', '')} {code_text}")
+        tags_text = " ".join(p.get("tags", []))
+        texts.append(f"{p.get('title', '')} {p.get('use_cases', '')} {tags_text} {code_text}")
     
     print(f"Computing embeddings for {len(texts)} patterns...")
     embeddings = embed_texts(texts)
@@ -136,15 +137,29 @@ def deduplicate(patterns: list[dict], threshold: float) -> tuple[list[dict], lis
     
     kept = []
     for cluster in clusters:
-        # Keep the pattern with the longest description
+        # Keep the pattern with the longest description as the base
         best_idx = max(cluster, key=lambda idx: len(patterns[idx].get("description", "")))
-        kept.append(patterns[best_idx])
+        kept_pattern = dict(patterns[best_idx])  # Create a copy to merge into
         
-        # Log removed duplicates
+        # Merge lists losslessly from all duplicates in the cluster
+        merged_use_cases = set(kept_pattern.get("use_cases", []))
+        merged_caveats = set(kept_pattern.get("caveats", []))
+        merged_tags = set(kept_pattern.get("tags", []))
+        
         for idx in cluster:
             if idx != best_idx:
+                dup = patterns[idx]
+                merged_use_cases.update(dup.get("use_cases", []))
+                merged_caveats.update(dup.get("caveats", []))
+                merged_tags.update(dup.get("tags", []))
+                
                 sim = cosine_similarity(embeddings[best_idx], embeddings[idx])
-                removed_pairs.append((patterns[best_idx], patterns[idx], sim))
+                removed_pairs.append((patterns[best_idx], dup, sim))
+                
+        kept_pattern["use_cases"] = sorted(list(merged_use_cases))
+        kept_pattern["caveats"] = sorted(list(merged_caveats))
+        kept_pattern["tags"] = sorted(list(merged_tags))
+        kept.append(kept_pattern)
     
     return kept, removed_pairs
 

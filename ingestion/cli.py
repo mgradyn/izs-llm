@@ -16,6 +16,9 @@ Steps:
 import argparse
 import sys
 from pathlib import Path
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # Add project root to path for imports
 project_root = Path(__file__).resolve().parent.parent
@@ -60,6 +63,11 @@ Examples:
         help="Skip embedding (faster, useful for testing)"
     )
     parser.add_argument(
+        "--enrich-llm",
+        action="store_true",
+        help="Use the main LLM to generate rich descriptions and domains from code."
+    )
+    parser.add_argument(
         "--vector-db",
         type=str,
         choices=["faiss", "chroma"],
@@ -69,8 +77,8 @@ Examples:
     parser.add_argument(
         "--embedding-model",
         type=str,
-        default="nomic-ai/nomic-embed-text-v1.5",
-        help="HuggingFace model for FAISS embeddings (default: nomic-ai/nomic-embed-text-v1.5)"
+        default="Qwen/Qwen3-Embedding-0.6B",
+        help="HuggingFace model for FAISS embeddings (default: Qwen/Qwen3-Embedding-0.6B)"
     )
     parser.add_argument(
         "--plugin-name",
@@ -79,12 +87,38 @@ Examples:
         help="Plugin name for generated plugin.yaml (defaults to directory name)"
     )
 
+    parser.add_argument(
+        "--components-dir",
+        type=Path,
+        help="Subdirectory for components (processes). Defaults to NF_COMPONENTS_DIR from env or search all."
+    )
+    parser.add_argument(
+        "--templates-dir",
+        type=Path,
+        help="Subdirectory for templates (workflows). Defaults to NF_TEMPLATES_DIR from env or search all."
+    )
+    parser.add_argument(
+        "--resources-dir",
+        type=Path,
+        help="Subdirectory for helper functions. Defaults to NF_RESOURCES_DIR from env or search all."
+    )
+
     args = parser.parse_args()
 
-    source_dir = args.source_dir.resolve()
+    import os
+    source_dir = args.source_dir.resolve() if args.source_dir else None
     plugin_dir = args.plugin_dir.resolve()
-
-    if not source_dir.exists():
+    
+    comp_dir = args.components_dir.resolve() if args.components_dir else (
+        Path(os.environ["NF_COMPONENTS_DIR"]).resolve() if os.environ.get("NF_COMPONENTS_DIR") else None
+    )
+    tmpl_dir = args.templates_dir.resolve() if args.templates_dir else (
+        Path(os.environ["NF_TEMPLATES_DIR"]).resolve() if os.environ.get("NF_TEMPLATES_DIR") else None
+    )
+    res_dir = args.resources_dir.resolve() if args.resources_dir else (
+        Path(os.environ["NF_RESOURCES_DIR"]).resolve() if os.environ.get("NF_RESOURCES_DIR") else None
+    )
+    if source_dir and not source_dir.exists():
         print(f"❌ Source directory not found: {source_dir}")
         sys.exit(1)
 
@@ -96,9 +130,21 @@ Examples:
     print()
 
     # Step 1: Find .nf files
-    nf_files = sorted(source_dir.rglob("*.nf"))
+    nf_files_set = set()
+    
+    def _add_files(search_dir: Path | None) -> None:
+        if not search_dir or not search_dir.exists(): return
+        for f in search_dir.rglob("*.nf"):
+            nf_files_set.add(f.resolve())
+
+    _add_files(source_dir)
+    _add_files(comp_dir)
+    _add_files(tmpl_dir)
+    _add_files(res_dir)
+        
+    nf_files = sorted(list(nf_files_set))
     if not nf_files:
-        print(f"❌ No .nf files found in {source_dir}")
+        print(f"❌ No .nf files found in provided directories")
         sys.exit(1)
     print(f"📁 Found {len(nf_files)} .nf files")
 
@@ -124,16 +170,34 @@ Examples:
         print(f"\n❌ No parseable definitions found in {len(nf_files)} files")
         sys.exit(1)
 
+    # Load plugin.yaml config if it exists
+    plugin_config = {}
+    yaml_path = plugin_dir / "plugin.yaml"
+    if yaml_path.exists():
+        import yaml
+        try:
+            with open(yaml_path, "r", encoding="utf-8") as f:
+                plugin_config = yaml.safe_load(f).get("ingestion", {})
+        except Exception as e:
+            print(f"⚠️ Could not load plugin.yaml for ingestion config: {e}")
+
     # Step 3: Build catalog
     print("\n📦 Building catalog...")
     catalog_dir = plugin_dir / "catalog"
-    stats = build_catalog(parsed_files, catalog_dir, source_dir)
+    stats = build_catalog(
+        parsed_files, 
+        catalog_dir, 
+        source_dir, 
+        resources_dir=res_dir,
+        enrich_llm=args.enrich_llm,
+        plugin_config=plugin_config
+    )
 
     # Step 4: Vector embedding
     if not args.skip_embed:
         print(f"\n🧠 Building {args.vector_db.upper()} index...")
         try:
-            from ingestion.embedder import build_chroma_index, build_faiss_index
+            from ingestion.embedder import build_chroma_index, build_faiss_index, build_patterns_index
             if args.vector_db == "faiss":
                 faiss_dir = plugin_dir / "faiss_index"
                 embed_stats = build_faiss_index(
@@ -141,6 +205,14 @@ Examples:
                     output_dir=faiss_dir,
                     embedding_model=args.embedding_model,
                 )
+                # Build separate patterns FAISS sub-index
+                print("\n🧠 Building patterns sub-index...")
+                patterns_stats = build_patterns_index(
+                    catalog_dir=catalog_dir,
+                    output_dir=plugin_dir / "patterns_index",
+                    embedding_model=args.embedding_model,
+                )
+                stats["pattern_entries"] = patterns_stats["entries"]
             else:
                 chroma_dir = plugin_dir / "chroma_index"
                 embed_stats = build_chroma_index(

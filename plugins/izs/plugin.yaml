@@ -18,10 +18,30 @@ catalog:
 code_store: "code_store.jsonl"
 faiss_index: "faiss_index"
 chroma_index: "chroma_index"
+patterns_index: "patterns_index"
 
 # Module source directory for framework validation (optional)
 # Set NGSMANAGER_DIR env var or leave empty to skip filesystem validation
 modules_dir: null
+
+# Ingestion configuration (plugin-specific overrides)
+ingestion:
+  template_patterns:
+    - "pipeline_*"
+    - "modules/*"
+  component_patterns:
+    - "multi/*"
+    - "steps/*"
+    - "_dummy.nf"
+  domain_mapping:
+    "step_0SQ": "Quality Control"
+    "step_1PP": "Preprocessing"
+    "step_2AS": "Assembly & Mapping"
+    "step_2MG": "Metagenomics"
+    "step_3TX": "Taxonomy"
+    "step_4AN": "Annotation & AMR"
+    "step_4TY": "Typing"
+    "module_qc": "Quality Control"
 
 # Prompts (merged with core base prompts)
 prompts:
@@ -236,6 +256,11 @@ rag:
     "variant": ["snp", "snv", "calling", "vcf", "mutation", "ivar", "snippy"]
     "plasmid": ["plasmidspades", "mobsuite", "mob_recon", "replicon", "extrachromosomal", "mobile"]
     "contamination": ["confindr", "purity", "mixed", "strain", "intra"]
+  # String replacements to normalize domain-specific multi-word phrases BEFORE tokenization
+  query_replacements:
+    "point mutation": "pointfinder staramr amr"
+    "point mutations": "pointfinder staramr amr"
+
   # Domain-specific keywords that boost search ranking when found in component IDs
   search_keywords:
     - "lineage"

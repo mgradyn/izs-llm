@@ -6,6 +6,7 @@ channel connections, and check AST structure against DSL2 rules.
 Token-efficient: only used on retries, not on first attempt.
 """
 
+import json
 import re
 
 from langchain.tools import tool, ToolRuntime
@@ -15,7 +16,7 @@ from core.catalog_registry import get_registry
 
 
 @tool
-def validate_body_code(code_snippet: str, workflow_name: str) -> dict:  # noqa: C901
+def validate_body_code(code_snippet: str, workflow_name: str) -> str:  # noqa: C901
     """Validate a body_code snippet for common Nextflow DSL2 errors.
     Use this to check a piece of body_code BEFORE including it in the AST.
 
@@ -146,16 +147,16 @@ def validate_body_code(code_snippet: str, workflow_name: str) -> dict:  # noqa: 
         if invalid:
             issues.append("Unknown components or functions not in catalog: " + str(sorted(invalid)))
 
-    return {
+    return json.dumps({
         "valid": len(issues) == 0,
         "issues": issues,
         "warnings": warnings,
         "checked_workflow": workflow_name,
-    }
+    }, indent=2)
 
 
 @tool
-def verify_dataflow_plan(entrypoint_instantiations: list[str], sub_workflows: list[dict]) -> dict:
+def verify_dataflow_plan(entrypoint_instantiations: list[str], sub_workflows: list[dict]) -> str:
     """Use this tool to incrementally test your dataflow plan before finalizing your reasoning.
     
     Args:
@@ -188,8 +189,8 @@ def verify_dataflow_plan(entrypoint_instantiations: list[str], sub_workflows: li
                 )
 
     if not warnings:
-        return {"status": "SUCCESS", "message": "DataFlow Plan looks logically consistent."}
-    return {"status": "WARNINGS FOUND", "warnings": warnings}
+        return json.dumps({"status": "SUCCESS", "message": "DataFlow Plan looks logically consistent."}, indent=2)
+    return json.dumps({"status": "WARNINGS FOUND", "warnings": warnings}, indent=2)
 
 
 def _get_component_channels_internal(component_name: str) -> dict:
@@ -220,63 +221,54 @@ def _get_component_channels_internal(component_name: str) -> dict:
 
 
 @tool
-def check_component_channels(component_name: str, runtime: ToolRuntime) -> dict:
+def check_component_channels(component_name: str, runtime: ToolRuntime) -> str:
     """Check exactly what channels a specific component takes and emits.
     Use this to pull specific constraints into your working memory to avoid hallucinations.
 
     Args:
         component_name: The name of the component (e.g., 'step_2AS_mapping__ivar')
     """
-    store = runtime.store
-
-    comp_item = store.get(("components",), component_name)
-    tmpl_item = store.get(("templates",), component_name) if not comp_item else None
-    if not comp_item and not tmpl_item:
-        return {"error": f"Component '{component_name}' not found in catalog."}
-
-    code_item = store.get(("code",), component_name)
-    code = code_item.value.get("content", "") if code_item else ""
-
-    # Fall back to metadata channels when source code unavailable
-    parsed = _parse_nextflow_channels(code)
-    takes = parsed["takes"]
-    emits = parsed["emits"]
-
-    if not takes:
-        meta = comp_item or tmpl_item
-        if meta:
-            takes = meta.value.get("input_channels", meta.value.get("input_types", [])) or []
-
-    if not emits:
-        meta = comp_item or tmpl_item
-        if meta:
-            emits = meta.value.get("output_channels", meta.value.get("out", [])) or []
+    res = _get_component_channels_internal(component_name)
+    if "error" in res:
+        return json.dumps(res, indent=2)
+        
+    emits = res.get("emits", [])
 
     from core.services.ast_compiler import _is_void_tool
     if _is_void_tool(component_name):
-        emits = ["(VOID TOOL - DOES NOT EMIT)"]
+        return json.dumps({
+            "component": component_name,
+            "takes": res.get("takes", []) if res.get("takes") else ["(NONE)"],
+            "emits": ["(VOID TOOL - DOES NOT EMIT)"]
+        }, indent=2)
 
-    from core.loader import data_loader
-    usages = data_loader.usage_db.get(component_name, [])
-    usage_snippet = "\n\n".join(
-        [f"Example from {u['template_id']}:\n```groovy\n{u['snippet']}\n```" for u in usages[:2]]
-    ) if usages else "(No usage examples found)"
-
-    return {
+    return json.dumps({
         "component": component_name,
-        "takes": takes if takes else ["(NONE)"],
-        "emits": emits if emits else ["(NONE)"],
-        "usage_examples": usage_snippet
-    }
+        "takes": res.get("takes", []) if res.get("takes") else ["(NONE)"],
+        "emits": [f"{component_name}.out.{e}" for e in emits] if emits else ["(NONE)"]
+    }, indent=2)
 
 
-from core.services.consultant_tools import find_component_usage, search_helper_functions, search_design_patterns
+from core.services.consultant_tools import (
+    search_helper_functions,
+    search_design_patterns,
+    auto_complete_pipeline_dag,
+    search_components,
+    find_dataflow_path,
+    get_component_neighbors,
+    explain_component,
+)
 
 ARCHITECT_TOOLS = [
+    search_components,
+    auto_complete_pipeline_dag,
     validate_body_code,
     verify_dataflow_plan,
     check_component_channels,
-    find_component_usage,
     search_helper_functions,
     search_design_patterns,
+    find_dataflow_path,
+    get_component_neighbors,
+    explain_component,
 ]
+

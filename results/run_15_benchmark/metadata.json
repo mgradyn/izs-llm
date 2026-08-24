@@ -1,0 +1,17 @@
+{
+  "run_started_at": "2026-07-25T14:47:29Z",
+  "bench": {
+    "commit": "0a9a17a1ffe13484991d691d957eed43e294bc0c",
+    "short_commit": "0a9a17a",
+    "branch": "main",
+    "remote": "https://github.com/mgradyn/izs-llm.git",
+    "dirty": true
+  },
+  "framework": {},
+  "llm": {
+    "name": "?",
+    "model": "labs-devstral-small-2512",
+    "api_url": "http://127.0.0.1:8765"
+  },
+  "dataset": "dataset_205.jsonl"
+}

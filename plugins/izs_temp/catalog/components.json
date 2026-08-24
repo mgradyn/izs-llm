@@ -1,0 +1,4266 @@
+{
+  "components": [
+    {
+      "id": "bowtie2",
+      "tool": "bowtie2",
+      "domain": "General",
+      "description": "bowtie2 \u2014 process 'bowtie2_index'.",
+      "keywords": [
+        "bowtie2"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "params.outdir"
+      ],
+      "input_channels": [
+        "ref",
+        "fasta"
+      ],
+      "output_channels": [],
+      "container": "ghcr.io/genpat-it/bowtie2:2.1.0--37ad014737",
+      "file_path": "etc/bowtie2"
+    },
+    {
+      "id": "ncbi_download",
+      "tool": "edirect",
+      "domain": "General",
+      "description": "edirect \u2014 process 'ncbi_assembly_refseq'.",
+      "keywords": [
+        "edirect"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "params.ncbi_max_download_assembly",
+        "params.ncbi_max_download_sra",
+        "params.outdir"
+      ],
+      "input_channels": [
+        "ref"
+      ],
+      "output_channels": [],
+      "container": "ncbi/edirect:12.5",
+      "file_path": "etc/ncbi_download"
+    },
+    {
+      "id": "ncbi_download",
+      "tool": "edirect",
+      "domain": "General",
+      "description": "edirect \u2014 process 'ncbi_assembly_genbank'.",
+      "keywords": [
+        "edirect"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "params.ncbi_max_download_assembly",
+        "params.ncbi_max_download_sra",
+        "params.outdir"
+      ],
+      "input_channels": [
+        "ref"
+      ],
+      "output_channels": [],
+      "container": "ncbi/edirect:12.5",
+      "file_path": "etc/ncbi_download"
+    },
+    {
+      "id": "ncbi_download",
+      "tool": "sra-tools",
+      "domain": "General",
+      "description": "sra-tools \u2014 process 'ncbi_sra'.",
+      "keywords": [
+        "sra-tools"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "params.ncbi_max_download_assembly",
+        "params.ncbi_max_download_sra",
+        "params.outdir"
+      ],
+      "input_channels": [
+        "code"
+      ],
+      "output_channels": [],
+      "container": "quay.io/biocontainers/sra-tools:3.0.10--h9f5acd7_0",
+      "file_path": "etc/ncbi_download"
+    },
+    {
+      "id": "ncbi_download",
+      "tool": "edirect",
+      "domain": "General",
+      "description": "edirect \u2014 process 'ncbi_nuccore'.",
+      "keywords": [
+        "edirect"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "params.ncbi_max_download_assembly",
+        "params.ncbi_max_download_sra",
+        "params.outdir"
+      ],
+      "input_channels": [
+        "ref",
+        "each format"
+      ],
+      "output_channels": [],
+      "container": "ncbi/edirect:12.5",
+      "file_path": "etc/ncbi_download"
+    },
+    {
+      "id": "module_augur",
+      "tool": "augur",
+      "domain": "General",
+      "description": "augur \u2014 process 'align'.",
+      "keywords": [
+        "augur"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "params.outdir"
+      ],
+      "input_channels": [
+        "sequences",
+        "_",
+        "ref_code",
+        "ref_path"
+      ],
+      "output_channels": [
+        "alignment"
+      ],
+      "container": "quay.io/biocontainers/augur:23.1.1--pyhdfd78af_1",
+      "file_path": "modules/module_augur"
+    },
+    {
+      "id": "module_augur",
+      "tool": "augur",
+      "domain": "General",
+      "description": "augur \u2014 process 'tree'.",
+      "keywords": [
+        "augur"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "params.outdir"
+      ],
+      "input_channels": [
+        "alignment"
+      ],
+      "output_channels": [
+        "tree_raw"
+      ],
+      "container": "quay.io/biocontainers/augur:23.1.1--pyhdfd78af_1",
+      "file_path": "modules/module_augur"
+    },
+    {
+      "id": "module_augur",
+      "tool": "augur",
+      "domain": "General",
+      "description": "augur \u2014 process 'refine'.",
+      "keywords": [
+        "augur"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "params.outdir"
+      ],
+      "input_channels": [
+        "tree",
+        "alignment",
+        "metadata"
+      ],
+      "output_channels": [
+        "tree",
+        "branch_lengths"
+      ],
+      "container": "quay.io/biocontainers/augur:23.1.1--pyhdfd78af_1",
+      "file_path": "modules/module_augur"
+    },
+    {
+      "id": "module_augur",
+      "tool": "augur",
+      "domain": "General",
+      "description": "augur \u2014 process 'ancestral'.",
+      "keywords": [
+        "augur"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "params.outdir"
+      ],
+      "input_channels": [
+        "tree",
+        "alignment",
+        "_",
+        "ref_code",
+        "ref_path"
+      ],
+      "output_channels": [
+        "nt_muts"
+      ],
+      "container": "quay.io/biocontainers/augur:23.1.1--pyhdfd78af_1",
+      "file_path": "modules/module_augur"
+    },
+    {
+      "id": "module_augur",
+      "tool": "augur",
+      "domain": "General",
+      "description": "augur \u2014 process 'translate'.",
+      "keywords": [
+        "augur"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "params.outdir"
+      ],
+      "input_channels": [
+        "tree",
+        "nt_muts",
+        "_",
+        "ref_code",
+        "ref_path"
+      ],
+      "output_channels": [
+        "aa_muts"
+      ],
+      "container": "quay.io/biocontainers/augur:23.1.1--pyhdfd78af_1",
+      "file_path": "modules/module_augur"
+    },
+    {
+      "id": "module_augur",
+      "tool": "augur",
+      "domain": "General",
+      "description": "augur \u2014 process 'traits'.",
+      "keywords": [
+        "augur"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "params.outdir"
+      ],
+      "input_channels": [
+        "tree",
+        "metadata"
+      ],
+      "output_channels": [
+        "traits"
+      ],
+      "container": "quay.io/biocontainers/augur:23.1.1--pyhdfd78af_1",
+      "file_path": "modules/module_augur"
+    },
+    {
+      "id": "module_augur",
+      "tool": "augur",
+      "domain": "General",
+      "description": "augur \u2014 process 'prepare_metadata'.",
+      "keywords": [
+        "augur"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "params.outdir"
+      ],
+      "input_channels": [
+        "metadata"
+      ],
+      "output_channels": [
+        "metadata"
+      ],
+      "container": "quay.io/biocontainers/augur:23.1.1--pyhdfd78af_1",
+      "file_path": "modules/module_augur"
+    },
+    {
+      "id": "module_augur",
+      "tool": "augur",
+      "domain": "General",
+      "description": "augur \u2014 process 'export'.",
+      "keywords": [
+        "augur"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "params.outdir"
+      ],
+      "input_channels": [
+        "tree",
+        "metadata",
+        "branch_lengths",
+        "traits",
+        "nt_muts",
+        "aa_muts",
+        "lat_longs"
+      ],
+      "output_channels": [
+        "auspice"
+      ],
+      "container": "quay.io/biocontainers/augur:23.1.1--pyhdfd78af_1",
+      "file_path": "modules/module_augur"
+    },
+    {
+      "id": "module_cfsan",
+      "tool": "cfsan_snp_pipeline",
+      "domain": "General",
+      "description": "cfsan_snp_pipeline \u2014 process 'cfsan_snp_pipeline'.",
+      "keywords": [
+        "cfsan_snp_pipeline"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "params.outdir"
+      ],
+      "input_channels": [
+        "samples",
+        "_",
+        "reference",
+        "refPath"
+      ],
+      "output_channels": [
+        "snpma",
+        "name",
+        "name",
+        "name",
+        "name",
+        "name",
+        "name"
+      ],
+      "container": null,
+      "file_path": "modules/module_cfsan"
+    },
+    {
+      "id": "module_cfsan",
+      "tool": "iqtree",
+      "domain": "General",
+      "description": "iqtree \u2014 process 'iqtree'.",
+      "keywords": [
+        "iqtree"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "params.outdir"
+      ],
+      "input_channels": [
+        "snpma"
+      ],
+      "output_channels": [
+        "nwk"
+      ],
+      "container": "quay.io/biocontainers/iqtree:1.6.12--he513fc3_0",
+      "file_path": "modules/module_cfsan"
+    },
+    {
+      "id": "module_cfsan",
+      "tool": "augur",
+      "domain": "General",
+      "description": "augur \u2014 process 'augur'.",
+      "keywords": [
+        "augur"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "params.outdir"
+      ],
+      "input_channels": [
+        "nwk",
+        "metadata",
+        "geodata"
+      ],
+      "output_channels": [],
+      "container": "quay.io/biocontainers/augur:22.0.0--pyhdfd78af_0",
+      "file_path": "modules/module_cfsan"
+    },
+    {
+      "id": "module_grapetree",
+      "tool": "chewbbaca-w-chewie-schemas",
+      "domain": "General",
+      "description": "chewbbaca-w-chewie-schemas \u2014 process 'extract_cgMLST'.",
+      "keywords": [
+        "chewbbaca-w-chewie-schemas"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "params.containsKey",
+        "params.input",
+        "params.outdir",
+        "params.schema"
+      ],
+      "input_channels": [
+        "alleles"
+      ],
+      "output_channels": [
+        "cgMLST"
+      ],
+      "container": "ghcr.io/genpat-it/chewbbaca-w-chewie-schemas:2.8.5--16b816c96d",
+      "file_path": "modules/module_grapetree"
+    },
+    {
+      "id": "module_grapetree",
+      "tool": "cgmlst-dists",
+      "domain": "General",
+      "description": "cgmlst-dists \u2014 process 'dists'.",
+      "keywords": [
+        "cgmlst-dists"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "params.containsKey",
+        "params.input",
+        "params.outdir",
+        "params.schema"
+      ],
+      "input_channels": [
+        "cgMLST"
+      ],
+      "output_channels": [],
+      "container": "quay.io/biocontainers/cgmlst-dists:0.4.0--hec16e2b_2",
+      "file_path": "modules/module_grapetree"
+    },
+    {
+      "id": "module_grapetree",
+      "tool": "grapetree",
+      "domain": "General",
+      "description": "grapetree \u2014 process 'grapetree'.",
+      "keywords": [
+        "grapetree"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "params.containsKey",
+        "params.input",
+        "params.outdir",
+        "params.schema"
+      ],
+      "input_channels": [
+        "cgMLST"
+      ],
+      "output_channels": [
+        "nwk_nj"
+      ],
+      "container": "quay.io/biocontainers/grapetree:2.1--pyh3252c3a_0",
+      "file_path": "modules/module_grapetree"
+    },
+    {
+      "id": "module_grapetree",
+      "tool": "augur",
+      "domain": "General",
+      "description": "augur \u2014 process 'augur'.",
+      "keywords": [
+        "augur"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "params.containsKey",
+        "params.input",
+        "params.outdir",
+        "params.schema"
+      ],
+      "input_channels": [
+        "nwk",
+        "metadata",
+        "geodata"
+      ],
+      "output_channels": [],
+      "container": "quay.io/biocontainers/augur:22.0.0--pyhdfd78af_0",
+      "file_path": "modules/module_grapetree"
+    },
+    {
+      "id": "module_ksnp3",
+      "tool": "ksnp3",
+      "domain": "General",
+      "description": "ksnp3 \u2014 process 'ksnp3'.",
+      "keywords": [
+        "ksnp3"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "params.outdir"
+      ],
+      "input_channels": [
+        "assembly",
+        "kmers_size",
+        "analysis_type"
+      ],
+      "output_channels": [
+        "fasta",
+        "name",
+        "name"
+      ],
+      "container": "ghcr.io/genpat-it/ksnp3:3.0--addd2c2d0e",
+      "file_path": "modules/module_ksnp3"
+    },
+    {
+      "id": "module_ksnp3",
+      "tool": "iqtree",
+      "domain": "General",
+      "description": "iqtree \u2014 process 'iqtree'.",
+      "keywords": [
+        "iqtree"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "params.outdir"
+      ],
+      "input_channels": [
+        "fasta"
+      ],
+      "output_channels": [
+        "nwk",
+        "name",
+        "name"
+      ],
+      "container": "quay.io/biocontainers/iqtree:1.6.12--he513fc3_0",
+      "file_path": "modules/module_ksnp3"
+    },
+    {
+      "id": "module_ksnp3",
+      "tool": "grapetree",
+      "domain": "General",
+      "description": "grapetree \u2014 process 'grapetree'.",
+      "keywords": [
+        "grapetree"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "params.outdir"
+      ],
+      "input_channels": [
+        "matrix"
+      ],
+      "output_channels": [],
+      "container": "quay.io/biocontainers/grapetree:2.1--pyh3252c3a_0",
+      "file_path": "modules/module_ksnp3"
+    },
+    {
+      "id": "module_ksnp3",
+      "tool": "augur",
+      "domain": "General",
+      "description": "augur \u2014 process 'augur'.",
+      "keywords": [
+        "augur"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "params.outdir"
+      ],
+      "input_channels": [
+        "nwk",
+        "metadata",
+        "geodata"
+      ],
+      "output_channels": [],
+      "container": "quay.io/biocontainers/augur:22.0.0--pyhdfd78af_0",
+      "file_path": "modules/module_ksnp3"
+    },
+    {
+      "id": "module_panaroo",
+      "tool": "panaroo",
+      "domain": "General",
+      "description": "panaroo \u2014 process 'panaroo'.",
+      "keywords": [
+        "panaroo"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "params.outdir"
+      ],
+      "input_channels": [
+        "gffs"
+      ],
+      "output_channels": [
+        "name",
+        "name"
+      ],
+      "container": "quay.io/biocontainers/panaroo:1.3.3--pyhdfd78af_0",
+      "file_path": "modules/module_panaroo"
+    },
+    {
+      "id": "module_plasmids",
+      "tool": "staramr",
+      "domain": "General",
+      "description": "staramr \u2014 process 'staramr'.",
+      "keywords": [
+        "staramr"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "getSingleInput()",
+        "params.outdir"
+      ],
+      "input_channels": [
+        "riscd_input",
+        "plasmid_file",
+        "genus_species"
+      ],
+      "output_channels": [
+        "name",
+        "name",
+        "name",
+        "name",
+        "name",
+        "name"
+      ],
+      "container": "ghcr.io/genpat-it/staramr:0.9.1--8fe6b5a239",
+      "file_path": "modules/module_plasmids"
+    },
+    {
+      "id": "module_qc_fastqc",
+      "tool": "fastqc",
+      "domain": "General",
+      "description": "fastqc \u2014 process 'module_qc_fastqc'.",
+      "keywords": [
+        "fastqc"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "params.outdir"
+      ],
+      "input_channels": [
+        "riscd_input",
+        "reads"
+      ],
+      "output_channels": [
+        "name",
+        "name"
+      ],
+      "container": "biocontainers/fastqc:v0.11.5_cv4",
+      "file_path": "modules/module_qc_fastqc"
+    },
+    {
+      "id": "module_qc_nanoplot",
+      "tool": "nanoplot",
+      "domain": "General",
+      "description": "nanoplot \u2014 process 'module_qc_nanoplot'.",
+      "keywords": [
+        "nanoplot"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "params.max_cpus",
+        "params.outdir"
+      ],
+      "input_channels": [
+        "riscd_input",
+        "reads"
+      ],
+      "output_channels": [
+        "name",
+        "name"
+      ],
+      "container": "quay.io/biocontainers/nanoplot:1.41.3--pyhdfd78af_0",
+      "file_path": "modules/module_qc_nanoplot"
+    },
+    {
+      "id": "module_qc_quast",
+      "tool": "quast",
+      "domain": "General",
+      "description": "quast \u2014 process 'quast'.",
+      "keywords": [
+        "quast"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "params.outdir"
+      ],
+      "input_channels": [
+        "_",
+        "assembly"
+      ],
+      "output_channels": [
+        "tsv"
+      ],
+      "container": "quay.io/biocontainers/quast:4.4--boost1.61_1",
+      "file_path": "modules/module_qc_quast"
+    },
+    {
+      "id": "module_qc_quast",
+      "tool": "ubuntu",
+      "domain": "General",
+      "description": "ubuntu \u2014 process 'summary'.",
+      "keywords": [
+        "ubuntu"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "params.outdir"
+      ],
+      "input_channels": [
+        "quast_results"
+      ],
+      "output_channels": [],
+      "container": "ubuntu:20.04",
+      "file_path": "modules/module_qc_quast"
+    },
+    {
+      "id": "module_snippycore",
+      "tool": "snippy",
+      "domain": "General",
+      "description": "snippy \u2014 process 'snippy'.",
+      "keywords": [
+        "snippy"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "getInputFolders()",
+        "params.outdir"
+      ],
+      "input_channels": [
+        "riscd_input",
+        "reads",
+        "riscd_ref",
+        "reference",
+        "reference_path"
+      ],
+      "output_channels": [
+        "results"
+      ],
+      "container": "ghcr.io/genpat-it/snippy:4.5.1--7be4a1c45a",
+      "file_path": "modules/module_snippycore"
+    },
+    {
+      "id": "module_snippycore",
+      "tool": "snippy",
+      "domain": "General",
+      "description": "snippy \u2014 process 'snippy_core'.",
+      "keywords": [
+        "snippy"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "getInputFolders()",
+        "params.outdir"
+      ],
+      "input_channels": [
+        "vcf_files",
+        "ref_riscd",
+        "ref_code",
+        "ref_file"
+      ],
+      "output_channels": [],
+      "container": "ghcr.io/genpat-it/snippy:4.5.1--7be4a1c45a",
+      "file_path": "modules/module_snippycore"
+    },
+    {
+      "id": "module_vcf2mst",
+      "tool": "vcf2mst",
+      "domain": "General",
+      "description": "vcf2mst \u2014 process 'vcf2mst'.",
+      "keywords": [
+        "vcf2mst"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "params.outdir"
+      ],
+      "input_channels": [
+        "vcf_files"
+      ],
+      "output_channels": [
+        "matrix"
+      ],
+      "container": "ghcr.io/genpat-it/vcf2mst:0.0.1--d587d682e9",
+      "file_path": "modules/module_vcf2mst"
+    },
+    {
+      "id": "module_vcf2mst",
+      "tool": "cgmlst-dists",
+      "domain": "General",
+      "description": "cgmlst-dists \u2014 process 'dists'.",
+      "keywords": [
+        "cgmlst-dists"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "params.outdir"
+      ],
+      "input_channels": [
+        "matrix"
+      ],
+      "output_channels": [],
+      "container": "quay.io/biocontainers/cgmlst-dists:0.4.0--hec16e2b_2",
+      "file_path": "modules/module_vcf2mst"
+    },
+    {
+      "id": "multi_alignment__snippycore",
+      "tool": "snippy",
+      "domain": "General",
+      "description": "snippy \u2014 process 'snippy'.",
+      "keywords": [
+        "snippy"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "getInputFolders()",
+        "params.outdir"
+      ],
+      "input_channels": [
+        "riscd_input",
+        "reads",
+        "riscd_ref",
+        "reference",
+        "reference_path"
+      ],
+      "output_channels": [
+        "results"
+      ],
+      "container": "ghcr.io/genpat-it/snippy:4.5.1--7be4a1c45a",
+      "file_path": "multi/multi_alignment__snippycore"
+    },
+    {
+      "id": "multi_alignment__snippycore",
+      "tool": "snippy",
+      "domain": "General",
+      "description": "snippy \u2014 process 'snippy_core'.",
+      "keywords": [
+        "snippy"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "getInputFolders()",
+        "params.outdir"
+      ],
+      "input_channels": [
+        "vcf_files",
+        "ref_riscd",
+        "ref_code",
+        "ref_file"
+      ],
+      "output_channels": [],
+      "container": "ghcr.io/genpat-it/snippy:4.5.1--7be4a1c45a",
+      "file_path": "multi/multi_alignment__snippycore"
+    },
+    {
+      "id": "multi_clustering__augur",
+      "tool": "augur",
+      "domain": "General",
+      "description": "augur \u2014 process 'align'.",
+      "keywords": [
+        "augur"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "params.outdir"
+      ],
+      "input_channels": [
+        "sequences",
+        "_",
+        "ref_code",
+        "ref_path"
+      ],
+      "output_channels": [
+        "alignment"
+      ],
+      "container": "quay.io/biocontainers/augur:23.1.1--pyhdfd78af_1",
+      "file_path": "multi/multi_clustering__augur"
+    },
+    {
+      "id": "multi_clustering__augur",
+      "tool": "augur",
+      "domain": "General",
+      "description": "augur \u2014 process 'tree'.",
+      "keywords": [
+        "augur"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "params.outdir"
+      ],
+      "input_channels": [
+        "alignment"
+      ],
+      "output_channels": [
+        "tree_raw"
+      ],
+      "container": "quay.io/biocontainers/augur:23.1.1--pyhdfd78af_1",
+      "file_path": "multi/multi_clustering__augur"
+    },
+    {
+      "id": "multi_clustering__augur",
+      "tool": "augur",
+      "domain": "General",
+      "description": "augur \u2014 process 'refine'.",
+      "keywords": [
+        "augur"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "params.outdir"
+      ],
+      "input_channels": [
+        "tree",
+        "alignment",
+        "metadata"
+      ],
+      "output_channels": [
+        "tree",
+        "branch_lengths"
+      ],
+      "container": "quay.io/biocontainers/augur:23.1.1--pyhdfd78af_1",
+      "file_path": "multi/multi_clustering__augur"
+    },
+    {
+      "id": "multi_clustering__augur",
+      "tool": "augur",
+      "domain": "General",
+      "description": "augur \u2014 process 'ancestral'.",
+      "keywords": [
+        "augur"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "params.outdir"
+      ],
+      "input_channels": [
+        "tree",
+        "alignment",
+        "_",
+        "ref_code",
+        "ref_path"
+      ],
+      "output_channels": [
+        "nt_muts"
+      ],
+      "container": "quay.io/biocontainers/augur:23.1.1--pyhdfd78af_1",
+      "file_path": "multi/multi_clustering__augur"
+    },
+    {
+      "id": "multi_clustering__augur",
+      "tool": "augur",
+      "domain": "General",
+      "description": "augur \u2014 process 'translate'.",
+      "keywords": [
+        "augur"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "params.outdir"
+      ],
+      "input_channels": [
+        "tree",
+        "nt_muts",
+        "_",
+        "ref_code",
+        "ref_path"
+      ],
+      "output_channels": [
+        "aa_muts"
+      ],
+      "container": "quay.io/biocontainers/augur:23.1.1--pyhdfd78af_1",
+      "file_path": "multi/multi_clustering__augur"
+    },
+    {
+      "id": "multi_clustering__augur",
+      "tool": "augur",
+      "domain": "General",
+      "description": "augur \u2014 process 'traits'.",
+      "keywords": [
+        "augur"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "params.outdir"
+      ],
+      "input_channels": [
+        "tree",
+        "metadata"
+      ],
+      "output_channels": [
+        "traits"
+      ],
+      "container": "quay.io/biocontainers/augur:23.1.1--pyhdfd78af_1",
+      "file_path": "multi/multi_clustering__augur"
+    },
+    {
+      "id": "multi_clustering__augur",
+      "tool": "augur",
+      "domain": "General",
+      "description": "augur \u2014 process 'prepare_metadata'.",
+      "keywords": [
+        "augur"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "params.outdir"
+      ],
+      "input_channels": [
+        "metadata"
+      ],
+      "output_channels": [
+        "metadata"
+      ],
+      "container": "quay.io/biocontainers/augur:23.1.1--pyhdfd78af_1",
+      "file_path": "multi/multi_clustering__augur"
+    },
+    {
+      "id": "multi_clustering__augur",
+      "tool": "augur",
+      "domain": "General",
+      "description": "augur \u2014 process 'export'.",
+      "keywords": [
+        "augur"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "params.outdir"
+      ],
+      "input_channels": [
+        "tree",
+        "metadata",
+        "branch_lengths",
+        "traits",
+        "nt_muts",
+        "aa_muts",
+        "lat_longs"
+      ],
+      "output_channels": [
+        "auspice"
+      ],
+      "container": "quay.io/biocontainers/augur:23.1.1--pyhdfd78af_1",
+      "file_path": "multi/multi_clustering__augur"
+    },
+    {
+      "id": "multi_clustering__cfsan",
+      "tool": "cfsan_snp_pipeline",
+      "domain": "General",
+      "description": "cfsan_snp_pipeline \u2014 process 'cfsan_snp_pipeline'.",
+      "keywords": [
+        "cfsan_snp_pipeline"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "params.outdir"
+      ],
+      "input_channels": [
+        "samples",
+        "_",
+        "reference",
+        "refPath"
+      ],
+      "output_channels": [
+        "snpma",
+        "name",
+        "name",
+        "name",
+        "name",
+        "name",
+        "name"
+      ],
+      "container": null,
+      "file_path": "multi/multi_clustering__cfsan"
+    },
+    {
+      "id": "multi_clustering__cfsan",
+      "tool": "iqtree",
+      "domain": "General",
+      "description": "iqtree \u2014 process 'iqtree'.",
+      "keywords": [
+        "iqtree"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "params.outdir"
+      ],
+      "input_channels": [
+        "snpma"
+      ],
+      "output_channels": [
+        "nwk"
+      ],
+      "container": "quay.io/biocontainers/iqtree:1.6.12--he513fc3_0",
+      "file_path": "multi/multi_clustering__cfsan"
+    },
+    {
+      "id": "multi_clustering__cfsan",
+      "tool": "augur",
+      "domain": "General",
+      "description": "augur \u2014 process 'augur'.",
+      "keywords": [
+        "augur"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "params.outdir"
+      ],
+      "input_channels": [
+        "nwk",
+        "metadata",
+        "geodata"
+      ],
+      "output_channels": [],
+      "container": "quay.io/biocontainers/augur:22.0.0--pyhdfd78af_0",
+      "file_path": "multi/multi_clustering__cfsan"
+    },
+    {
+      "id": "multi_clustering__grapetree",
+      "tool": "chewbbaca-w-chewie-schemas",
+      "domain": "General",
+      "description": "chewbbaca-w-chewie-schemas \u2014 process 'extract_cgMLST'.",
+      "keywords": [
+        "chewbbaca-w-chewie-schemas"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "params.containsKey",
+        "params.input",
+        "params.outdir",
+        "params.schema"
+      ],
+      "input_channels": [
+        "alleles"
+      ],
+      "output_channels": [
+        "cgMLST"
+      ],
+      "container": "ghcr.io/genpat-it/chewbbaca-w-chewie-schemas:2.8.5--16b816c96d",
+      "file_path": "multi/multi_clustering__grapetree"
+    },
+    {
+      "id": "multi_clustering__grapetree",
+      "tool": "cgmlst-dists",
+      "domain": "General",
+      "description": "cgmlst-dists \u2014 process 'dists'.",
+      "keywords": [
+        "cgmlst-dists"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "params.containsKey",
+        "params.input",
+        "params.outdir",
+        "params.schema"
+      ],
+      "input_channels": [
+        "cgMLST"
+      ],
+      "output_channels": [],
+      "container": "quay.io/biocontainers/cgmlst-dists:0.4.0--hec16e2b_2",
+      "file_path": "multi/multi_clustering__grapetree"
+    },
+    {
+      "id": "multi_clustering__grapetree",
+      "tool": "grapetree",
+      "domain": "General",
+      "description": "grapetree \u2014 process 'grapetree'.",
+      "keywords": [
+        "grapetree"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "params.containsKey",
+        "params.input",
+        "params.outdir",
+        "params.schema"
+      ],
+      "input_channels": [
+        "cgMLST"
+      ],
+      "output_channels": [
+        "nwk_nj"
+      ],
+      "container": "quay.io/biocontainers/grapetree:2.1--pyh3252c3a_0",
+      "file_path": "multi/multi_clustering__grapetree"
+    },
+    {
+      "id": "multi_clustering__grapetree",
+      "tool": "augur",
+      "domain": "General",
+      "description": "augur \u2014 process 'augur'.",
+      "keywords": [
+        "augur"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "params.containsKey",
+        "params.input",
+        "params.outdir",
+        "params.schema"
+      ],
+      "input_channels": [
+        "nwk",
+        "metadata",
+        "geodata"
+      ],
+      "output_channels": [],
+      "container": "quay.io/biocontainers/augur:22.0.0--pyhdfd78af_0",
+      "file_path": "multi/multi_clustering__grapetree"
+    },
+    {
+      "id": "multi_clustering__ksnp3",
+      "tool": "ksnp3",
+      "domain": "General",
+      "description": "ksnp3 \u2014 process 'ksnp3'.",
+      "keywords": [
+        "ksnp3"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "params.outdir"
+      ],
+      "input_channels": [
+        "assembly",
+        "kmers_size",
+        "analysis_type"
+      ],
+      "output_channels": [
+        "fasta",
+        "name",
+        "name"
+      ],
+      "container": "ghcr.io/genpat-it/ksnp3:3.0--addd2c2d0e",
+      "file_path": "multi/multi_clustering__ksnp3"
+    },
+    {
+      "id": "multi_clustering__ksnp3",
+      "tool": "iqtree",
+      "domain": "General",
+      "description": "iqtree \u2014 process 'iqtree'.",
+      "keywords": [
+        "iqtree"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "params.outdir"
+      ],
+      "input_channels": [
+        "fasta"
+      ],
+      "output_channels": [
+        "nwk",
+        "name",
+        "name"
+      ],
+      "container": "quay.io/biocontainers/iqtree:1.6.12--he513fc3_0",
+      "file_path": "multi/multi_clustering__ksnp3"
+    },
+    {
+      "id": "multi_clustering__ksnp3",
+      "tool": "grapetree",
+      "domain": "General",
+      "description": "grapetree \u2014 process 'grapetree'.",
+      "keywords": [
+        "grapetree"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "params.outdir"
+      ],
+      "input_channels": [
+        "matrix"
+      ],
+      "output_channels": [],
+      "container": "quay.io/biocontainers/grapetree:2.1--pyh3252c3a_0",
+      "file_path": "multi/multi_clustering__ksnp3"
+    },
+    {
+      "id": "multi_clustering__ksnp3",
+      "tool": "augur",
+      "domain": "General",
+      "description": "augur \u2014 process 'augur'.",
+      "keywords": [
+        "augur"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "params.outdir"
+      ],
+      "input_channels": [
+        "nwk",
+        "metadata",
+        "geodata"
+      ],
+      "output_channels": [],
+      "container": "quay.io/biocontainers/augur:22.0.0--pyhdfd78af_0",
+      "file_path": "multi/multi_clustering__ksnp3"
+    },
+    {
+      "id": "multi_clustering__reportree_alignment",
+      "tool": "ubuntu",
+      "domain": "General",
+      "description": "ubuntu \u2014 process 'prepare_metadata'.",
+      "keywords": [
+        "ubuntu"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "params.max_cpus",
+        "params.outdir"
+      ],
+      "input_channels": [
+        "metadata"
+      ],
+      "output_channels": [
+        "metadata"
+      ],
+      "container": "ubuntu:20.04",
+      "file_path": "multi/multi_clustering__reportree_alignment"
+    },
+    {
+      "id": "multi_clustering__reportree_alignment",
+      "tool": "mafft",
+      "domain": "General",
+      "description": "mafft \u2014 process 'maaft'.",
+      "keywords": [
+        "mafft"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "params.max_cpus",
+        "params.outdir"
+      ],
+      "input_channels": [
+        "sequences"
+      ],
+      "output_channels": [
+        "alignment"
+      ],
+      "container": "quay.io/biocontainers/mafft:7.520--h031d066_3",
+      "file_path": "multi/multi_clustering__reportree_alignment"
+    },
+    {
+      "id": "multi_clustering__reportree_alignment",
+      "tool": "reportree",
+      "domain": "General",
+      "description": "reportree \u2014 process 'reportree_hc'.",
+      "keywords": [
+        "reportree"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "params.max_cpus",
+        "params.outdir"
+      ],
+      "input_channels": [
+        "alignment",
+        "metadata"
+      ],
+      "output_channels": [
+        "nwk_hc",
+        "metadata_hc"
+      ],
+      "container": "ghcr.io/genpat-it/reportree:2.4.1--088b6651b8",
+      "file_path": "multi/multi_clustering__reportree_alignment"
+    },
+    {
+      "id": "multi_clustering__reportree_alignment",
+      "tool": "python3",
+      "domain": "General",
+      "description": "python3 \u2014 process 'find_closest'.",
+      "keywords": [
+        "python3"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "params.max_cpus",
+        "params.outdir"
+      ],
+      "input_channels": [
+        "matrix"
+      ],
+      "output_channels": [],
+      "container": "ghcr.io/genpat-it/python3:3.10.1--29cf21c1f1",
+      "file_path": "multi/multi_clustering__reportree_alignment"
+    },
+    {
+      "id": "multi_clustering__reportree_alignment",
+      "tool": "augur",
+      "domain": "General",
+      "description": "augur \u2014 process 'augur'.",
+      "keywords": [
+        "augur"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "params.max_cpus",
+        "params.outdir"
+      ],
+      "input_channels": [
+        "nwk",
+        "metadata",
+        "geodata"
+      ],
+      "output_channels": [],
+      "container": "quay.io/biocontainers/augur:22.0.0--pyhdfd78af_0",
+      "file_path": "multi/multi_clustering__reportree_alignment"
+    },
+    {
+      "id": "multi_clustering__reportree_alleles",
+      "tool": "chewbbaca-w-chewie-schemas",
+      "domain": "General",
+      "description": "chewbbaca-w-chewie-schemas \u2014 process 'merge_profiles'.",
+      "keywords": [
+        "chewbbaca-w-chewie-schemas"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "params.containsKey",
+        "params.input",
+        "params.max_cpus",
+        "params.outdir",
+        "params.schema"
+      ],
+      "input_channels": [
+        "profiles"
+      ],
+      "output_channels": [
+        "all_profiles",
+        "s",
+        "s"
+      ],
+      "container": "ghcr.io/genpat-it/chewbbaca-w-chewie-schemas:2.8.5--16b816c96d",
+      "file_path": "multi/multi_clustering__reportree_alleles"
+    },
+    {
+      "id": "multi_clustering__reportree_alleles",
+      "tool": "ubuntu",
+      "domain": "General",
+      "description": "ubuntu \u2014 process 'prepare_metadata'.",
+      "keywords": [
+        "ubuntu"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "params.containsKey",
+        "params.input",
+        "params.max_cpus",
+        "params.outdir",
+        "params.schema"
+      ],
+      "input_channels": [
+        "metadata"
+      ],
+      "output_channels": [
+        "metadata"
+      ],
+      "container": "ubuntu:20.04",
+      "file_path": "multi/multi_clustering__reportree_alleles"
+    },
+    {
+      "id": "multi_clustering__reportree_alleles",
+      "tool": "reportree",
+      "domain": "General",
+      "description": "reportree \u2014 process 'reportree_hc'.",
+      "keywords": [
+        "reportree"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "params.containsKey",
+        "params.input",
+        "params.max_cpus",
+        "params.outdir",
+        "params.schema"
+      ],
+      "input_channels": [
+        "profiles",
+        "metadata"
+      ],
+      "output_channels": [
+        "nwk_hc",
+        "metadata_hc"
+      ],
+      "container": "ghcr.io/genpat-it/reportree:2.4.1--088b6651b8",
+      "file_path": "multi/multi_clustering__reportree_alleles"
+    },
+    {
+      "id": "multi_clustering__reportree_alleles",
+      "tool": "python3",
+      "domain": "General",
+      "description": "python3 \u2014 process 'find_closest'.",
+      "keywords": [
+        "python3"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "params.containsKey",
+        "params.input",
+        "params.max_cpus",
+        "params.outdir",
+        "params.schema"
+      ],
+      "input_channels": [
+        "matrix"
+      ],
+      "output_channels": [],
+      "container": "ghcr.io/genpat-it/python3:3.10.1--29cf21c1f1",
+      "file_path": "multi/multi_clustering__reportree_alleles"
+    },
+    {
+      "id": "multi_clustering__reportree_alleles",
+      "tool": "augur",
+      "domain": "General",
+      "description": "augur \u2014 process 'augur'.",
+      "keywords": [
+        "augur"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "params.containsKey",
+        "params.input",
+        "params.max_cpus",
+        "params.outdir",
+        "params.schema"
+      ],
+      "input_channels": [
+        "nwk",
+        "metadata",
+        "geodata"
+      ],
+      "output_channels": [],
+      "container": "quay.io/biocontainers/augur:22.0.0--pyhdfd78af_0",
+      "file_path": "multi/multi_clustering__reportree_alleles"
+    },
+    {
+      "id": "multi_clustering__reportree_vcf",
+      "tool": "ubuntu",
+      "domain": "General",
+      "description": "ubuntu \u2014 process 'prepare_metadata'.",
+      "keywords": [
+        "ubuntu"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "params.max_cpus",
+        "params.outdir"
+      ],
+      "input_channels": [
+        "metadata"
+      ],
+      "output_channels": [
+        "metadata"
+      ],
+      "container": "ubuntu:20.04",
+      "file_path": "multi/multi_clustering__reportree_vcf"
+    },
+    {
+      "id": "multi_clustering__reportree_vcf",
+      "tool": "reportree",
+      "domain": "General",
+      "description": "reportree \u2014 process 'reportree_hc'.",
+      "keywords": [
+        "reportree"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "params.max_cpus",
+        "params.outdir"
+      ],
+      "input_channels": [
+        "vcfs",
+        "metadata"
+      ],
+      "output_channels": [
+        "nwk_hc",
+        "metadata_hc"
+      ],
+      "container": "ghcr.io/genpat-it/reportree:2.4.1--088b6651b8",
+      "file_path": "multi/multi_clustering__reportree_vcf"
+    },
+    {
+      "id": "multi_clustering__reportree_vcf",
+      "tool": "python3",
+      "domain": "General",
+      "description": "python3 \u2014 process 'find_closest'.",
+      "keywords": [
+        "python3"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "params.max_cpus",
+        "params.outdir"
+      ],
+      "input_channels": [
+        "matrix"
+      ],
+      "output_channels": [],
+      "container": "ghcr.io/genpat-it/python3:3.10.1--29cf21c1f1",
+      "file_path": "multi/multi_clustering__reportree_vcf"
+    },
+    {
+      "id": "multi_clustering__reportree_vcf",
+      "tool": "augur",
+      "domain": "General",
+      "description": "augur \u2014 process 'augur'.",
+      "keywords": [
+        "augur"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "params.max_cpus",
+        "params.outdir"
+      ],
+      "input_channels": [
+        "nwk",
+        "metadata",
+        "geodata"
+      ],
+      "output_channels": [],
+      "container": "quay.io/biocontainers/augur:22.0.0--pyhdfd78af_0",
+      "file_path": "multi/multi_clustering__reportree_vcf"
+    },
+    {
+      "id": "multi_clustering__vcf2mst",
+      "tool": "vcf2mst",
+      "domain": "General",
+      "description": "vcf2mst \u2014 process 'vcf2mst'.",
+      "keywords": [
+        "vcf2mst"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "params.outdir"
+      ],
+      "input_channels": [
+        "vcf_files"
+      ],
+      "output_channels": [
+        "matrix"
+      ],
+      "container": "ghcr.io/genpat-it/vcf2mst:0.0.1--d587d682e9",
+      "file_path": "multi/multi_clustering__vcf2mst"
+    },
+    {
+      "id": "multi_clustering__vcf2mst",
+      "tool": "cgmlst-dists",
+      "domain": "General",
+      "description": "cgmlst-dists \u2014 process 'dists'.",
+      "keywords": [
+        "cgmlst-dists"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "params.outdir"
+      ],
+      "input_channels": [
+        "matrix"
+      ],
+      "output_channels": [],
+      "container": "quay.io/biocontainers/cgmlst-dists:0.4.0--hec16e2b_2",
+      "file_path": "multi/multi_clustering__vcf2mst"
+    },
+    {
+      "id": "multi_pangenome__panaroo",
+      "tool": "panaroo",
+      "domain": "General",
+      "description": "panaroo \u2014 process 'panaroo'.",
+      "keywords": [
+        "panaroo"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "params.outdir"
+      ],
+      "input_channels": [
+        "gffs"
+      ],
+      "output_channels": [
+        "name",
+        "name"
+      ],
+      "container": "quay.io/biocontainers/panaroo:1.3.3--pyhdfd78af_0",
+      "file_path": "multi/multi_pangenome__panaroo"
+    },
+    {
+      "id": "step_0SQ_rawreads__fastq",
+      "tool": "fastqc",
+      "domain": "General",
+      "description": "fastqc \u2014 process 'fastqc'.",
+      "keywords": [
+        "fastqc"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "params.max_cpus",
+        "params.outdir"
+      ],
+      "input_channels": [
+        "riscd_input",
+        "reads"
+      ],
+      "output_channels": [
+        "name",
+        "name",
+        "name",
+        "name"
+      ],
+      "container": "biocontainers/fastqc:v0.11.5_cv4",
+      "file_path": "steps/step_0SQ_rawreads__fastq"
+    },
+    {
+      "id": "step_0SQ_rawreads__fastq",
+      "tool": "nanoplot",
+      "domain": "General",
+      "description": "nanoplot \u2014 process 'nanoplot'.",
+      "keywords": [
+        "nanoplot"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "params.max_cpus",
+        "params.outdir"
+      ],
+      "input_channels": [
+        "riscd_input",
+        "reads"
+      ],
+      "output_channels": [
+        "stats",
+        "name",
+        "name"
+      ],
+      "container": "quay.io/biocontainers/nanoplot:1.41.3--pyhdfd78af_0",
+      "file_path": "steps/step_0SQ_rawreads__fastq"
+    },
+    {
+      "id": "step_0SQ_rawreads__fastq",
+      "tool": "biopython",
+      "domain": "General",
+      "description": "biopython \u2014 process 'nanopore_reads_check'.",
+      "keywords": [
+        "biopython"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "params.max_cpus",
+        "params.outdir"
+      ],
+      "input_channels": [
+        "riscd_input",
+        "stats"
+      ],
+      "output_channels": [],
+      "container": "quay.io/biocontainers/biopython:1.78",
+      "file_path": "steps/step_0SQ_rawreads__fastq"
+    },
+    {
+      "id": "step_1PP_downsampling__bbnorm",
+      "tool": "bbmap",
+      "domain": "General",
+      "description": "bbmap \u2014 process 'bbnorm'.",
+      "keywords": [
+        "bbmap"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "getSingleInput()",
+        "params.max_memory",
+        "params.outdir"
+      ],
+      "input_channels": [
+        "riscd_input",
+        "reads",
+        "k",
+        "target"
+      ],
+      "output_channels": [],
+      "container": "quay.io/biocontainers/bbmap:39.01--h5c4e2a8_0",
+      "file_path": "steps/step_1PP_downsampling__bbnorm"
+    },
+    {
+      "id": "step_1PP_filtering__bowtie",
+      "tool": "bowtie2",
+      "domain": "General",
+      "description": "bowtie2 \u2014 process 'bowtie2'.",
+      "keywords": [
+        "bowtie2"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "getSingleInput()",
+        "params.outdir"
+      ],
+      "input_channels": [
+        "riscd_input",
+        "reads",
+        "riscd_ref",
+        "reference",
+        "referencePath"
+      ],
+      "output_channels": [
+        "sam"
+      ],
+      "container": "ghcr.io/genpat-it/bowtie2:2.1.0--37ad014737",
+      "file_path": "steps/step_1PP_filtering__bowtie"
+    },
+    {
+      "id": "step_1PP_filtering__bowtie",
+      "tool": "samtools",
+      "domain": "General",
+      "description": "samtools \u2014 process 'samtools'.",
+      "keywords": [
+        "samtools"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "getSingleInput()",
+        "params.outdir"
+      ],
+      "input_channels": [
+        "sam",
+        "reference",
+        "referencePath",
+        "type"
+      ],
+      "output_channels": [
+        "filtered"
+      ],
+      "container": "quay.io/biocontainers/samtools:0.1.19--hf89b575_7",
+      "file_path": "steps/step_1PP_filtering__bowtie"
+    },
+    {
+      "id": "step_1PP_filtering__krakentools",
+      "tool": "krakentools",
+      "domain": "General",
+      "description": "krakentools \u2014 process 'krakentools'.",
+      "keywords": [
+        "krakentools"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "params.outdir"
+      ],
+      "input_channels": [
+        "riscd_input",
+        "krakenResults",
+        "riscd_input2",
+        "reads",
+        "taxaid",
+        "include_parents",
+        "include_children"
+      ],
+      "output_channels": [],
+      "container": "quay.io/biocontainers/krakentools:1.2--pyh5e36f6f_0",
+      "file_path": "steps/step_1PP_filtering__krakentools"
+    },
+    {
+      "id": "step_1PP_filtering__minimap2",
+      "tool": "minimap2",
+      "domain": "General",
+      "description": "minimap2 \u2014 process 'minimap2'.",
+      "keywords": [
+        "minimap2"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "getSingleInput()",
+        "params.max_cpus",
+        "params.outdir"
+      ],
+      "input_channels": [
+        "riscd_input",
+        "reads",
+        "riscd_ref",
+        "reference",
+        "referencePath"
+      ],
+      "output_channels": [
+        "sam"
+      ],
+      "container": "quay.io/biocontainers/minimap2:2.26--he4a0461_1",
+      "file_path": "steps/step_1PP_filtering__minimap2"
+    },
+    {
+      "id": "step_1PP_filtering__minimap2",
+      "tool": "samtools",
+      "domain": "General",
+      "description": "samtools \u2014 process 'samtools'.",
+      "keywords": [
+        "samtools"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "getSingleInput()",
+        "params.max_cpus",
+        "params.outdir"
+      ],
+      "input_channels": [
+        "sam",
+        "reference",
+        "referencePath"
+      ],
+      "output_channels": [
+        "filtered"
+      ],
+      "container": "quay.io/biocontainers/samtools:1.10--h9402c20_1",
+      "file_path": "steps/step_1PP_filtering__minimap2"
+    },
+    {
+      "id": "step_1PP_generated__fasta2fastq",
+      "tool": "biopython",
+      "domain": "General",
+      "description": "biopython \u2014 process 'fasta2fastq'.",
+      "keywords": [
+        "biopython"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "getSingleInput()",
+        "params.outdir"
+      ],
+      "input_channels": [
+        "riscd_input",
+        "assembly"
+      ],
+      "output_channels": [
+        "name",
+        "name"
+      ],
+      "container": "quay.io/biocontainers/biopython:1.78",
+      "file_path": "steps/step_1PP_generated__fasta2fastq"
+    },
+    {
+      "id": "step_1PP_hostdepl__bowtie",
+      "tool": "bowtie2",
+      "domain": "General",
+      "description": "bowtie2 \u2014 process 'bowtie2'.",
+      "keywords": [
+        "bowtie2"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "getHostUnkeyed()",
+        "getSingleInput()",
+        "params.outdir"
+      ],
+      "input_channels": [
+        "riscd_input",
+        "reads",
+        "host"
+      ],
+      "output_channels": [
+        "sam"
+      ],
+      "container": "ghcr.io/genpat-it/bowtie2:2.1.0--37ad014737",
+      "file_path": "steps/step_1PP_hostdepl__bowtie"
+    },
+    {
+      "id": "step_1PP_hostdepl__bowtie",
+      "tool": "samtools",
+      "domain": "General",
+      "description": "samtools \u2014 process 'samtools'.",
+      "keywords": [
+        "samtools"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "getHostUnkeyed()",
+        "getSingleInput()",
+        "params.outdir"
+      ],
+      "input_channels": [
+        "sam",
+        "host",
+        "type"
+      ],
+      "output_channels": [
+        "depleted"
+      ],
+      "container": "quay.io/biocontainers/samtools:0.1.19--hf89b575_7",
+      "file_path": "steps/step_1PP_hostdepl__bowtie"
+    },
+    {
+      "id": "step_1PP_hostdepl__minimap2",
+      "tool": "minimap2",
+      "domain": "General",
+      "description": "minimap2 \u2014 process 'minimap2'.",
+      "keywords": [
+        "minimap2"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "getSingleInput()",
+        "params.max_cpus",
+        "params.outdir"
+      ],
+      "input_channels": [
+        "riscd_input",
+        "reads",
+        "_",
+        "host_code",
+        "host"
+      ],
+      "output_channels": [
+        "sam"
+      ],
+      "container": "quay.io/biocontainers/minimap2:2.26--he4a0461_1",
+      "file_path": "steps/step_1PP_hostdepl__minimap2"
+    },
+    {
+      "id": "step_1PP_hostdepl__minimap2",
+      "tool": "samtools",
+      "domain": "General",
+      "description": "samtools \u2014 process 'samtools'.",
+      "keywords": [
+        "samtools"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "getSingleInput()",
+        "params.max_cpus",
+        "params.outdir"
+      ],
+      "input_channels": [
+        "sam",
+        "host_code"
+      ],
+      "output_channels": [
+        "depleted"
+      ],
+      "container": "quay.io/biocontainers/samtools:1.10--h9402c20_1",
+      "file_path": "steps/step_1PP_hostdepl__minimap2"
+    },
+    {
+      "id": "step_1PP_trimming__chopper",
+      "tool": "chopper",
+      "domain": "General",
+      "description": "chopper \u2014 process 'chopper'.",
+      "keywords": [
+        "chopper"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "params.max_cpus",
+        "params.outdir"
+      ],
+      "input_channels": [
+        "riscd_input",
+        "reads"
+      ],
+      "output_channels": [
+        "trimmed"
+      ],
+      "container": "quay.io/biocontainers/chopper:0.7.0--hdcf5f25_0",
+      "file_path": "steps/step_1PP_trimming__chopper"
+    },
+    {
+      "id": "step_1PP_trimming__chopper",
+      "tool": "nanoplot",
+      "domain": "General",
+      "description": "nanoplot \u2014 process 'nanoplot'.",
+      "keywords": [
+        "nanoplot"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "params.max_cpus",
+        "params.outdir"
+      ],
+      "input_channels": [
+        "riscd_input",
+        "reads"
+      ],
+      "output_channels": [],
+      "container": "quay.io/biocontainers/nanoplot:1.41.3--pyhdfd78af_0",
+      "file_path": "steps/step_1PP_trimming__chopper"
+    },
+    {
+      "id": "step_1PP_trimming__fastp",
+      "tool": "fastp",
+      "domain": "General",
+      "description": "fastp \u2014 process 'fastp'.",
+      "keywords": [
+        "fastp"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "params.outdir"
+      ],
+      "input_channels": [
+        "riscd_input",
+        "reads"
+      ],
+      "output_channels": [
+        "trimmed"
+      ],
+      "container": "ghcr.io/genpat-it/fastp:0.23.1--e4ac3df4c5",
+      "file_path": "steps/step_1PP_trimming__fastp"
+    },
+    {
+      "id": "step_1PP_trimming__fastp",
+      "tool": "biopython",
+      "domain": "General",
+      "description": "biopython \u2014 process 'sample_reads_check'.",
+      "keywords": [
+        "biopython"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "params.outdir"
+      ],
+      "input_channels": [
+        "_",
+        "reads",
+        "_",
+        "trimmed"
+      ],
+      "output_channels": [],
+      "container": "quay.io/biocontainers/biopython:1.78",
+      "file_path": "steps/step_1PP_trimming__fastp"
+    },
+    {
+      "id": "step_1PP_trimming__fastp",
+      "tool": "fastqc",
+      "domain": "General",
+      "description": "fastqc \u2014 process 'fastqc'.",
+      "keywords": [
+        "fastqc"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "params.outdir"
+      ],
+      "input_channels": [
+        "riscd_input",
+        "reads"
+      ],
+      "output_channels": [
+        "name",
+        "name"
+      ],
+      "container": "biocontainers/fastqc:v0.11.5_cv4",
+      "file_path": "steps/step_1PP_trimming__fastp"
+    },
+    {
+      "id": "step_1PP_trimming__trimmomatic",
+      "tool": "trimmomatic",
+      "domain": "General",
+      "description": "trimmomatic \u2014 process 'trimmomatic'.",
+      "keywords": [
+        "trimmomatic"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "params.outdir"
+      ],
+      "input_channels": [
+        "riscd_input",
+        "reads"
+      ],
+      "output_channels": [
+        "fastq"
+      ],
+      "container": "quay.io/biocontainers/trimmomatic:0.36--6",
+      "file_path": "steps/step_1PP_trimming__trimmomatic"
+    },
+    {
+      "id": "step_1PP_trimming__trimmomatic",
+      "tool": "biopython",
+      "domain": "General",
+      "description": "biopython \u2014 process 'sample_reads_check'.",
+      "keywords": [
+        "biopython"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "params.outdir"
+      ],
+      "input_channels": [
+        "_",
+        "reads",
+        "_",
+        "trimmed"
+      ],
+      "output_channels": [],
+      "container": "quay.io/biocontainers/biopython:1.78",
+      "file_path": "steps/step_1PP_trimming__trimmomatic"
+    },
+    {
+      "id": "step_1PP_trimming__trimmomatic",
+      "tool": "fastqc",
+      "domain": "General",
+      "description": "fastqc \u2014 process 'fastqc'.",
+      "keywords": [
+        "fastqc"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "params.outdir"
+      ],
+      "input_channels": [
+        "riscd_input",
+        "reads"
+      ],
+      "output_channels": [
+        "name",
+        "name"
+      ],
+      "container": "biocontainers/fastqc:v0.11.5_cv4",
+      "file_path": "steps/step_1PP_trimming__trimmomatic"
+    },
+    {
+      "id": "step_2AS_denovo__flye",
+      "tool": "quast",
+      "domain": "General",
+      "description": "quast \u2014 process 'quast'.",
+      "keywords": [
+        "quast"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "getSingleInput()",
+        "params.max_cpus",
+        "params.outdir"
+      ],
+      "input_channels": [
+        "_",
+        "assembly"
+      ],
+      "output_channels": [],
+      "container": "quay.io/biocontainers/quast:4.4--boost1.61_1",
+      "file_path": "steps/step_2AS_denovo__flye"
+    },
+    {
+      "id": "step_2AS_denovo__plasmidspades",
+      "tool": "spades",
+      "domain": "General",
+      "description": "spades \u2014 process 'plasmid_spades'.",
+      "keywords": [
+        "spades"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "getSingleInput()",
+        "params.max_cpus",
+        "params.outdir"
+      ],
+      "input_channels": [
+        "riscd_input",
+        "reads"
+      ],
+      "output_channels": [
+        "scaffolds"
+      ],
+      "container": "quay.io/biocontainers/spades:3.11.1--py27_zlib1.2.8_0",
+      "file_path": "steps/step_2AS_denovo__plasmidspades"
+    },
+    {
+      "id": "step_2AS_denovo__plasmidspades",
+      "tool": "python3",
+      "domain": "General",
+      "description": "python3 \u2014 process 'assembly_filter'.",
+      "keywords": [
+        "python3"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "getSingleInput()",
+        "params.max_cpus",
+        "params.outdir"
+      ],
+      "input_channels": [
+        "scaffolds"
+      ],
+      "output_channels": [
+        "fasta"
+      ],
+      "container": "ghcr.io/genpat-it/python3:3.10.1--29cf21c1f1",
+      "file_path": "steps/step_2AS_denovo__plasmidspades"
+    },
+    {
+      "id": "step_2AS_denovo__plasmidspades",
+      "tool": "quast",
+      "domain": "General",
+      "description": "quast \u2014 process 'quast'.",
+      "keywords": [
+        "quast"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "getSingleInput()",
+        "params.max_cpus",
+        "params.outdir"
+      ],
+      "input_channels": [
+        "_",
+        "l200"
+      ],
+      "output_channels": [],
+      "container": "quay.io/biocontainers/quast:4.4--boost1.61_1",
+      "file_path": "steps/step_2AS_denovo__plasmidspades"
+    },
+    {
+      "id": "step_2AS_denovo__shovill",
+      "tool": "shovill",
+      "domain": "General",
+      "description": "shovill \u2014 process 'shovill'.",
+      "keywords": [
+        "shovill"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "getSingleInput()",
+        "params.max_cpus",
+        "params.outdir",
+        "params.skip_checkm"
+      ],
+      "input_channels": [
+        "riscd_input",
+        "reads"
+      ],
+      "output_channels": [
+        "assembly"
+      ],
+      "container": "ghcr.io/genpat-it/shovill:1.1.0--d84470570e",
+      "file_path": "steps/step_2AS_denovo__shovill"
+    },
+    {
+      "id": "step_2AS_denovo__shovill",
+      "tool": "shovill-se",
+      "domain": "General",
+      "description": "shovill-se \u2014 process 'shovill_se'.",
+      "keywords": [
+        "shovill-se"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "getSingleInput()",
+        "params.max_cpus",
+        "params.outdir",
+        "params.skip_checkm"
+      ],
+      "input_channels": [
+        "riscd_input",
+        "reads"
+      ],
+      "output_channels": [
+        "assembly"
+      ],
+      "container": "ghcr.io/genpat-it/shovill-se:1.1.1--ba51ea69e5",
+      "file_path": "steps/step_2AS_denovo__shovill"
+    },
+    {
+      "id": "step_2AS_denovo__shovill",
+      "tool": "quast",
+      "domain": "General",
+      "description": "quast \u2014 process 'quast'.",
+      "keywords": [
+        "quast"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "getSingleInput()",
+        "params.max_cpus",
+        "params.outdir",
+        "params.skip_checkm"
+      ],
+      "input_channels": [
+        "_",
+        "assembly"
+      ],
+      "output_channels": [],
+      "container": "quay.io/biocontainers/quast:4.4--boost1.61_1",
+      "file_path": "steps/step_2AS_denovo__shovill"
+    },
+    {
+      "id": "step_2AS_denovo__shovill",
+      "tool": "checkm-genome",
+      "domain": "General",
+      "description": "checkm-genome \u2014 process 'checkm'.",
+      "keywords": [
+        "checkm-genome"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "getSingleInput()",
+        "params.max_cpus",
+        "params.outdir",
+        "params.skip_checkm"
+      ],
+      "input_channels": [
+        "_",
+        "assembly"
+      ],
+      "output_channels": [
+        "s",
+        "s"
+      ],
+      "container": "quay.io/biocontainers/checkm-genome:1.1.3--py_1",
+      "file_path": "steps/step_2AS_denovo__shovill"
+    },
+    {
+      "id": "step_2AS_denovo__spades",
+      "tool": "spades",
+      "domain": "General",
+      "description": "spades \u2014 process 'denovo'.",
+      "keywords": [
+        "spades"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "getSingleInput()",
+        "params.max_cpus",
+        "params.outdir"
+      ],
+      "input_channels": [
+        "riscd_input",
+        "reads"
+      ],
+      "output_channels": [
+        "scaffolds"
+      ],
+      "container": "quay.io/biocontainers/spades:3.11.1--py27_zlib1.2.8_0",
+      "file_path": "steps/step_2AS_denovo__spades"
+    },
+    {
+      "id": "step_2AS_denovo__spades",
+      "tool": "python3",
+      "domain": "General",
+      "description": "python3 \u2014 process 'assembly_filter'.",
+      "keywords": [
+        "python3"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "getSingleInput()",
+        "params.max_cpus",
+        "params.outdir"
+      ],
+      "input_channels": [
+        "scaffolds"
+      ],
+      "output_channels": [
+        "fasta"
+      ],
+      "container": "ghcr.io/genpat-it/python3:3.10.1--29cf21c1f1",
+      "file_path": "steps/step_2AS_denovo__spades"
+    },
+    {
+      "id": "step_2AS_denovo__spades",
+      "tool": "quast",
+      "domain": "General",
+      "description": "quast \u2014 process 'quast'.",
+      "keywords": [
+        "quast"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "getSingleInput()",
+        "params.max_cpus",
+        "params.outdir"
+      ],
+      "input_channels": [
+        "_",
+        "l200"
+      ],
+      "output_channels": [],
+      "container": "quay.io/biocontainers/quast:4.4--boost1.61_1",
+      "file_path": "steps/step_2AS_denovo__spades"
+    },
+    {
+      "id": "step_2AS_denovo__unicycler",
+      "tool": "unicycler",
+      "domain": "General",
+      "description": "unicycler \u2014 process 'unicycler'.",
+      "keywords": [
+        "unicycler"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "getSingleInput()",
+        "params.outdir"
+      ],
+      "input_channels": [
+        "riscd_input",
+        "reads"
+      ],
+      "output_channels": [
+        "scaffolds"
+      ],
+      "container": "docker.io/biocontainers/unicycler:v0.4.7dfsg-2-deb_cv1",
+      "file_path": "steps/step_2AS_denovo__unicycler"
+    },
+    {
+      "id": "step_2AS_denovo__unicycler",
+      "tool": "python3",
+      "domain": "General",
+      "description": "python3 \u2014 process 'assembly_filter'.",
+      "keywords": [
+        "python3"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "getSingleInput()",
+        "params.outdir"
+      ],
+      "input_channels": [
+        "scaffolds"
+      ],
+      "output_channels": [
+        "fasta"
+      ],
+      "container": "ghcr.io/genpat-it/python3:3.10.1--29cf21c1f1",
+      "file_path": "steps/step_2AS_denovo__unicycler"
+    },
+    {
+      "id": "step_2AS_denovo__unicycler",
+      "tool": "quast",
+      "domain": "General",
+      "description": "quast \u2014 process 'quast'.",
+      "keywords": [
+        "quast"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "getSingleInput()",
+        "params.outdir"
+      ],
+      "input_channels": [
+        "_",
+        "l200"
+      ],
+      "output_channels": [],
+      "container": "quay.io/biocontainers/quast:4.4--boost1.61_1",
+      "file_path": "steps/step_2AS_denovo__unicycler"
+    },
+    {
+      "id": "step_2AS_filtering__seqio",
+      "tool": "python3",
+      "domain": "General",
+      "description": "python3 \u2014 process 'filter'.",
+      "keywords": [
+        "python3"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "params.outdir"
+      ],
+      "input_channels": [
+        "riscd_input",
+        "calls",
+        "riscd_input2",
+        "l200",
+        "riscd_ref",
+        "reference",
+        "referencePath"
+      ],
+      "output_channels": [],
+      "container": "ghcr.io/genpat-it/python3:3.10.1--29cf21c1f1",
+      "file_path": "steps/step_2AS_filtering__seqio"
+    },
+    {
+      "id": "step_2AS_hybrid__unicycler",
+      "tool": "unicycler",
+      "domain": "General",
+      "description": "unicycler \u2014 process 'unicycler'.",
+      "keywords": [
+        "unicycler"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "getSingleInput()",
+        "params.max_cpus",
+        "params.outdir"
+      ],
+      "input_channels": [
+        "riscd_input",
+        "short_reads",
+        "riscd_input2",
+        "long_reads"
+      ],
+      "output_channels": [
+        "scaffolds"
+      ],
+      "container": "quay.io/biocontainers/unicycler:0.5.0--py38h5cf8b27_3",
+      "file_path": "steps/step_2AS_hybrid__unicycler"
+    },
+    {
+      "id": "step_2AS_hybrid__unicycler",
+      "tool": "quast",
+      "domain": "General",
+      "description": "quast \u2014 process 'quast'.",
+      "keywords": [
+        "quast"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "getSingleInput()",
+        "params.max_cpus",
+        "params.outdir"
+      ],
+      "input_channels": [
+        "l200"
+      ],
+      "output_channels": [],
+      "container": "quay.io/biocontainers/quast:4.4--boost1.61_1",
+      "file_path": "steps/step_2AS_hybrid__unicycler"
+    },
+    {
+      "id": "step_2AS_mapping__bowtie",
+      "tool": "bowtie2",
+      "domain": "General",
+      "description": "bowtie2 \u2014 process 'bowtie2'.",
+      "keywords": [
+        "bowtie2"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "getSingleInput()",
+        "params.outdir"
+      ],
+      "input_channels": [
+        "riscd_input",
+        "reads",
+        "riscd_ref",
+        "reference",
+        "referencePath"
+      ],
+      "output_channels": [
+        "sam"
+      ],
+      "container": "ghcr.io/genpat-it/bowtie2:2.1.0--37ad014737",
+      "file_path": "steps/step_2AS_mapping__bowtie"
+    },
+    {
+      "id": "step_2AS_mapping__bowtie",
+      "tool": "samtools",
+      "domain": "General",
+      "description": "samtools \u2014 process 'samtools'.",
+      "keywords": [
+        "samtools"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "getSingleInput()",
+        "params.outdir"
+      ],
+      "input_channels": [
+        "sam",
+        "reference",
+        "referencePath"
+      ],
+      "output_channels": [
+        "bam",
+        "fq"
+      ],
+      "container": "ghcr.io/genpat-it/samtools:0.1.19--f3869562fe",
+      "file_path": "steps/step_2AS_mapping__bowtie"
+    },
+    {
+      "id": "step_2AS_mapping__bowtie",
+      "tool": "python3",
+      "domain": "General",
+      "description": "python3 \u2014 process 'seqio'.",
+      "keywords": [
+        "python3"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "getSingleInput()",
+        "params.outdir"
+      ],
+      "input_channels": [
+        "fq",
+        "reference"
+      ],
+      "output_channels": [
+        "consensus"
+      ],
+      "container": "ghcr.io/genpat-it/python3:3.10.1--29cf21c1f1",
+      "file_path": "steps/step_2AS_mapping__bowtie"
+    },
+    {
+      "id": "step_2AS_mapping__bowtie",
+      "tool": "samtools",
+      "domain": "General",
+      "description": "samtools \u2014 process 'samtools_depth'.",
+      "keywords": [
+        "samtools"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "getSingleInput()",
+        "params.outdir"
+      ],
+      "input_channels": [
+        "bam",
+        "reference",
+        "method"
+      ],
+      "output_channels": [
+        "coverage"
+      ],
+      "container": "quay.io/biocontainers/samtools:1.10--h9402c20_1",
+      "file_path": "steps/step_2AS_mapping__bowtie"
+    },
+    {
+      "id": "step_2AS_mapping__bowtie",
+      "tool": "samtools",
+      "domain": "General",
+      "description": "samtools \u2014 process 'coverage_minmax'.",
+      "keywords": [
+        "samtools"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "getSingleInput()",
+        "params.outdir"
+      ],
+      "input_channels": [
+        "bam",
+        "reference",
+        "method"
+      ],
+      "output_channels": [
+        "coverage_depth",
+        "coverage_extra"
+      ],
+      "container": "ghcr.io/genpat-it/samtools:0.1.19--f3869562fe",
+      "file_path": "steps/step_2AS_mapping__bowtie"
+    },
+    {
+      "id": "step_2AS_mapping__bowtie",
+      "tool": "python3",
+      "domain": "General",
+      "description": "python3 \u2014 process 'coverage_check'.",
+      "keywords": [
+        "python3"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "getSingleInput()",
+        "params.outdir"
+      ],
+      "input_channels": [
+        "coverage",
+        "consensus",
+        "reference",
+        "context"
+      ],
+      "output_channels": [
+        "coverage_basic"
+      ],
+      "container": "ghcr.io/genpat-it/python3:3.10.1--29cf21c1f1",
+      "file_path": "steps/step_2AS_mapping__bowtie"
+    },
+    {
+      "id": "step_2AS_mapping__bowtie",
+      "tool": "ubuntu",
+      "domain": "General",
+      "description": "ubuntu \u2014 process 'coverage_check_group'.",
+      "keywords": [
+        "ubuntu"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "getSingleInput()",
+        "params.outdir"
+      ],
+      "input_channels": [
+        "key",
+        "files",
+        "method"
+      ],
+      "output_channels": [],
+      "container": "ubuntu:20.04",
+      "file_path": "steps/step_2AS_mapping__bowtie"
+    },
+    {
+      "id": "step_2AS_mapping__bowtie",
+      "tool": "ubuntu",
+      "domain": "General",
+      "description": "ubuntu \u2014 process 'coverage_check_merge'.",
+      "keywords": [
+        "ubuntu"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "getSingleInput()",
+        "params.outdir"
+      ],
+      "input_channels": [
+        "key",
+        "reference",
+        "covMinMax",
+        "covBasic",
+        "method"
+      ],
+      "output_channels": [
+        "coverage_merged"
+      ],
+      "container": "ubuntu:20.04",
+      "file_path": "steps/step_2AS_mapping__bowtie"
+    },
+    {
+      "id": "step_2AS_mapping__bowtie",
+      "tool": "matplotlib",
+      "domain": "General",
+      "description": "matplotlib \u2014 process 'coverage_plot'.",
+      "keywords": [
+        "matplotlib"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "getSingleInput()",
+        "params.outdir"
+      ],
+      "input_channels": [
+        "coverage_depth",
+        "reference"
+      ],
+      "output_channels": [],
+      "container": "quay.io/biocontainers/matplotlib:3.1.2",
+      "file_path": "steps/step_2AS_mapping__bowtie"
+    },
+    {
+      "id": "step_2AS_mapping__ivar",
+      "tool": "snippy",
+      "domain": "General",
+      "description": "snippy \u2014 process 'snippy'.",
+      "keywords": [
+        "snippy"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "getSingleInput()",
+        "params.outdir",
+        "params.step_2AS_mapping__ivar___q"
+      ],
+      "input_channels": [
+        "riscd_input",
+        "reads",
+        "riscd_ref",
+        "reference",
+        "reference_path"
+      ],
+      "output_channels": [
+        "bam",
+        "name",
+        "name",
+        "name",
+        "name"
+      ],
+      "container": "ghcr.io/genpat-it/snippy:4.5.1--7be4a1c45a",
+      "file_path": "steps/step_2AS_mapping__ivar"
+    },
+    {
+      "id": "step_2AS_mapping__ivar",
+      "tool": "samtools",
+      "domain": "General",
+      "description": "samtools \u2014 process 'samtools_pileup'.",
+      "keywords": [
+        "samtools"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "getSingleInput()",
+        "params.outdir",
+        "params.step_2AS_mapping__ivar___q"
+      ],
+      "input_channels": [
+        "bam",
+        "reference"
+      ],
+      "output_channels": [
+        "pileup"
+      ],
+      "container": "quay.io/biocontainers/samtools:1.10--h2e538c0_3",
+      "file_path": "steps/step_2AS_mapping__ivar"
+    },
+    {
+      "id": "step_2AS_mapping__ivar",
+      "tool": "ivar",
+      "domain": "General",
+      "description": "ivar \u2014 process 'ivar'.",
+      "keywords": [
+        "ivar"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "getSingleInput()",
+        "params.outdir",
+        "params.step_2AS_mapping__ivar___q"
+      ],
+      "input_channels": [
+        "pileup",
+        "reference"
+      ],
+      "output_channels": [
+        "consensus"
+      ],
+      "container": "quay.io/biocontainers/ivar:1.3--h089eab3_1",
+      "file_path": "steps/step_2AS_mapping__ivar"
+    },
+    {
+      "id": "step_2AS_mapping__ivar",
+      "tool": "samtools",
+      "domain": "General",
+      "description": "samtools \u2014 process 'samtools_depth'.",
+      "keywords": [
+        "samtools"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "getSingleInput()",
+        "params.outdir",
+        "params.step_2AS_mapping__ivar___q"
+      ],
+      "input_channels": [
+        "bam",
+        "reference",
+        "method"
+      ],
+      "output_channels": [
+        "coverage"
+      ],
+      "container": "quay.io/biocontainers/samtools:1.10--h9402c20_1",
+      "file_path": "steps/step_2AS_mapping__ivar"
+    },
+    {
+      "id": "step_2AS_mapping__ivar",
+      "tool": "samtools",
+      "domain": "General",
+      "description": "samtools \u2014 process 'coverage_minmax'.",
+      "keywords": [
+        "samtools"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "getSingleInput()",
+        "params.outdir",
+        "params.step_2AS_mapping__ivar___q"
+      ],
+      "input_channels": [
+        "bam",
+        "reference",
+        "method"
+      ],
+      "output_channels": [
+        "coverage_depth",
+        "coverage_extra"
+      ],
+      "container": "ghcr.io/genpat-it/samtools:0.1.19--f3869562fe",
+      "file_path": "steps/step_2AS_mapping__ivar"
+    },
+    {
+      "id": "step_2AS_mapping__ivar",
+      "tool": "python3",
+      "domain": "General",
+      "description": "python3 \u2014 process 'coverage_check'.",
+      "keywords": [
+        "python3"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "getSingleInput()",
+        "params.outdir",
+        "params.step_2AS_mapping__ivar___q"
+      ],
+      "input_channels": [
+        "coverage",
+        "consensus",
+        "reference",
+        "context"
+      ],
+      "output_channels": [
+        "coverage_basic"
+      ],
+      "container": "ghcr.io/genpat-it/python3:3.10.1--29cf21c1f1",
+      "file_path": "steps/step_2AS_mapping__ivar"
+    },
+    {
+      "id": "step_2AS_mapping__ivar",
+      "tool": "ubuntu",
+      "domain": "General",
+      "description": "ubuntu \u2014 process 'coverage_check_group'.",
+      "keywords": [
+        "ubuntu"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "getSingleInput()",
+        "params.outdir",
+        "params.step_2AS_mapping__ivar___q"
+      ],
+      "input_channels": [
+        "key",
+        "files",
+        "method"
+      ],
+      "output_channels": [],
+      "container": "ubuntu:20.04",
+      "file_path": "steps/step_2AS_mapping__ivar"
+    },
+    {
+      "id": "step_2AS_mapping__ivar",
+      "tool": "ubuntu",
+      "domain": "General",
+      "description": "ubuntu \u2014 process 'coverage_check_merge'.",
+      "keywords": [
+        "ubuntu"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "getSingleInput()",
+        "params.outdir",
+        "params.step_2AS_mapping__ivar___q"
+      ],
+      "input_channels": [
+        "key",
+        "reference",
+        "covMinMax",
+        "covBasic",
+        "method"
+      ],
+      "output_channels": [
+        "coverage_merged"
+      ],
+      "container": "ubuntu:20.04",
+      "file_path": "steps/step_2AS_mapping__ivar"
+    },
+    {
+      "id": "step_2AS_mapping__ivar",
+      "tool": "matplotlib",
+      "domain": "General",
+      "description": "matplotlib \u2014 process 'coverage_plot'.",
+      "keywords": [
+        "matplotlib"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "getSingleInput()",
+        "params.outdir",
+        "params.step_2AS_mapping__ivar___q"
+      ],
+      "input_channels": [
+        "coverage_depth",
+        "reference"
+      ],
+      "output_channels": [],
+      "container": "quay.io/biocontainers/matplotlib:3.1.2",
+      "file_path": "steps/step_2AS_mapping__ivar"
+    },
+    {
+      "id": "step_2AS_mapping__ivar",
+      "tool": "ubuntu",
+      "domain": "General",
+      "description": "ubuntu \u2014 process 'aggregate'.",
+      "keywords": [
+        "ubuntu"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "getSingleInput()",
+        "params.outdir",
+        "params.step_2AS_mapping__ivar___q"
+      ],
+      "input_channels": [
+        "riscd_input",
+        "references",
+        "consensus"
+      ],
+      "output_channels": [],
+      "container": "ubuntu:20.04",
+      "file_path": "steps/step_2AS_mapping__ivar"
+    },
+    {
+      "id": "step_2AS_mapping__medaka",
+      "tool": "medaka",
+      "domain": "General",
+      "description": "medaka \u2014 process 'medaka'.",
+      "keywords": [
+        "medaka"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "getSingleInput()",
+        "params.max_cpus",
+        "params.outdir"
+      ],
+      "input_channels": [
+        "riscd_input",
+        "reads",
+        "riscd_ref",
+        "reference",
+        "reference_path"
+      ],
+      "output_channels": [
+        "consensus",
+        "bam"
+      ],
+      "container": "quay.io/biocontainers/medaka:1.8.0--py38hdaa7744_0",
+      "file_path": "steps/step_2AS_mapping__medaka"
+    },
+    {
+      "id": "step_2AS_mapping__medaka",
+      "tool": "samtools",
+      "domain": "General",
+      "description": "samtools \u2014 process 'coverage_minmax'.",
+      "keywords": [
+        "samtools"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "getSingleInput()",
+        "params.max_cpus",
+        "params.outdir"
+      ],
+      "input_channels": [
+        "bam",
+        "reference",
+        "method"
+      ],
+      "output_channels": [
+        "coverage_depth",
+        "coverage_extra"
+      ],
+      "container": "ghcr.io/genpat-it/samtools:0.1.19--f3869562fe",
+      "file_path": "steps/step_2AS_mapping__medaka"
+    },
+    {
+      "id": "step_2AS_mapping__medaka",
+      "tool": "samtools",
+      "domain": "General",
+      "description": "samtools \u2014 process 'samtools_depth'.",
+      "keywords": [
+        "samtools"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "getSingleInput()",
+        "params.max_cpus",
+        "params.outdir"
+      ],
+      "input_channels": [
+        "bam",
+        "reference",
+        "method"
+      ],
+      "output_channels": [
+        "coverage"
+      ],
+      "container": "quay.io/biocontainers/samtools:1.10--h9402c20_1",
+      "file_path": "steps/step_2AS_mapping__medaka"
+    },
+    {
+      "id": "step_2AS_mapping__medaka",
+      "tool": "python3",
+      "domain": "General",
+      "description": "python3 \u2014 process 'coverage_check'.",
+      "keywords": [
+        "python3"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "getSingleInput()",
+        "params.max_cpus",
+        "params.outdir"
+      ],
+      "input_channels": [
+        "coverage",
+        "consensus",
+        "reference",
+        "context"
+      ],
+      "output_channels": [
+        "coverage_basic"
+      ],
+      "container": "ghcr.io/genpat-it/python3:3.10.1--29cf21c1f1",
+      "file_path": "steps/step_2AS_mapping__medaka"
+    },
+    {
+      "id": "step_2AS_mapping__medaka",
+      "tool": "ubuntu",
+      "domain": "General",
+      "description": "ubuntu \u2014 process 'coverage_check_merge'.",
+      "keywords": [
+        "ubuntu"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "getSingleInput()",
+        "params.max_cpus",
+        "params.outdir"
+      ],
+      "input_channels": [
+        "key",
+        "reference",
+        "covMinMax",
+        "covBasic",
+        "method"
+      ],
+      "output_channels": [
+        "coverage_merged"
+      ],
+      "container": "ubuntu:20.04",
+      "file_path": "steps/step_2AS_mapping__medaka"
+    },
+    {
+      "id": "step_2AS_mapping__medaka",
+      "tool": "matplotlib",
+      "domain": "General",
+      "description": "matplotlib \u2014 process 'coverage_plot'.",
+      "keywords": [
+        "matplotlib"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "getSingleInput()",
+        "params.max_cpus",
+        "params.outdir"
+      ],
+      "input_channels": [
+        "coverage_depth",
+        "reference"
+      ],
+      "output_channels": [],
+      "container": "quay.io/biocontainers/matplotlib:3.1.2",
+      "file_path": "steps/step_2AS_mapping__medaka"
+    },
+    {
+      "id": "step_2AS_mapping__minimap2",
+      "tool": "minimap2",
+      "domain": "General",
+      "description": "minimap2 \u2014 process 'minimap2'.",
+      "keywords": [
+        "minimap2"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "getSingleInput()",
+        "params.max_cpus",
+        "params.outdir"
+      ],
+      "input_channels": [
+        "riscd_input",
+        "reads",
+        "riscd_ref",
+        "reference",
+        "referencePath"
+      ],
+      "output_channels": [
+        "sam"
+      ],
+      "container": "quay.io/biocontainers/minimap2:2.26--he4a0461_1",
+      "file_path": "steps/step_2AS_mapping__minimap2"
+    },
+    {
+      "id": "step_2AS_mapping__minimap2",
+      "tool": "samtools",
+      "domain": "General",
+      "description": "samtools \u2014 process 'samtools'.",
+      "keywords": [
+        "samtools"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "getSingleInput()",
+        "params.max_cpus",
+        "params.outdir"
+      ],
+      "input_channels": [
+        "sam",
+        "reference",
+        "referencePath"
+      ],
+      "output_channels": [
+        "bam",
+        "fq"
+      ],
+      "container": "ghcr.io/genpat-it/samtools:0.1.19--f3869562fe",
+      "file_path": "steps/step_2AS_mapping__minimap2"
+    },
+    {
+      "id": "step_2AS_mapping__minimap2",
+      "tool": "python3",
+      "domain": "General",
+      "description": "python3 \u2014 process 'seqio'.",
+      "keywords": [
+        "python3"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "getSingleInput()",
+        "params.max_cpus",
+        "params.outdir"
+      ],
+      "input_channels": [
+        "fq",
+        "reference"
+      ],
+      "output_channels": [
+        "consensus"
+      ],
+      "container": "ghcr.io/genpat-it/python3:3.10.1--29cf21c1f1",
+      "file_path": "steps/step_2AS_mapping__minimap2"
+    },
+    {
+      "id": "step_2AS_mapping__minimap2",
+      "tool": "samtools",
+      "domain": "General",
+      "description": "samtools \u2014 process 'coverage_minmax'.",
+      "keywords": [
+        "samtools"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "getSingleInput()",
+        "params.max_cpus",
+        "params.outdir"
+      ],
+      "input_channels": [
+        "bam",
+        "reference",
+        "method"
+      ],
+      "output_channels": [
+        "coverage_depth",
+        "coverage_extra"
+      ],
+      "container": "ghcr.io/genpat-it/samtools:0.1.19--f3869562fe",
+      "file_path": "steps/step_2AS_mapping__minimap2"
+    },
+    {
+      "id": "step_2AS_mapping__minimap2",
+      "tool": "samtools",
+      "domain": "General",
+      "description": "samtools \u2014 process 'samtools_depth'.",
+      "keywords": [
+        "samtools"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "getSingleInput()",
+        "params.max_cpus",
+        "params.outdir"
+      ],
+      "input_channels": [
+        "bam",
+        "reference",
+        "method"
+      ],
+      "output_channels": [
+        "coverage"
+      ],
+      "container": "quay.io/biocontainers/samtools:1.10--h9402c20_1",
+      "file_path": "steps/step_2AS_mapping__minimap2"
+    },
+    {
+      "id": "step_2AS_mapping__minimap2",
+      "tool": "python3",
+      "domain": "General",
+      "description": "python3 \u2014 process 'coverage_check'.",
+      "keywords": [
+        "python3"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "getSingleInput()",
+        "params.max_cpus",
+        "params.outdir"
+      ],
+      "input_channels": [
+        "coverage",
+        "consensus",
+        "reference",
+        "context"
+      ],
+      "output_channels": [
+        "coverage_basic"
+      ],
+      "container": "ghcr.io/genpat-it/python3:3.10.1--29cf21c1f1",
+      "file_path": "steps/step_2AS_mapping__minimap2"
+    },
+    {
+      "id": "step_2AS_mapping__minimap2",
+      "tool": "ubuntu",
+      "domain": "General",
+      "description": "ubuntu \u2014 process 'coverage_check_merge'.",
+      "keywords": [
+        "ubuntu"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "getSingleInput()",
+        "params.max_cpus",
+        "params.outdir"
+      ],
+      "input_channels": [
+        "key",
+        "reference",
+        "covMinMax",
+        "covBasic",
+        "method"
+      ],
+      "output_channels": [
+        "coverage_merged"
+      ],
+      "container": "ubuntu:20.04",
+      "file_path": "steps/step_2AS_mapping__minimap2"
+    },
+    {
+      "id": "step_2AS_mapping__minimap2",
+      "tool": "matplotlib",
+      "domain": "General",
+      "description": "matplotlib \u2014 process 'coverage_plot'.",
+      "keywords": [
+        "matplotlib"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "getSingleInput()",
+        "params.max_cpus",
+        "params.outdir"
+      ],
+      "input_channels": [
+        "coverage_depth",
+        "reference"
+      ],
+      "output_channels": [],
+      "container": "quay.io/biocontainers/matplotlib:3.1.2",
+      "file_path": "steps/step_2AS_mapping__minimap2"
+    },
+    {
+      "id": "step_2AS_mapping__snippy",
+      "tool": "snippy",
+      "domain": "General",
+      "description": "snippy \u2014 process 'snippy'.",
+      "keywords": [
+        "snippy"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "getSingleInput()",
+        "params.outdir"
+      ],
+      "input_channels": [
+        "riscd_input",
+        "reads",
+        "riscd_ref",
+        "reference",
+        "reference_path"
+      ],
+      "output_channels": [
+        "name",
+        "name"
+      ],
+      "container": "ghcr.io/genpat-it/snippy:4.5.1--7be4a1c45a",
+      "file_path": "steps/step_2AS_mapping__snippy"
+    },
+    {
+      "id": "step_2MG_denovo__metaspades",
+      "tool": "spades",
+      "domain": "General",
+      "description": "spades \u2014 process 'metaspades'.",
+      "keywords": [
+        "spades"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "getSingleInput()",
+        "params.max_cpus",
+        "params.outdir"
+      ],
+      "input_channels": [
+        "riscd_input",
+        "reads"
+      ],
+      "output_channels": [
+        "scaffolds"
+      ],
+      "container": "quay.io/biocontainers/spades:3.11.1--py27_zlib1.2.8_0",
+      "file_path": "steps/step_2MG_denovo__metaspades"
+    },
+    {
+      "id": "step_2MG_denovo__metaspades",
+      "tool": "python3",
+      "domain": "General",
+      "description": "python3 \u2014 process 'assembly_filter'.",
+      "keywords": [
+        "python3"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "getSingleInput()",
+        "params.max_cpus",
+        "params.outdir"
+      ],
+      "input_channels": [
+        "scaffolds"
+      ],
+      "output_channels": [
+        "fasta"
+      ],
+      "container": "ghcr.io/genpat-it/python3:3.10.1--29cf21c1f1",
+      "file_path": "steps/step_2MG_denovo__metaspades"
+    },
+    {
+      "id": "step_2MG_denovo__metaspades",
+      "tool": "quast",
+      "domain": "General",
+      "description": "quast \u2014 process 'quast'.",
+      "keywords": [
+        "quast"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "getSingleInput()",
+        "params.max_cpus",
+        "params.outdir"
+      ],
+      "input_channels": [
+        "_",
+        "l200"
+      ],
+      "output_channels": [],
+      "container": "quay.io/biocontainers/quast:4.4--boost1.61_1",
+      "file_path": "steps/step_2MG_denovo__metaspades"
+    },
+    {
+      "id": "step_3TX_class__centrifuge",
+      "tool": "centrifuge",
+      "domain": "General",
+      "description": "centrifuge \u2014 process 'centrifuge'.",
+      "keywords": [
+        "centrifuge"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "getSingleInput()",
+        "params.max_cpus",
+        "params.outdir"
+      ],
+      "input_channels": [
+        "riscd_input",
+        "reads"
+      ],
+      "output_channels": [
+        "reports"
+      ],
+      "container": "quay.io/biocontainers/centrifuge:1.0.4_beta--h9a82719_6",
+      "file_path": "steps/step_3TX_class__centrifuge"
+    },
+    {
+      "id": "step_3TX_class__centrifuge",
+      "tool": "biopython",
+      "domain": "General",
+      "description": "biopython \u2014 process 'import_taxa'.",
+      "keywords": [
+        "biopython"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "getSingleInput()",
+        "params.max_cpus",
+        "params.outdir"
+      ],
+      "input_channels": [
+        "genus",
+        "species",
+        "krakenLike"
+      ],
+      "output_channels": [],
+      "container": "quay.io/biocontainers/biopython:1.78",
+      "file_path": "steps/step_3TX_class__centrifuge"
+    },
+    {
+      "id": "step_3TX_class__confindr",
+      "tool": "confindr",
+      "domain": "General",
+      "description": "confindr \u2014 process 'confindr'.",
+      "keywords": [
+        "confindr"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "getSingleInput()",
+        "params.outdir"
+      ],
+      "input_channels": [
+        "riscd_input",
+        "reads",
+        "genus_species"
+      ],
+      "output_channels": [],
+      "container": "ghcr.io/genpat-it/confindr:0.7.4--8fe19dd246",
+      "file_path": "steps/step_3TX_class__confindr"
+    },
+    {
+      "id": "step_3TX_class__kraken",
+      "tool": "kraken",
+      "domain": "General",
+      "description": "kraken \u2014 process 'kraken'.",
+      "keywords": [
+        "kraken"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "getSingleInput()",
+        "params.outdir"
+      ],
+      "input_channels": [
+        "riscd_input",
+        "reads"
+      ],
+      "output_channels": [
+        "report"
+      ],
+      "container": "quay.io/biocontainers/kraken:1.0--pl5.22.0_0",
+      "file_path": "steps/step_3TX_class__kraken"
+    },
+    {
+      "id": "step_3TX_class__kraken",
+      "tool": "bracken",
+      "domain": "General",
+      "description": "bracken \u2014 process 'braken'.",
+      "keywords": [
+        "bracken"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "getSingleInput()",
+        "params.outdir"
+      ],
+      "input_channels": [
+        "kraken_report"
+      ],
+      "output_channels": [
+        "genus_report"
+      ],
+      "container": "quay.io/biocontainers/bracken:1.0.0--1",
+      "file_path": "steps/step_3TX_class__kraken"
+    },
+    {
+      "id": "step_3TX_class__kraken2",
+      "tool": "kraken2",
+      "domain": "General",
+      "description": "kraken2 \u2014 process 'kraken2'.",
+      "keywords": [
+        "kraken2"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "getSingleInput()",
+        "params.outdir"
+      ],
+      "input_channels": [
+        "riscd_input",
+        "reads"
+      ],
+      "output_channels": [
+        "report"
+      ],
+      "container": "quay.io/biocontainers/kraken2:2.1.2--pl5262h7d875b9_0",
+      "file_path": "steps/step_3TX_class__kraken2"
+    },
+    {
+      "id": "step_3TX_class__kraken2",
+      "tool": "bracken",
+      "domain": "General",
+      "description": "bracken \u2014 process 'braken2'.",
+      "keywords": [
+        "bracken"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "getSingleInput()",
+        "params.outdir"
+      ],
+      "input_channels": [
+        "kraken_report"
+      ],
+      "output_channels": [
+        "genus_report"
+      ],
+      "container": "quay.io/biocontainers/bracken:2.6.1--py39h7cff6ad_2",
+      "file_path": "steps/step_3TX_class__kraken2"
+    },
+    {
+      "id": "step_3TX_species__kmerfinder",
+      "tool": "python",
+      "domain": "General",
+      "description": "python \u2014 process 'kmerfinder'.",
+      "keywords": [
+        "python"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "params.outdir"
+      ],
+      "input_channels": [
+        "riscd_input",
+        "scaffolds200"
+      ],
+      "output_channels": [
+        "check",
+        "name",
+        "name",
+        "name",
+        "name"
+      ],
+      "container": "python:2.7.8",
+      "file_path": "steps/step_3TX_species__kmerfinder"
+    },
+    {
+      "id": "step_3TX_species__mash",
+      "tool": "mash",
+      "domain": "General",
+      "description": "mash \u2014 process 'mash'.",
+      "keywords": [
+        "mash"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "params.max_cpus",
+        "params.outdir"
+      ],
+      "input_channels": [
+        "riscd_input",
+        "reads"
+      ],
+      "output_channels": [],
+      "container": "ghcr.io/genpat-it/mash:2.3--debdd7eb23",
+      "file_path": "steps/step_3TX_species__mash"
+    },
+    {
+      "id": "step_3TX_species__vdabricate",
+      "tool": "abricate",
+      "domain": "General",
+      "description": "abricate \u2014 process 'abricate'.",
+      "keywords": [
+        "abricate"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "params.outdir"
+      ],
+      "input_channels": [
+        "riscd_input",
+        "scaffolds",
+        "database"
+      ],
+      "output_channels": [
+        "calls"
+      ],
+      "container": "quay.io/biocontainers/abricate:0.9.8--h1341992_0",
+      "file_path": "steps/step_3TX_species__vdabricate"
+    },
+    {
+      "id": "step_4AN_AMR__abricate",
+      "tool": "abricate",
+      "domain": "General",
+      "description": "abricate \u2014 process 'abricate'.",
+      "keywords": [
+        "abricate"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "params.outdir"
+      ],
+      "input_channels": [
+        "riscd_input",
+        "assembly"
+      ],
+      "output_channels": [],
+      "container": "staphb/abricate:1.0.0",
+      "file_path": "steps/step_4AN_AMR__abricate"
+    },
+    {
+      "id": "step_4AN_AMR__filtering",
+      "tool": "python3",
+      "domain": "General",
+      "description": "python3 \u2014 process 'abricate_filtering'.",
+      "keywords": [
+        "python3"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "getSingleInput()",
+        "params.outdir"
+      ],
+      "input_channels": [
+        "riscd_input",
+        "calls",
+        "coverage",
+        "identity"
+      ],
+      "output_channels": [],
+      "container": "ghcr.io/genpat-it/python3:3.10.1--29cf21c1f1",
+      "file_path": "steps/step_4AN_AMR__filtering"
+    },
+    {
+      "id": "step_4AN_AMR__resfinder",
+      "tool": "resfinder",
+      "domain": "General",
+      "description": "resfinder \u2014 process 'resfinder'.",
+      "keywords": [
+        "resfinder"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "getSingleInput()",
+        "params.outdir"
+      ],
+      "input_channels": [
+        "riscd_input",
+        "reads",
+        "genus_species"
+      ],
+      "output_channels": [],
+      "container": "ghcr.io/genpat-it/resfinder:4.1.5--858219071c",
+      "file_path": "steps/step_4AN_AMR__resfinder"
+    },
+    {
+      "id": "step_4AN_AMR__staramr",
+      "tool": "staramr",
+      "domain": "General",
+      "description": "staramr \u2014 process 'staramr'.",
+      "keywords": [
+        "staramr"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "getSingleInput()",
+        "params.outdir"
+      ],
+      "input_channels": [
+        "riscd_input",
+        "assembly",
+        "genus_species"
+      ],
+      "output_channels": [
+        "name",
+        "name",
+        "name",
+        "name",
+        "name",
+        "name"
+      ],
+      "container": "ghcr.io/genpat-it/staramr:0.9.1--8fe6b5a239",
+      "file_path": "steps/step_4AN_AMR__staramr"
+    },
+    {
+      "id": "step_4AN_genes__prokka",
+      "tool": "prokka",
+      "domain": "General",
+      "description": "prokka \u2014 process 'prokka'.",
+      "keywords": [
+        "prokka"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "getKingdom()",
+        "params.outdir"
+      ],
+      "input_channels": [
+        "riscd_input",
+        "scaffolds200",
+        "kingdom",
+        "riscd_ref",
+        "reference",
+        "gb"
+      ],
+      "output_channels": [
+        "name",
+        "name",
+        "name",
+        "name"
+      ],
+      "container": "quay.io/biocontainers/prokka:1.14.5--pl526_1",
+      "file_path": "steps/step_4AN_genes__prokka"
+    },
+    {
+      "id": "step_4TY_MLST__mlst",
+      "tool": "mlst-w-db",
+      "domain": "General",
+      "description": "mlst-w-db \u2014 process 'mlst'.",
+      "keywords": [
+        "mlst-w-db"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "params.max_cpus",
+        "params.outdir"
+      ],
+      "input_channels": [
+        "riscd_input",
+        "assembly"
+      ],
+      "output_channels": [],
+      "container": "ghcr.io/genpat-it/mlst-w-db:2.23.0--60b8b2e3dd_231219.124455",
+      "file_path": "steps/step_4TY_MLST__mlst"
+    },
+    {
+      "id": "step_4TY_cgMLST__chewbbaca",
+      "tool": "chewbbaca-w-chewie-schemas",
+      "domain": "General",
+      "description": "chewbbaca-w-chewie-schemas \u2014 process 'chewbbaca'.",
+      "keywords": [
+        "chewbbaca-w-chewie-schemas"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "params.max_cpus",
+        "params.outdir"
+      ],
+      "input_channels": [
+        "riscd_input",
+        "assembly",
+        "genus_species",
+        "schema"
+      ],
+      "output_channels": [
+        "stats",
+        "alleles",
+        "alleles_with_new"
+      ],
+      "container": "ghcr.io/genpat-it/chewbbaca-w-chewie-schemas:2.8.5--16b816c96d",
+      "file_path": "steps/step_4TY_cgMLST__chewbbaca"
+    },
+    {
+      "id": "step_4TY_cgMLST__chewbbaca",
+      "tool": "python",
+      "domain": "General",
+      "description": "python \u2014 process 'chewbbaca_check'.",
+      "keywords": [
+        "python"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "params.max_cpus",
+        "params.outdir"
+      ],
+      "input_channels": [
+        "chewbbacaStats"
+      ],
+      "output_channels": [
+        "check"
+      ],
+      "container": "quay.io/biocontainers/python:3.9",
+      "file_path": "steps/step_4TY_cgMLST__chewbbaca"
+    },
+    {
+      "id": "step_4TY_cgMLST__chewbbaca",
+      "tool": "hashing",
+      "domain": "General",
+      "description": "hashing \u2014 process 'hashing'.",
+      "keywords": [
+        "hashing"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "params.max_cpus",
+        "params.outdir"
+      ],
+      "input_channels": [
+        "chewbbaca_result",
+        "schema_path"
+      ],
+      "output_channels": [],
+      "container": "ghcr.io/genpat-it/hashing:1.0--29180a232f",
+      "file_path": "steps/step_4TY_cgMLST__chewbbaca"
+    },
+    {
+      "id": "step_4TY_flaA__flaA",
+      "tool": "mlst-w-db",
+      "domain": "General",
+      "description": "mlst-w-db \u2014 process 'mlst_flaa'.",
+      "keywords": [
+        "mlst-w-db"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "params.max_cpus",
+        "params.outdir"
+      ],
+      "input_channels": [
+        "riscd_input",
+        "scaffolds200",
+        "genus_species"
+      ],
+      "output_channels": [],
+      "container": "ghcr.io/genpat-it/mlst-w-db:2.23.0--60b8b2e3dd_231219.124455",
+      "file_path": "steps/step_4TY_flaA__flaA"
+    },
+    {
+      "id": "step_4TY_lineage__pangolin",
+      "tool": "pangolin",
+      "domain": "General",
+      "description": "pangolin \u2014 process 'pangolin'.",
+      "keywords": [
+        "pangolin"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "params.outdir"
+      ],
+      "input_channels": [
+        "riscd_input",
+        "consensus"
+      ],
+      "output_channels": [],
+      "container": "ghcr.io/genpat-it/pangolin:v4.3.1-v0.1.12-v0.3.17-v1.21",
+      "file_path": "steps/step_4TY_lineage__pangolin"
+    },
+    {
+      "id": "step_4TY_lineage__westnile",
+      "tool": "snippy",
+      "domain": "General",
+      "description": "snippy \u2014 process 'snippy'.",
+      "keywords": [
+        "snippy"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "getSingleInput()",
+        "params.assets_dir",
+        "params.outdir",
+        "params.step_4TY_lineage__westnile___threshold"
+      ],
+      "input_channels": [
+        "riscd_input",
+        "reads",
+        "riscd_ref",
+        "reference",
+        "reference_path"
+      ],
+      "output_channels": [
+        "bam"
+      ],
+      "container": "ghcr.io/genpat-it/snippy:4.5.1--7be4a1c45a",
+      "file_path": "steps/step_4TY_lineage__westnile"
+    },
+    {
+      "id": "step_4TY_lineage__westnile",
+      "tool": "samtools",
+      "domain": "General",
+      "description": "samtools \u2014 process 'samtools_depth'.",
+      "keywords": [
+        "samtools"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "getSingleInput()",
+        "params.assets_dir",
+        "params.outdir",
+        "params.step_4TY_lineage__westnile___threshold"
+      ],
+      "input_channels": [
+        "riscd_input",
+        "reference",
+        "bam"
+      ],
+      "output_channels": [
+        "coverage"
+      ],
+      "container": "quay.io/biocontainers/samtools:1.10--h9402c20_1",
+      "file_path": "steps/step_4TY_lineage__westnile"
+    },
+    {
+      "id": "step_4TY_lineage__westnile",
+      "tool": "python3",
+      "domain": "General",
+      "description": "python3 \u2014 process 'lineage_selection'.",
+      "keywords": [
+        "python3"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "getSingleInput()",
+        "params.assets_dir",
+        "params.outdir",
+        "params.step_4TY_lineage__westnile___threshold"
+      ],
+      "input_channels": [
+        "riscd_input",
+        "covfile"
+      ],
+      "output_channels": [
+        "lineage"
+      ],
+      "container": "ghcr.io/genpat-it/python3:3.10.1--29cf21c1f1",
+      "file_path": "steps/step_4TY_lineage__westnile"
+    },
+    {
+      "id": "step_4TY_plasmid__mobsuite",
+      "tool": "mobsuite",
+      "domain": "General",
+      "description": "mobsuite \u2014 process 'mobsuite'.",
+      "keywords": [
+        "mobsuite"
+      ],
+      "use_cases": [],
+      "compatible_seq_types": [],
+      "variables_needed": [
+        "getSingleInput()",
+        "params.max_cpus",
+        "params.outdir"
+      ],
+      "input_channels": [
+        "riscd_input",
+        "assembly"
+      ],
+      "output_channels": [
+        "plasmids"
+      ],
+      "container": "ghcr.io/genpat-it/mobsuite:3.1.4--c2c728b1a2",
+      "file_path": "steps/step_4TY_plasmid__mobsuite"
+    }
+  ]
+}

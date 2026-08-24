@@ -92,9 +92,10 @@ except Exception:
 def retrieve_rag_context(user_query: Any, store: BaseStore, embed_code: Any=False) -> Any:  # noqa: C901
     """
     Retrieves context using a Hybrid Approach:
+      0. GraphRAG: Graph-guided pre-fill — expand matched components via data-flow edges
       1. Keyword & metadata matching across the component/template catalog
       2. FAISS semantic vector search for latent similarity
-    Both paths share a preprocessed, synonym-expanded token set.
+    Both keyword/FAISS paths share a preprocessed, synonym-expanded token set.
     """
     if not data_loader.vector_store:
         return "Vector Store not loaded."
@@ -109,6 +110,26 @@ def retrieve_rag_context(user_query: Any, store: BaseStore, embed_code: Any=Fals
 
     if not clean_query:
         return "Query too broad. Provide more details to search the catalog."
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # STAGE 0 — GRAPHRAG PRE-FILL
+    # Loads the deterministic AST tool graph and pre-populates adjacent
+    # components so the architect gets a connected subgraph, not isolated hits.
+    # ══════════════════════════════════════════════════════════════════════════
+    graph_adjacency: dict[str, list[dict]] = {}  # src_id → [{"target": str, "via": [...]}]
+    graph_reverse: dict[str, list[dict]] = {}    # tgt_id → [{"source": str, "via": [...]}]
+    try:
+        graph_item = store.get(("graph",), "adjacency")
+        if graph_item and graph_item.value:
+            for edge in graph_item.value.get("edges", []):
+                src = edge["source"]
+                tgt = edge["target"]
+                via = edge.get("via", [])
+                if edge.get("edge_type") == "data_flow":
+                    graph_adjacency.setdefault(src, []).append({"target": tgt, "via": via})
+                    graph_reverse.setdefault(tgt, []).append({"source": src, "via": via})
+    except Exception as e:
+        logger.warning(f"graph_rag_load_failed: {e}")
 
     # ══════════════════════════════════════════════════════════════════════════
     # STAGE 1 — DISCOVERY / SUGGESTION INTENT DETECTION
@@ -282,10 +303,37 @@ def retrieve_rag_context(user_query: Any, store: BaseStore, embed_code: Any=Fals
                 if comp_key not in found_ids:
                     _inject_component(comp_key, found_ids, context_blocks, store, embed_code)
 
+            # ── GRAPHRAG EXPANSION ───────────────────────────────────────────
+            # For every keyword-matched component, pull in its direct graph
+            # neighbours (upstream prerequisites + downstream consumers).
+            # This ensures the architect always sees a valid connected subgraph.
+            if graph_adjacency or graph_reverse:
+                graph_neighbors_to_inject = []
+                for comp_key in smart_comps:
+                    # Downstream: what this component feeds into
+                    for edge in graph_adjacency.get(comp_key, []):
+                        neighbor = edge["target"]
+                        if neighbor not in found_ids and neighbor not in graph_neighbors_to_inject:
+                            graph_neighbors_to_inject.append(neighbor)
+                    # Upstream: what feeds into this component
+                    for edge in graph_reverse.get(comp_key, []):
+                        neighbor = edge["source"]
+                        if neighbor not in found_ids and neighbor not in graph_neighbors_to_inject:
+                            graph_neighbors_to_inject.append(neighbor)
+
+                # Inject up to settings.RAG_MAX_KEYWORD_COMPONENTS neighbors (no code, metadata only)
+                max_graph_neighbors = getattr(settings, "RAG_MAX_GRAPH_NEIGHBORS", 4)
+                for neighbor_id in graph_neighbors_to_inject[:max_graph_neighbors]:
+                    if neighbor_id not in found_ids:
+                        _inject_component(neighbor_id, found_ids, context_blocks, store, embed_code=False)
+                if graph_neighbors_to_inject:
+                    logger.info("graphrag_expansion", injected=min(len(graph_neighbors_to_inject), max_graph_neighbors))
+
     except Exception as e:
         logger.error(f"--- [NODE] TOOL ERROR component search error: {e}")
 
     # ── Resource (Helper Function) Scan ────────────────────────────────────
+
     try:
         res_item = store.get(("resources",), "helper_functions")
         if res_item and isinstance(res_item.value, dict):

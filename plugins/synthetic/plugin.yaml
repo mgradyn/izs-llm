@@ -15,6 +15,7 @@ catalog:
 code_store: "code_store.jsonl"
 faiss_index: "faiss_index"
 chroma_index: "chroma_index"
+patterns_index: "patterns_index"
 
 # Benchmark data directory (relative to this plugin directory)
 benchmark_data: "benchmark_data"

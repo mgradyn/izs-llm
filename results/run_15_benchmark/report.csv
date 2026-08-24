@@ -1,0 +1,248 @@
+"id","id","category","prompt","syntax_valid","semantic_valid","error_category","error_detail","n_processes","expected_processes","matches_gt_steps","extra_steps","missing_steps","hallucinated_steps","included_steps","called_steps","ground_truth_steps","code_chars","code_lines","n_workflow_calls","turns","elapsed_s","llm_reply_excerpt","nextflow_code","ground_truth_code"
+"A01_mlst_listeria","A01_mlst_listeria","A01","I have a Listeria monocytogenes assembly and I want to run MLST typing on it.","N","N","no_code","http exception: HTTPConnectionPool(host='127.0.0.1', port=8765): Read timed out. (read timeout=180)","0","1","N","","step_4TY_MLST__mlst","","","","step_4TY_MLST__mlst","0","0","0","2","206.7","","","nextflow.enable.dsl=2
+
+include { getInput; optionalOrDefault; param } from '../functions/parameters.nf'
+include { step_4TY_MLST__mlst } from '../steps/step_4TY_MLST__mlst'
+workflow {
+    step_4TY_MLST__mlst(getInput())
+}
+"
+"A02_mlst_ecoli","A02_mlst_ecoli","A02","Run MLST typing on an Escherichia coli assembly.","Y","Y","none","","1","1","Y","","","","step_4TY_MLST__mlst","step_4TY_MLST__mlst","step_4TY_MLST__mlst","337","19","1","2","181.3","I have successfully generated and validated the Nextflow pipeline based on your approved plan.","nextflow.enable.dsl=2
+
+// --- IMPORTS ---
+
+include { getInput } from '../functions/parameters.nf'
+
+include { step_4TY_MLST__mlst } from '../steps/step_4TY_MLST__mlst'
+
+// --- GLOBALS ---
+
+// --- INLINE PROCESSES ---
+
+// --- SUB WORKFLOWS ---
+
+// --- ENTRYPOINT ---
+workflow {
+    assembly = getInput()
+    step_4TY_MLST__mlst(assembly)
+}","nextflow.enable.dsl=2
+
+include { getInput; optionalOrDefault; param } from '../functions/parameters.nf'
+include { step_4TY_MLST__mlst } from '../steps/step_4TY_MLST__mlst'
+workflow {
+    step_4TY_MLST__mlst(getInput())
+}
+"
+"A03_mlst_salmonella","A03_mlst_salmonella","A03","Classic MLST (PubMLST) on a Salmonella enterica assembly.","N","N","no_code","http exception: HTTPConnectionPool(host='127.0.0.1', port=8765): Read timed out. (read timeout=180)","0","1","N","","step_4TY_MLST__mlst","","","","step_4TY_MLST__mlst","0","0","0","2","239.5","","","nextflow.enable.dsl=2
+
+include { getInput; optionalOrDefault; param } from '../functions/parameters.nf'
+include { step_4TY_MLST__mlst } from '../steps/step_4TY_MLST__mlst'
+workflow {
+    step_4TY_MLST__mlst(getInput())
+}
+"
+"A04_cgmlst_listeria","A04_cgmlst_listeria","A04","cgMLST allelic profile for Listeria monocytogenes from a pre-existing assembly.","N","N","no_code","http exception: HTTPConnectionPool(host='127.0.0.1', port=8765): Read timed out. (read timeout=180)","0","3","N","","step_4TY_cgMLST__chewbbaca","","","","step_4TY_cgMLST__chewbbaca","0","0","0","2","297.8","","","nextflow.enable.dsl=2
+
+include { getInput; optionalOrDefault; param } from '../functions/parameters.nf'
+include { step_4TY_cgMLST__chewbbaca } from '../steps/step_4TY_cgMLST__chewbbaca'
+workflow {
+    step_4TY_cgMLST__chewbbaca(getInput(), param('genus_species'), optionalOrDefault('schema', ''))
+}
+"
+"A05_cgmlst_ecoli","A05_cgmlst_ecoli","A05","cgMLST allelic profile on an Escherichia coli assembly.","Y","N","missing_param","missing required param: step_3TX_species__kmerfinder__db","0","3","Y","","","","step_4TY_cgMLST__chewbbaca","step_4TY_cgMLST__chewbbaca","step_4TY_cgMLST__chewbbaca","506","23","1","2","170.8","I have successfully generated and validated the Nextflow pipeline based on your approved plan.","nextflow.enable.dsl=2
+
+// --- IMPORTS ---
+
+include { getBacterialReferencePath } from '../steps/step_3TX_species__kmerfinder'
+
+include { step_4TY_cgMLST__chewbbaca } from '../steps/step_4TY_cgMLST__chewbbaca'
+
+// --- GLOBALS ---
+
+def genus_species = 'Escherichia coli'
+
+def schema = 'ecoli'
+
+// --- INLINE PROCESSES ---
+
+// --- SUB WORKFLOWS ---
+
+// --- ENTRYPOINT ---
+workflow {
+    assembly = getBacterialReferencePath('Escherichia coli')
+    step_4TY_cgMLST__chewbbaca(assembly, genus_species, schema)
+}","nextflow.enable.dsl=2
+
+include { getInput; optionalOrDefault; param } from '../functions/parameters.nf'
+include { step_4TY_cgMLST__chewbbaca } from '../steps/step_4TY_cgMLST__chewbbaca'
+workflow {
+    step_4TY_cgMLST__chewbbaca(getInput(), param('genus_species'), optionalOrDefault('schema', ''))
+}
+"
+"A06_cgmlst_salmonella","A06_cgmlst_salmonella","A06","Generate cgMLST allelic profiles starting from a Salmonella enterica assembly.","N","N","arity_error","Workflow `step_4TY_cgMLST__chewbbaca` declares 3 input channels but 4 were given","0","3","Y","","","","step_4TY_cgMLST__chewbbaca","step_4TY_cgMLST__chewbbaca","step_4TY_cgMLST__chewbbaca","542","24","1","2","299.7","I have successfully generated and validated the Nextflow pipeline based on your approved plan.","nextflow.enable.dsl=2
+
+// --- IMPORTS ---
+
+include { getInput } from '../functions/parameters.nf'
+
+include { getExtraParams; step_4TY_cgMLST__chewbbaca } from '../steps/step_4TY_cgMLST__chewbbaca'
+
+// --- GLOBALS ---
+
+def genus_species = 'salmonella_enterica'
+
+def schema = 's_enterica_chewie_3255_210531'
+
+// --- INLINE PROCESSES ---
+
+// --- SUB WORKFLOWS ---
+
+// --- ENTRYPOINT ---
+workflow {
+    assembly = getInput()
+    extra_params = getExtraParams(schema)
+    step_4TY_cgMLST__chewbbaca(assembly, genus_species, schema, extra_params)
+}","nextflow.enable.dsl=2
+
+include { getInput; optionalOrDefault; param } from '../functions/parameters.nf'
+include { step_4TY_cgMLST__chewbbaca } from '../steps/step_4TY_cgMLST__chewbbaca'
+workflow {
+    step_4TY_cgMLST__chewbbaca(getInput(), param('genus_species'), optionalOrDefault('schema', ''))
+}
+"
+"A07_flaa_campylobacter","A07_flaa_campylobacter","A07","Run flaA typing on a Campylobacter assembly.","N","N","no_code","http exception: HTTPConnectionPool(host='127.0.0.1', port=8765): Read timed out. (read timeout=180)","0","1","N","","step_4TY_flaA__flaA","","","","step_4TY_flaA__flaA","0","0","0","2","199.5","","","nextflow.enable.dsl=2
+
+include { getInput; optionalOrDefault; param } from '../functions/parameters.nf'
+include { step_4TY_flaA__flaA } from '../steps/step_4TY_flaA__flaA'
+workflow {
+    step_4TY_flaA__flaA(getInput(), param('genus_species'))
+}
+"
+"A08_staramr_campylobacter","A08_staramr_campylobacter","A08","AMR profiling with staramr on a Campylobacter assembly.","Y","N","silent_no_op","No process placeholders appeared. when: clause filtered everything?","0","1","Y","","","","step_4AN_AMR__staramr","step_4AN_AMR__staramr","step_4AN_AMR__staramr","458","20","1","2","150.5","I have successfully generated and validated the Nextflow pipeline based on your approved plan.","nextflow.enable.dsl=2
+
+// --- IMPORTS ---
+
+include { getSingleInput } from '../functions/parameters.nf'
+
+include { getPointfinderParam; step_4AN_AMR__staramr } from '../steps/step_4AN_AMR__staramr'
+
+// --- GLOBALS ---
+
+// --- INLINE PROCESSES ---
+
+// --- SUB WORKFLOWS ---
+
+// --- ENTRYPOINT ---
+workflow {
+    assembly = getSingleInput('assembly')
+    genus_species = getPointfinderParam('genus_species')
+    step_4AN_AMR__staramr(assembly, genus_species)
+}","nextflow.enable.dsl=2
+
+include { getSingleInput; optionalOrDefault; param } from '../functions/parameters.nf'
+include { step_4AN_AMR__staramr } from '../steps/step_4AN_AMR__staramr'
+workflow {
+    step_4AN_AMR__staramr(getSingleInput(), param('genus_species'))
+}
+"
+"B01_spades_listeria","B01_spades_listeria","B01","De novo genome assembly with SPAdes from Illumina paired-end reads of Listeria monocytogenes.","N","N","no_code","http exception: HTTPConnectionPool(host='127.0.0.1', port=8765): Read timed out. (read timeout=180)","0","3","N","","step_2AS_denovo__spades","","","","step_2AS_denovo__spades","0","0","0","2","240.0","","","nextflow.enable.dsl=2
+
+include { getSingleInput; optionalOrDefault; param } from '../functions/parameters.nf'
+include { step_2AS_denovo__spades } from '../steps/step_2AS_denovo__spades'
+workflow {
+    step_2AS_denovo__spades(getSingleInput())
+}
+"
+"B02_shovill_ecoli","B02_shovill_ecoli","B02","Quick bacterial genome assembly with Shovill from Illumina reads (Escherichia coli).","Y","Y","none","","3","3","N","step_1PP_trimming__fastp","","","step_1PP_trimming__fastp, step_2AS_denovo__shovill","step_1PP_trimming__fastp, step_2AS_denovo__shovill","step_2AS_denovo__shovill","487","22","2","2","78.9","I have successfully generated and validated the Nextflow pipeline based on your approved plan.","nextflow.enable.dsl=2
+
+// --- IMPORTS ---
+
+include { getInput } from '../functions/parameters.nf'
+
+include { step_2AS_denovo__shovill } from '../steps/step_2AS_denovo__shovill'
+
+include { step_1PP_trimming__fastp } from '../steps/step_1PP_trimming__fastp'
+
+// --- GLOBALS ---
+
+// --- INLINE PROCESSES ---
+
+// --- SUB WORKFLOWS ---
+
+// --- ENTRYPOINT ---
+workflow {
+    rawreads = getInput()
+    trimmed = step_1PP_trimming__fastp(rawreads).trimmed
+    step_2AS_denovo__shovill(trimmed)
+}","nextflow.enable.dsl=2
+
+include { getSingleInput; optionalOrDefault; param } from '../functions/parameters.nf'
+include { step_2AS_denovo__shovill } from '../steps/step_2AS_denovo__shovill'
+workflow {
+    step_2AS_denovo__shovill(getSingleInput())
+}
+"
+"B03_unicycler_salmonella","B03_unicycler_salmonella","B03","Assemble a Salmonella enterica genome with Unicycler from Illumina paired-end reads.","N","N","no_code","http exception: HTTPConnectionPool(host='127.0.0.1', port=8765): Read timed out. (read timeout=180)","0","3","N","","step_2AS_denovo__unicycler","","","","step_2AS_denovo__unicycler","0","0","0","2","228.9","","","nextflow.enable.dsl=2
+
+include { getSingleInput; optionalOrDefault; param } from '../functions/parameters.nf'
+include { step_2AS_denovo__unicycler } from '../steps/step_2AS_denovo__unicycler'
+workflow {
+    step_2AS_denovo__unicycler(getSingleInput())
+}
+"
+"B04_plasmidspades","B04_plasmidspades","B04","I want to assemble plasmids only from Illumina paired-end reads using plasmidSPAdes.","N","N","no_code","http exception: HTTPConnectionPool(host='127.0.0.1', port=8765): Read timed out. (read timeout=180)","0","3","N","","step_2AS_denovo__plasmidspades","","","","step_2AS_denovo__plasmidspades","0","0","0","2","316.4","","","nextflow.enable.dsl=2
+
+include { getSingleInput; optionalOrDefault; param } from '../functions/parameters.nf'
+include { step_2AS_denovo__plasmidspades } from '../steps/step_2AS_denovo__plasmidspades'
+workflow {
+    step_2AS_denovo__plasmidspades(getSingleInput())
+}
+"
+"B05_metaspades","B05_metaspades","B05","Run metagenomic assembly with metaSPAdes on paired-end Illumina reads from an environmental sample.","N","N","no_code","http exception: HTTPConnectionPool(host='127.0.0.1', port=8765): Read timed out. (read timeout=180)","0","3","N","","step_2MG_denovo__metaspades","","","","step_2MG_denovo__metaspades","0","0","0","2","347.5","","","nextflow.enable.dsl=2
+
+include { getSingleInput; optionalOrDefault; param } from '../functions/parameters.nf'
+include { step_2MG_denovo__metaspades } from '../steps/step_2MG_denovo__metaspades'
+workflow {
+    step_2MG_denovo__metaspades(getSingleInput())
+}
+"
+"C01_kmerfinder","C01_kmerfinder","C01","Identify the species of an unknown bacterial isolate from Illumina paired FASTQ using KmerFinder.","Y","Y","none","","2","1","N","step_0SQ_rawreads__fastq, step_1PP_trimming__fastp","","","step_0SQ_rawreads__fastq, step_1PP_trimming__fastp, step_3TX_species__kmerfinder","step_0SQ_rawreads__fastq, step_1PP_trimming__fastp, step_3TX_species__kmerfinder","step_3TX_species__kmerfinder","653","25","3","2","171.8","I have successfully generated and validated the Nextflow pipeline based on your approved plan.","nextflow.enable.dsl=2
+
+// --- IMPORTS ---
+
+include { getInput } from '../functions/parameters.nf'
+
+include { step_0SQ_rawreads__fastq } from '../steps/step_0SQ_rawreads__fastq'
+
+include { step_3TX_species__kmerfinder } from '../steps/step_3TX_species__kmerfinder'
+
+include { step_1PP_trimming__fastp } from '../steps/step_1PP_trimming__fastp'
+
+// --- GLOBALS ---
+
+// --- INLINE PROCESSES ---
+
+// --- SUB WORKFLOWS ---
+
+// --- ENTRYPOINT ---
+workflow {
+    rawreads = getInput()
+    step_0SQ_rawreads__fastq(rawreads)
+    trimmed = step_1PP_trimming__fastp(rawreads).trimmed
+    assigned_species = step_3TX_species__kmerfinder(trimmed).assigned_species
+}","nextflow.enable.dsl=2
+
+include { getInput; optionalOrDefault; param } from '../functions/parameters.nf'
+include { step_3TX_species__kmerfinder } from '../steps/step_3TX_species__kmerfinder'
+workflow {
+    step_3TX_species__kmerfinder(getInput())
+}
+"
+"C02_mash","C02_mash","C02","Run Mash sketch-based species identification on paired-end Illumina reads.","N","N","no_code","http exception: HTTPConnectionPool(host='127.0.0.1', port=8765): Read timed out. (read timeout=180)","0","1","N","","step_3TX_species__mash","","","","step_3TX_species__mash","0","0","0","2","261.9","","","nextflow.enable.dsl=2
+
+include { getSingleInput; optionalOrDefault; param } from '../functions/parameters.nf'
+include { step_3TX_species__mash } from '../steps/step_3TX_species__mash'
+workflow {
+    step_3TX_species__mash(getSingleInput())
+}
+"

@@ -146,6 +146,16 @@ async def chat_with_agent(request: ChatRequest, graph: Any=Depends(get_graph)) -
 
         # Get the AI reply from the messages list safely
         messages = result.get("messages", [])
+        
+        import os
+        log_dir = os.environ.get("IZS_LOG_DIR")
+        if log_dir:
+            try:
+                from core.utils.trace_dumper import dump_trace
+                dump_trace(log_dir, request.session_id, messages)
+            except Exception as e:
+                logger.error("trace_dump_error", error=str(e))
+        
         ai_reply = "No response generated."
         
         if status == "APPROVED":

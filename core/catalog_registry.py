@@ -200,6 +200,32 @@ class CatalogRegistry:
 
 
 
+    def resolve_canonical_id(self, query: str) -> str | None:
+        """Resolve arbitrary shorthand, tool name, or alias to canonical component ID."""
+        if not query or not isinstance(query, str):
+            return None
+        q_raw = query.strip()
+        if q_raw in self._valid_components:
+            return q_raw
+        try:
+            from core.services.knowledge_graph import kg
+            if kg.is_built:
+                v = kg.project_vertex(q_raw)
+                if v:
+                    return v
+        except Exception:
+            pass
+        q_lower = q_raw.lower()
+        for comp in self._valid_components:
+            if comp.lower() == q_lower:
+                return comp
+            if comp.lower().endswith(f"__{q_lower}") or comp.lower().endswith(f"_{q_lower}"):
+                return comp
+        matches = difflib.get_close_matches(q_raw, list(self._valid_components), n=1, cutoff=0.7)
+        if matches:
+            return matches[0]
+        return None
+
     def component_exists(self, name: str) -> bool:
         """Check if a component exists in the registry."""
         return name in self._valid_components
@@ -228,17 +254,22 @@ class CatalogRegistry:
 _registry: CatalogRegistry | None = None
 
 
+import threading
+_registry_lock = threading.Lock()
+
 def get_registry() -> CatalogRegistry:
     """Get the global catalog registry. Initializes from active plugin if needed."""
     global _registry
     if _registry is None:
-        _registry = CatalogRegistry()
-        try:
-            from core.plugin_loader import get_active_plugin
-            plugin = get_active_plugin()
-            _registry.init_from_plugin(plugin)
-        except Exception as e:
-            logger.warning(f"--- [REGISTRY] Warning: Plugin-based init failed ({e}), using empty registry")
+        with _registry_lock:
+            if _registry is None:
+                _registry = CatalogRegistry()
+                try:
+                    from core.plugin_loader import get_active_plugin
+                    plugin = get_active_plugin()
+                    _registry.init_from_plugin(plugin)
+                except Exception as e:
+                    logger.warning(f"--- [REGISTRY] Warning: Plugin-based init failed ({e}), using empty registry")
     return _registry
 
 

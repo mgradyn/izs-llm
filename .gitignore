@@ -37,3 +37,8 @@ downloads/
 implementation_details_paper_publishing/
 scratch/
 bmc_bioinformatics_strategy.md
+nf_framework/
+.nextflow/
+.reference_project
+
+graphify-out

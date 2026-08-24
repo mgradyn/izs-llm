@@ -42,6 +42,7 @@ class PluginConfig:
         self.code_store_path = (self.plugin_dir / config.get("code_store")) if config.get("code_store") else None
         self.faiss_index_path = (self.plugin_dir / config.get("faiss_index")) if config.get("faiss_index") else None
         self.chroma_index_path = (self.plugin_dir / config.get("chroma_index")) if config.get("chroma_index") else None
+        self.patterns_index_path = (self.plugin_dir / config.get("patterns_index")) if config.get("patterns_index") else None
 
         # Modules directory (for framework validation)
         modules_dir = config.get("modules_dir")
@@ -139,6 +140,11 @@ class PluginConfig:
     def search_keywords(self) -> list[str]:
         """Domain-specific keywords that boost search ranking."""
         return self._rag_config.get("search_keywords", [])
+
+    @property
+    def query_synonyms(self) -> dict[str, list[str]]:
+        """Dynamic synonyms mapping for Graph normalization (e.g. 'assembly': ['contigs', 'spades'])."""
+        return self._rag_config.get("query_synonyms", {})
 
     @property
     def void_tool_exceptions(self) -> list[dict[str, str]]:

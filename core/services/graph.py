@@ -5,6 +5,8 @@ from langchain_core.messages import ToolMessage as LCToolMessage
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, StateGraph
 from langgraph.prebuilt import ToolNode
+
+from langgraph.store.base import BaseStore
 from langgraph.store.memory import InMemoryStore
 
 from core.config import settings
@@ -166,6 +168,138 @@ def compact_memory_node(state: GraphState) -> Any:  # noqa: C901
         return updates
     return {}
 
+def graph_rag_node(state: GraphState, store: BaseStore) -> Any:
+    """Queries the Structural Knowledge Graph and injects a deterministic topological blueprint
+    into the context before the Consultant LLM reasoning begins.
+    """
+    messages = state.get("messages", [])
+    if not messages:
+        return {}
+
+    # Extract user query
+    user_query = ""
+    for msg in reversed(messages):
+        if isinstance(msg, HumanMessage):
+            user_query = str(msg.content)
+            break
+        elif isinstance(msg, tuple) and len(msg) == 2 and msg[0] == "user":
+            user_query = str(msg[1])
+            break
+        elif getattr(msg, "type", None) == "human":
+            user_query = str(msg.content)
+            break
+            
+    if not user_query:
+        return {}
+
+    from core.services.knowledge_graph import kg
+    from core.services.query_normalizer import normalize_query
+
+    # Ensure graph is built
+    if not kg.is_built:
+        kg.build_graph(store)
+
+    q_info = normalize_query(user_query)
+    query_tokens = set(q_info["query_tokens"])
+
+    # Basic topological search based on tokens
+    found_nodes = set()
+    for comp_id in kg.component_takes.keys():
+        comp_tokens = set(comp_id.replace("_", " ").lower().split())
+        if comp_tokens.intersection(query_tokens):
+            found_nodes.add(comp_id)
+
+    if not found_nodes:
+        return {}
+
+    # GraphRAG Neighborhood Retrieval (N-Depth Subgraphs)
+    blueprint = "GRAPH RAG TOPOLOGICAL BLUEPRINT:\\n"
+    blueprint += "The following GraphRAG Neighborhoods have been extracted via Semantic Dataflow Topology:\\n\\n"
+    
+    neighborhoods = 0
+    found_nodes_list = list(found_nodes)
+    for anchor in found_nodes_list:
+        upstream = kg.get_upstream_nodes(anchor, max_depth=2, store=store)
+        downstream = kg.get_downstream_nodes(anchor, max_depth=2, store=store)
+        
+        if upstream or downstream:
+            neighborhoods += 1
+            takes = list(kg.component_takes.get(anchor, []))
+            emits = list(kg.component_emits.get(anchor, []))
+            blueprint += f"Anchor Node: `{anchor}`\\n"
+            blueprint += f"  - Takes: {takes}\\n"
+            blueprint += f"  - Emits: {emits}\\n"
+            
+            if upstream:
+                blueprint += "  ↑ Upstream Ancestors (Semantic Producers):\\n"
+                for up_node, depth in upstream:
+                    blueprint += f"      - [Depth {depth}] `{up_node}` -> `{anchor}`\\n"
+            
+            if downstream:
+                blueprint += "  ↓ Downstream Children (Semantic Consumers):\\n"
+                for dn_node, depth in downstream:
+                    blueprint += f"      - [Depth {depth}] `{anchor}` -> `{dn_node}`\\n"
+            blueprint += "\\n"
+
+    # Identify potential connecting paths between multiple anchor nodes
+    paths = []
+    for i in range(len(found_nodes_list)):
+        for j in range(len(found_nodes_list)):
+            if i != j:
+                path = kg.find_path(found_nodes_list[i], found_nodes_list[j], store)
+                if path:
+                    paths.append(path)
+
+    if paths:
+        blueprint += "Connecting Paths between Anchor Nodes:\\n"
+        for p in paths:
+            blueprint += f"- {' -> '.join(p)}\\n"
+        blueprint += "\\n"
+
+    # NEW LOGIC: Fetch and inject exact schemas for all discovered nodes
+    unique_schema_nodes = set(found_nodes_list)
+    for anchor in found_nodes_list:
+        upstream = kg.get_upstream_nodes(anchor, max_depth=2, store=store)
+        downstream = kg.get_downstream_nodes(anchor, max_depth=2, store=store)
+        for up_node, _ in upstream:
+            unique_schema_nodes.add(up_node)
+        for dn_node, _ in downstream:
+            unique_schema_nodes.add(dn_node)
+            
+    for p in paths:
+        for node in p:
+            unique_schema_nodes.add(node)
+            
+    if unique_schema_nodes:
+        blueprint += "\\n=== EXACT COMPONENT SCHEMAS ===\\n"
+        blueprint += "Use the following deterministic input/output signatures to build the pipeline correctly. You do not need to use search tools for these components:\\n\\n"
+        for node_id in unique_schema_nodes:
+            comp_item = store.get(("components",), node_id)
+            if comp_item and comp_item.value:
+                data = comp_item.value
+                inputs = data.get("input_channels") or data.get("input_types") or []
+                raw_outputs = data.get("output_channels") or data.get("out") or []
+                outputs = [f"{node_id}.out.{o}" for o in raw_outputs] if raw_outputs else []
+                
+                # Hyper-compact XML token format
+                in_str = ','.join(inputs) if inputs else 'none'
+                out_str = ','.join(outputs) if outputs else 'none'
+                blueprint += f'<c id="{node_id}" in="{in_str}" out="{out_str}"/>\n'
+        blueprint += "\\n"
+
+    blueprint += "PRIORITIZE THESE PATHS AND SCHEMAS when designing the architecture.\\n"
+    blueprint += "CRITICAL NOTE: This is a macro-topology map. It shows WHAT components connect.\\n"
+    blueprint += "If a producer emits a sub-output (e.g. [meta, fasta, gfa]) and the consumer only takes [meta, fasta], you must use native Nextflow channel shaping (e.g. .map{}) to isolate the sub-output!\\n"
+    
+    logger.info(f"--- [NODE] GRAPH RAG injected topology with {neighborhoods} neighborhoods and {len(paths)} paths.")
+    
+    # Inject as a HumanMessage so it doesn't break vLLM chat templates which enforce SystemMessage at index 0
+    new_msg = HumanMessage(content=blueprint)
+    
+    # Since we can't easily insert into the middle of the message list using LangGraph's standard 
+    # reducer without overwriting, we append it. The LLM will see it.
+    return {"messages": [new_msg]}
+
 def build_consultant_subgraph(store: Any = None) -> Any:
     """Consultant subgraph with ReAct tool-calling loop:
 
@@ -176,22 +310,37 @@ def build_consultant_subgraph(store: Any = None) -> Any:
     sub = StateGraph(GraphState)
 
     # Nodes
+    # NOTE: graph_rag_node is intentionally removed from the subgraph.
+    # The knowledge graph is now built offline at load time (loader.py → kg.build_nx_graph).
+    # The LLM accesses graph data via search_component_graph / find_dataflow_path tools.
     sub.add_node("consultant", consultant_node)
     sub.add_node("tools", ToolNode(get_consultant_tools(), handle_tool_errors=True))
     sub.add_node("sanitize", sanitize_orphaned_tool_calls)
     sub.add_node("consultant_extract", consultant_extract_node)
     sub.add_node("compact_memory", compact_memory_node)
 
-    # Entry
+    # Entry — consultant is now the direct entry point
     sub.set_entry_point("consultant")
 
     # Routing: if consultant produced tool_calls → tools, else → sanitize → extract
     def route_consultant(state: GraphState) -> str:
+        from langchain_core.messages import AIMessage
         messages = state.get("messages", [])
         if not messages:
             return "sanitize"
         last_msg = messages[-1]
         if hasattr(last_msg, "tool_calls") and last_msg.tool_calls:
+            # Check for silent tool loop (repeating exact same calls)
+            prev_ai = None
+            for m in reversed(messages[:-1]):
+                if isinstance(m, AIMessage) and getattr(m, 'tool_calls', None):
+                    prev_ai = m
+                    break
+            
+            if prev_ai and prev_ai.tool_calls == last_msg.tool_calls:
+                logger.info("--- [NODE] GRAPH tool loop detected. Silently forcing extraction.")
+                return "sanitize"
+
             # Count tool messages only since the last HumanMessage (per-turn reset)
             tool_msg_count = 0
             for m in reversed(messages):
@@ -205,7 +354,7 @@ def build_consultant_subgraph(store: Any = None) -> Any:
 
             logger.info(f"--- [NODE] GRAPH routing: is_approval={is_approval}")
 
-            effective_limit = MAX_TOOL_ITERATIONS_APPROVAL if is_approval else MAX_TOOL_ITERATIONS
+            effective_limit = settings.MAX_TOOL_ITERATIONS_APPROVAL if is_approval else settings.MAX_TOOL_ITERATIONS
 
             if tool_msg_count >= effective_limit:
                 logger.info(f"--- [NODE] GRAPH tool limit of {effective_limit} reached (is_approval={is_approval}, count={tool_msg_count}). forcing extraction")
@@ -271,11 +420,23 @@ def build_execution_subgraph(store: Any = None) -> Any:
     # Architect reason routing: tool calls → tools loop, else → generate
     # Uses state-tracked arch_tool_iterations counter (reset to 0 by repair_node each repair cycle)
     def route_architect_reason(state: GraphState) -> str:
+        from langchain_core.messages import AIMessage
         messages = state.get("messages", [])
         if not messages:
             return "architect_generate"
         last_msg = messages[-1]
         if hasattr(last_msg, "tool_calls") and last_msg.tool_calls:
+            # Check for silent tool loop (repeating exact same calls)
+            prev_ai = None
+            for m in reversed(messages[:-1]):
+                if isinstance(m, AIMessage) and getattr(m, 'tool_calls', None):
+                    prev_ai = m
+                    break
+            
+            if prev_ai and prev_ai.tool_calls == last_msg.tool_calls:
+                logger.info("--- [NODE] GRAPH architect tool loop detected. Silently forcing generation.")
+                return "sanitize_architect"
+
             arch_tool_count = state.get("arch_tool_iterations", 0)
             strategy = state.get("strategy_selector", "CUSTOM_BUILD")
             effective_limit = (

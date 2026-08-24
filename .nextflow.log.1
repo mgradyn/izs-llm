@@ -1,0 +1,64 @@
+Jul-18 19:50:41.297 [main] DEBUG nextflow.cli.Launcher - $> nextflow run plugins/izs/cohesive-ngsmanager/pipelines/_dummy.nf -preview
+Jul-18 19:50:41.452 [main] DEBUG nextflow.cli.CmdRun - N E X T F L O W  ~  version 26.04.6
+Jul-18 19:50:41.509 [main] DEBUG nextflow.plugin.PluginsFacade - Setting up plugin manager > mode=prod; embedded=false; plugins-dir=/Users/grady/.nextflow/plugins; core-plugins: nf-amazon@3.9.2,nf-azure@1.22.6,nf-cloudcache@0.6.0,nf-codecommit@0.5.3,nf-console@1.3.0,nf-google@1.27.3,nf-k8s@1.5.4,nf-seqera@0.21.1,nf-tower@1.28.2,nf-wave@1.21.0
+Jul-18 19:50:41.565 [main] INFO  o.pf4j.DefaultPluginStatusProvider - Enabled plugins: []
+Jul-18 19:50:41.567 [main] INFO  o.pf4j.DefaultPluginStatusProvider - Disabled plugins: []
+Jul-18 19:50:41.572 [main] INFO  org.pf4j.DefaultPluginManager - PF4J version 3.14.1 in 'deployment' mode
+Jul-18 19:50:41.619 [main] DEBUG nextflow.util.RetryConfig - Missing nextflow session - using default retry config
+Jul-18 19:50:41.861 [main] DEBUG nextflow.plugin.PluginUpdater - Using plugin repository: HttpPluginRepository [registry]; url=https://registry.nextflow.io/api
+Jul-18 19:50:41.869 [main] INFO  org.pf4j.AbstractPluginManager - No plugins
+Jul-18 19:50:41.923 [main] DEBUG nextflow.config.ConfigParserFactory - Using config parser v2
+Jul-18 19:50:42.014 [main] DEBUG nextflow.plugin.PluginsFacade - Plugins default=[]
+Jul-18 19:50:42.015 [main] DEBUG nextflow.plugin.PluginsFacade - Plugins resolved requirement=[]
+Jul-18 19:50:42.045 [main] DEBUG n.secret.LocalSecretsProvider - Secrets store: /Users/grady/.nextflow/secrets/store.json
+Jul-18 19:50:42.077 [main] DEBUG nextflow.secret.SecretsLoader - Discovered secrets providers: [nextflow.secret.LocalSecretsProvider@1cec219f] - activable => nextflow.secret.LocalSecretsProvider@1cec219f
+Jul-18 19:50:42.105 [main] DEBUG nextflow.cli.CmdRun - * PREVIEW * null [zen_monod] - revision: fd1fdf7478
+Jul-18 19:50:42.268 [main] DEBUG nextflow.Session - Session UUID: 976b1b50-038b-482f-80f4-1362aa587560
+Jul-18 19:50:42.269 [main] DEBUG nextflow.Session - Run name: zen_monod
+Jul-18 19:50:42.271 [main] DEBUG nextflow.Session - Executor pool size: 8
+Jul-18 19:50:42.290 [main] DEBUG nextflow.file.FilePorter - File porter settings maxRetries=3; maxTransfers=50; pollTimeout=null
+Jul-18 19:50:42.304 [main] DEBUG nextflow.util.ThreadPoolBuilder - Creating thread pool 'FileTransfer' minSize=10; maxSize=24; workQueue=LinkedBlockingQueue[-1]; allowCoreThreadTimeout=false
+Jul-18 19:50:42.504 [main] DEBUG nextflow.cli.CmdRun - 
+  Version: 26.04.6 build 12646
+  Created: 09-07-2026 18:49 UTC (21:49 EEST)
+  System: Mac OS X 12.5.1
+  Runtime: Groovy 4.0.31 on OpenJDK 64-Bit Server VM 24.0.1+9
+  Encoding: UTF-8 (UTF-8)
+  Process: 4736@Tuturu-wus-MacBook-Pro.local [127.0.0.1]
+  CPUs: 8 - Mem: 16 GB (4.5 GB) - Swap: 3 GB (580.8 MB)
+Jul-18 19:50:42.531 [main] DEBUG nextflow.Session - Work-dir: /Users/grady/Documents/DIE/cloud/izs-llm/work [Mac OS X]
+Jul-18 19:50:42.532 [main] DEBUG nextflow.Session - Script base path does not exist or is not a directory: /Users/grady/Documents/DIE/cloud/izs-llm/plugins/izs/cohesive-ngsmanager/pipelines/bin
+Jul-18 19:50:42.544 [main] DEBUG nextflow.executor.ExecutorFactory - Extension executors providers=[]
+Jul-18 19:50:42.559 [main] DEBUG nextflow.Session - Observer factory (v2): LinObserverFactory
+Jul-18 19:50:42.561 [main] DEBUG nextflow.Session - Observer factory (v2): DefaultObserverFactory
+Jul-18 19:50:42.628 [main] DEBUG nextflow.cache.CacheFactory - Using Nextflow cache factory: nextflow.cache.DefaultCacheFactory
+Jul-18 19:50:42.656 [main] DEBUG nextflow.util.CustomThreadPool - Creating default thread pool > poolSize: 9; maxThreads: 1000
+Jul-18 19:50:42.738 [main] DEBUG nextflow.Session - Session start
+Jul-18 19:50:42.758 [main] DEBUG nextflow.script.ScriptLoaderFactory - Using script parser v2
+Jul-18 19:50:43.132 [main] DEBUG nextflow.script.ScriptRunner - Parsed script files:
+Jul-18 19:50:43.159 [main] DEBUG n.trace.WorkflowStatsObserver - Workflow completed > WorkflowStats[succeededCount=0; failedCount=0; ignoredCount=0; cachedCount=0; pendingCount=0; submittedCount=0; runningCount=0; retriesCount=0; abortedCount=0; succeedDuration=0ms; failedDuration=0ms; cachedDuration=0ms;loadCpus=0; loadMemory=0; peakRunning=0; peakCpus=0; peakMemory=0; ]
+Jul-18 19:50:43.177 [main] ERROR nextflow.cli.Launcher - Script compilation failed
+nextflow.exception.ScriptCompilationException: Script compilation failed
+	at nextflow.script.parser.v2.ScriptLoaderV2.parse0(ScriptLoaderV2.groovy:129)
+	at nextflow.script.parser.v2.ScriptLoaderV2.parse(ScriptLoaderV2.groovy:81)
+	at nextflow.script.parser.v2.ScriptLoaderV2.parse(ScriptLoaderV2.groovy)
+	at nextflow.script.ScriptRunner.parseScript(ScriptRunner.groovy:215)
+	at nextflow.script.ScriptRunner.execute(ScriptRunner.groovy:126)
+	at nextflow.cli.CmdRun.run(CmdRun.groovy:442)
+	at nextflow.cli.Launcher.run(Launcher.groovy:526)
+	at nextflow.cli.Launcher.main(Launcher.groovy:686)
+Caused by: org.codehaus.groovy.control.MultipleCompilationErrorsException: startup failed:
+Main: 1: Invalid include source: '/Users/grady/Documents/DIE/cloud/izs-llm/plugins/izs/cohesive-ngsmanager/steps/1PP_trimming/fastp.nf' @ line 1, column 1.
+   include { step_1PP_trimming__fastp } from '../steps/1PP_trimming/fastp'
+   ^
+
+1 error
+
+	at org.codehaus.groovy.control.ErrorCollector.failIfErrors(ErrorCollector.java:292)
+	at org.codehaus.groovy.control.CompilationUnit$ISourceUnitOperation.doPhaseOperation(CompilationUnit.java:878)
+	at org.codehaus.groovy.control.CompilationUnit.processPhaseOperations(CompilationUnit.java:660)
+	at org.codehaus.groovy.control.CompilationUnit.compile(CompilationUnit.java:634)
+	at nextflow.script.parser.v2.ScriptCompiler.compile0(ScriptCompiler.java:146)
+	at nextflow.script.parser.v2.ScriptCompiler.compile(ScriptCompiler.java:112)
+	at nextflow.script.parser.v2.ScriptLoaderV2.parse0(ScriptLoaderV2.groovy:114)
+	... 7 common frames omitted

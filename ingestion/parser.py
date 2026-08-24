@@ -3,8 +3,11 @@ Nextflow .nf Parser — Extracts process/workflow definitions from Nextflow DSL2
 
 Parses:
   - Process definitions (name, container, input/output channels, script)
-  - Workflow definitions (name, take/emit channels, body)
-  - Include statements
+  - Workflow definitions (name, take/emit channels, body, includes)
+  - Include statements (for dependency graph)
+  - Global params.XXX references (variables_needed)
+  - Helper function calls (getParam, getSpecies, etc.)
+  - Groovy function definitions (for resources catalog)
 
 Usage:
     from ingestion.parser import parse_nf_file
@@ -21,9 +24,12 @@ def parse_nf_file(filepath: Path) -> dict:
     Returns:
         {
             "file": str,
+            "file_stem": str,
             "processes": [{name, container, inputs, outputs, script}],
             "workflows": [{name, takes, emits, body, includes}],
             "includes": [str],
+            "variables_needed": [str],        # params.XXX + helper calls
+            "groovy_functions": [{name, body, doc}],  # for resources
             "raw_code": str,
         }
     """
@@ -35,16 +41,100 @@ def parse_nf_file(filepath: Path) -> dict:
         "processes": _extract_processes(code),
         "workflows": _extract_workflows(code),
         "includes": _extract_includes(code),
+        "variables_needed": _extract_variables_needed(code),
+        "groovy_functions": _extract_groovy_functions(code),
         "raw_code": code,
     }
 
 
+# ── Deep extraction ───────────────────────────────────────────────────────────
+
+def _extract_variables_needed(code: str) -> list[str]:
+    """Extract all implicit dependencies from the code:
+    - params.XXX references
+    - getParam('XXX') calls
+    - Known named helper invocations (getSpecies, getKingdom, etc.)
+    """
+    deps: set[str] = set()
+
+    # params.SOMETHING
+    for m in re.finditer(r'\bparams\.([a-zA-Z0-9_]+)', code):
+        deps.add(f"params.{m.group(1)}")
+
+    # getParam('XXX') or getParam("XXX")
+    for m in re.finditer(r"getParam\s*\(\s*['\"]([^'\"]+)['\"]\s*\)", code):
+        deps.add(f"getParam('{m.group(1)}')")
+
+    # Known zero-arg helpers that still imply a dependency
+    NAMED_HELPERS = [
+        "getSpecies", "getKingdom", "getGenus", "getHost",
+        "getHostUnkeyed", "getGenusSpecies", "getGenusSpeciesOptional",
+        "getBlastDatabase", "getBlastDatabaseUnkeyed",
+        "getSingleInput", "getInputOf", "getInputFolders",
+        "getRISCD", "getCmp",
+    ]
+    for helper in NAMED_HELPERS:
+        # Match calls like getSpecies() or getSpecies(something)
+        if re.search(rf'\b{re.escape(helper)}\s*\(', code):
+            deps.add(f"{helper}()")
+
+    return sorted(deps)
+
+
+def _extract_groovy_functions(code: str) -> list[dict]:
+    """Extract Groovy 'def functionName(...)' definitions from a .nf file.
+
+    Returns a list of {name, body, usage, doc} for resources catalog.
+    """
+    functions = []
+    # Match: def funcName(...) { ... }
+    for m in re.finditer(r'\bdef\s+([a-zA-Z_]\w*)\s*\([^)]*\)\s*\{', code):
+        name = m.group(1)
+        start_pos = m.end() - 1  # position of opening {
+        body = _extract_balanced_block(code, start_pos)
+        if body is not None:
+            # Try to get a preceding comment as doc
+            pre = code[:m.start()].rstrip()
+            lines_before = pre.split('\n')
+            doc_lines = []
+            for line in reversed(lines_before):
+                stripped = line.strip()
+                if stripped.startswith('//') or stripped.startswith('*') or stripped.startswith('/*'):
+                    doc_lines.insert(0, stripped.lstrip('/*').strip())
+                else:
+                    break
+            doc = ' '.join(doc_lines).strip()
+
+            # Build a usage hint: def funcName(args)
+            sig_m = re.match(r'\bdef\s+([a-zA-Z_]\w*)\s*(\([^)]*\))', m.group(0))
+            usage = f"def {name}{sig_m.group(2)}" if sig_m else f"def {name}()"
+            
+            # Extract arguments
+            arguments = []
+            if sig_m:
+                args_str = sig_m.group(2)[1:-1].strip()
+                if args_str:
+                    for arg in args_str.split(','):
+                        clean_arg = arg.split('=')[0].strip().split()[-1]
+                        if clean_arg:
+                            arguments.append(clean_arg)
+
+            functions.append({
+                "name": name,
+                "body": body.strip(),
+                "usage": usage,
+                "doc": doc,
+                "num_args": len(arguments),
+                "arguments": arguments,
+            })
+    return functions
+
+
+# ── Process / Workflow extractors ─────────────────────────────────────────────
+
 def _extract_processes(code: str) -> list[dict]:
     """Extract process definitions from Nextflow DSL2 code."""
     processes = []
-
-    # Match: process PROCESS_NAME { ... }
-    # Use a brace-counting approach for nested blocks
     proc_starts = list(re.finditer(r'\bprocess\s+(\w+)\s*\{', code))
 
     for match in proc_starts:
@@ -120,7 +210,7 @@ def _extract_includes(code: str) -> list[str]:
     return includes
 
 
-# ── Block extraction helpers ─────────────────────────────────────────────────
+# ── Block extraction helpers ──────────────────────────────────────────────────
 
 def _extract_balanced_block(code: str, open_brace_pos: int) -> str | None:  # noqa: C901
     """Extract content between balanced braces starting at open_brace_pos.
@@ -141,7 +231,6 @@ def _extract_balanced_block(code: str, open_brace_pos: int) -> str | None:  # no
     while i < len(code):
         char = code[i]
 
-        # Handle state exits
         if in_line_comment:
             if char == '\n':
                 in_line_comment = False
@@ -196,7 +285,6 @@ def _extract_balanced_block(code: str, open_brace_pos: int) -> str | None:  # no
             i += 1
             continue
 
-        # Handle state entrances
         if code[i:i+2] == '//':
             in_line_comment = True
             i += 2
@@ -222,7 +310,6 @@ def _extract_balanced_block(code: str, open_brace_pos: int) -> str | None:  # no
             i += 1
             continue
 
-        # Count braces only in code space
         if char == '{':
             depth += 1
         elif char == '}':
@@ -236,13 +323,11 @@ def _extract_balanced_block(code: str, open_brace_pos: int) -> str | None:  # no
 
 
 def _extract_container(process_body: str) -> str | None:
-    """Extract container directive from a process body."""
     match = re.search(r'container\s+["\']([^"\']+)["\']', process_body)
     return match.group(1) if match else None
 
 
 def _extract_input_channels(process_body: str) -> list[str]:
-    """Extract input channel declarations from a process body."""
     channels = []
     input_match = re.search(r'\binput\s*:(.*?)(?=\boutput\s*:|\bscript\s*:|\bshell\s*:|\bexec\s*:|\Z)',
                             process_body, re.DOTALL)
@@ -250,7 +335,6 @@ def _extract_input_channels(process_body: str) -> list[str]:
         for line in input_match.group(1).strip().split('\n'):
             line = line.strip()
             if line and not line.startswith('//'):
-                # Extract channel type and name: val(x), path(x), tuple val(x), path(y)
                 names = re.findall(r'(?:val|path|file|env|stdin)\s*\(?\s*(\w+)', line)
                 if names:
                     channels.extend(names)
@@ -260,7 +344,6 @@ def _extract_input_channels(process_body: str) -> list[str]:
 
 
 def _extract_output_channels(process_body: str) -> list[str]:
-    """Extract output channel declarations from a process body."""
     channels = []
     output_match = re.search(r'\boutput\s*:(.*?)(?=\bscript\s*:|\bshell\s*:|\bexec\s*:|\bwhen\s*:|\Z)',
                              process_body, re.DOTALL)
@@ -268,7 +351,6 @@ def _extract_output_channels(process_body: str) -> list[str]:
         for line in output_match.group(1).strip().split('\n'):
             line = line.strip()
             if line and not line.startswith('//'):
-                # Emit labels: emit: channel_name
                 emit_match = re.search(r'emit\s*:\s*(\w+)', line)
                 if emit_match:
                     channels.append(emit_match.group(1))
@@ -280,19 +362,20 @@ def _extract_output_channels(process_body: str) -> list[str]:
 
 
 def _extract_script_block(process_body: str) -> str:
-    """Extract the script/shell block from a process body."""
-    match = re.search(r'(?:script|shell)\s*:\s*\n?\s*(?:"""|\'\'\')\s*\n?(.*?)(?:"""|\'\'\')',
-                      process_body, re.DOTALL)
+    # Match triple-quoted script blocks
+    triple_pat = r'(?:script|shell)\s*:\s*\n?\s*(?:"""|\'\'\')\s*\n?(.*?)(?:"""|\'\'\')'
+    match = re.search(triple_pat, process_body, re.DOTALL)
     if match:
         return match.group(1).strip()
-
-    # Single-line script
+    # Single-line quoted fallback
     match = re.search(r'(?:script|shell)\s*:\s*\n?\s*["\'](.+?)["\']', process_body)
     return match.group(1).strip() if match else ""
 
 
+
+
+
 def _extract_take_channels(workflow_body: str) -> list[str]:
-    """Extract take: channels from a workflow body."""
     channels = []
     take_match = re.search(r'\btake\s*:(.*?)(?=\bmain\s*:|\bemit\s*:|\Z)',
                            workflow_body, re.DOTALL)
@@ -305,7 +388,6 @@ def _extract_take_channels(workflow_body: str) -> list[str]:
 
 
 def _extract_emit_channels(workflow_body: str) -> list[str]:
-    """Extract emit: channels from a workflow body."""
     channels = []
     emit_match = re.search(r'\bemit\s*:(.*?)(?=\}|$|\Z)', workflow_body, re.DOTALL)
     if emit_match:
@@ -319,23 +401,27 @@ def _extract_emit_channels(workflow_body: str) -> list[str]:
 
 
 def _extract_main_block(workflow_body: str) -> str:
-    """Extract the main: block from a workflow body."""
     match = re.search(r'\bmain\s*:(.*?)(?=\bemit\s*:|\Z)', workflow_body, re.DOTALL)
     if match:
         return match.group(1).strip()
-    # No main: label — everything before emit:
     match = re.search(r'^(.*?)(?=\bemit\s*:|\Z)', workflow_body, re.DOTALL)
     return match.group(1).strip() if match else workflow_body.strip()
 
 
 def _extract_workflow_calls(body: str) -> list[str]:
-    """Extract process/workflow calls from workflow body code."""
     calls = re.findall(r'(?<!\.)\b([a-zA-Z0-9_]+)\s*\(', body)
 
     built_ins = {
         'file', 'path', 'val', 'env', 'tuple', 'set', 'Channel', 'println',
         'print', 'error', 'exit', 'log', 'workflow', 'process', 'def',
-        'if', 'else', 'for', 'while', 'switch', 'case', 'return', 'String', 'Integer', 'Boolean'
+        'if', 'else', 'for', 'while', 'switch', 'case', 'return',
+        'String', 'Integer', 'Boolean', 'Map', 'List',
     }
 
-    return list(set(c for c in calls if c not in built_ins))
+    seen = set()
+    ordered_calls = []
+    for c in calls:
+        if c not in built_ins and c not in seen:
+            seen.add(c)
+            ordered_calls.append(c)
+    return ordered_calls

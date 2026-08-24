@@ -1,10 +1,12 @@
 import os
 from pathlib import Path
 
+from dotenv import load_dotenv
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+load_dotenv(os.path.join(_BASE_DIR, ".env"))
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
@@ -43,7 +45,7 @@ class Settings(BaseSettings):
     RAG_KEYWORD_TEMPLATE_MIN_SCORE: int = 5
     RAG_KEYWORD_COMPONENT_THRESHOLD: float = 0.20
     RAG_FAISS_K: int = 20
-    RAG_FAISS_MAX_L2_DISTANCE: float = 1.4
+    RAG_FAISS_MAX_L2_DISTANCE: float = 2.5
     RAG_FAISS_RELATIVE_MARGIN: float = 0.35
     RAG_MAX_HELPER_FUNCTIONS: int = 5
 
@@ -51,11 +53,11 @@ class Settings(BaseSettings):
     RAG_EXCLUDED_TEMPLATES: set[str] = Field(default_factory=set)
 
     # Graph & Agent Iteration Limits
-    MAX_TOOL_ITERATIONS: int = 15
-    MAX_TOOL_ITERATIONS_APPROVAL: int = 5
+    MAX_TOOL_ITERATIONS: int = 16
+    MAX_TOOL_ITERATIONS_APPROVAL: int = 2
     MAX_ARCHITECT_TOOL_ITERATIONS: int = 8
-    MAX_ARCHITECT_TOOL_ITERATIONS_CUSTOM_BUILD: int = 16  # CUSTOM_BUILD needs more research
-    MAX_REPAIR_RETRIES: int = 5
+    MAX_ARCHITECT_TOOL_ITERATIONS_CUSTOM_BUILD: int = 25  # CUSTOM_BUILD needs more research
+    MAX_REPAIR_RETRIES: int = 3
     MAX_DIAGRAM_RETRIES: int = 3
 
     # Memory & Context Windows

@@ -222,6 +222,10 @@ class WorkflowBlock(BaseModel):
                 if re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', v):
                     valid_vars.add(v)
 
+        # Catch regular assignments: var = ...
+        regular_assigns = re.findall(r'(?:def\s+)?([a-zA-Z_][a-zA-Z0-9_]*)\s*=', self.body_code)
+        valid_vars.update(regular_assigns)
+
         process_calls = re.findall(r'\b([a-zA-Z0-9_]+)\s*\(', self.body_code)
         valid_vars.update(process_calls)
 
@@ -414,7 +418,7 @@ class NextflowPipelineAST(BaseModel):
         # Check Entrypoint
         undefined_ep = validate_undefined_variables(self.entrypoint.body_code, global_vars)
         if undefined_ep:
-            raise ValueError(f"UNDEFINED VAR in entrypoint: Variables {', '.join(undefined_ep)} used but not defined. Did you forget to getSingleInput()?")
+            raise ValueError(f"UNDEFINED VAR in entrypoint: Variables {', '.join(undefined_ep)} used but not defined. Did you forget to assign them using a helper function or params?")
             
         # Check SubWorkflows
         for sw in self.sub_workflows:

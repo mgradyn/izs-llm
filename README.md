@@ -323,3 +323,84 @@ docker-compose up -d
 
 ### 8.3 Graph Introspection (LangGraph Studio)
 The repository includes a `langgraph.json` configuration file. You can attach LangGraph Studio directly to this repository to visually step through the `app_graph` execution matrix, inspect message histories, and rewind failed tool calls in real time.
+
+---
+
+## 9. IZS-LLM Validation, Benchmark, and Testing Report
+
+The testing and validation architecture for the `izs-llm` framework consists of two main pillars: a comprehensive **Pairwise Evaluation Benchmark Suite (Topo@k)** for comparative model testing, and a suite of **Component-Specific Validation Subprocesses** that assess distinct features of the pipeline.
+
+### 9.1 Current Benchmark Framework: Pairwise Glicko-2 (Topo@k) Evaluation
+
+The current primary evaluation mechanism compares two LLM executions head-to-head. Instead of scoring outputs on a 1–5 scale (which can have high variance), it uses a **Pairwise LLM Judge** with position bias control and Chain-of-Thought reasoning. Models are then ranked using the **Glicko-2 Rating System**.
+
+#### Datasets and Complexity
+The benchmark runs against curated datasets organized by pipeline complexity:
+- **Single-Turn Benchmark:** 205 examples spanning complexity levels 1 to 5 (from simple mono-step pipelines like trimming/assembly to complex 5-step parallel aggregations).
+- **Multi-Turn Benchmark:** 159 conversations (330 turns) focusing on iterative pipeline modifications (e.g., adding or dropping steps).
+
+#### The Evaluation Flow
+For each benchmark run, the system executes the following flow:
+1. **Agent Pipeline Execution:** The user request is passed to the `/chat` API, and the full pipeline generates the output (Nextflow code, diagrams, tool recommendations, etc.).
+2. **Deterministic Checks:** Validates structure via exact step matching and calculates Precision/Recall/F1 scores based on verified ground truth.
+3. **Pairwise Comparison:** An LLM Judge compares Model A and Model B across 6 dimensions.
+    - *Position bias control:* Both A vs B and B vs A orderings are evaluated.
+    - *Chain-of-Thought:* The judge explicitly explains reasoning step-by-step before deciding the winner.
+4. **Rating Calculation:** Glicko-2 calculates Player Strength (μ) and Rating Deviation (φ).
+
+#### Evaluation Dimensions
+The pairwise judge evaluates specific test types based on up to 6 dimensions:
+- **Faithfulness:** Does the AI only use actual tools from the catalog?
+- **Relevance:** Are context parameters correct for the biological problem?
+- **Syntax:** Is the generated Nextflow DSL2 code valid?
+- **Logic:** Is the pipeline wired together correctly?
+- **Diagram Quality:** Are the generated Mermaid diagrams accurate?
+- **Communication:** Is the system's textual response clear and helpful?
+
+---
+
+### 9.2 Detailed Validation Subprocesses (Component Level)
+
+The framework breaks down validation into specialized test subprocesses (originally designed as the Likert-scale test suite and now integrated into variant benchmark datasets). These tests validate discrete components of the AI's behavior:
+
+#### a. Retrieval Testing Feature (RAG Validation)
+- **Goal:** Check if the AI correctly locates the required tools from the catalog.
+- **Process:** The system searches the Qdrant vector database based on the request.
+- **Validation:** **Deterministic**. There is no LLM judge here. The system simply checks if the expected `tool_id` from the catalog matches the results returned by the agent. If this fails, the system knows the search/retrieval mechanism is broken, not the code generation.
+- **File Reference:** [test_rag.py](file:///Users/grady/Documents/DIE/cloud/izs-llm/tests/legacy/test_rag.py)
+
+#### b. Planning and Consultation Feature
+- **Goal:** Test how the AI plans the biological work before writing code.
+- **Process:** The user request is processed by the Consultant Node to plan the pipeline.
+- **Validation:** The system first checks if the plan achieves an "approved" status. A specialized **Consultant Judge** then assesses the plan.
+    - *Faithfulness:* Checks if the plan hallucinated tools.
+    - *Relevance:* Checks if the plan actually solves the underlying bioinformatics problem.
+- **File Reference:** [test_consultant.py](file:///Users/grady/Documents/DIE/cloud/izs-llm/tests/legacy/test_consultant.py)
+
+#### c. Code Generation and Execution Feature
+- **Goal:** Ensure the generated Nextflow DSL2 code is structurally and logically correct.
+- **Process:** The Architect Node generates Nextflow code and a flowchart.
+- **Validation:**
+    1. **Existence Check:** Verifies the code was output.
+    2. **Nextflow Stub Run:** The system runs the generated Nextflow code in a stub execution to catch any compiler or basic connectivity errors.
+    3. **Architect Judge:** Validates the syntax and ensures the code directly follows the consultant's plan.
+    4. **Diagram Judge:** Evaluates the Mermaid flowchart to ensure it aligns perfectly with the generated code.
+- **File Reference:** [test_execution.py](file:///Users/grady/Documents/DIE/cloud/izs-llm/tests/legacy/test_execution.py)
+
+#### d. Guardrails and Safety Feature
+- **Goal:** Verify that the AI refuses bad, unsafe, or impossible laboratory requests.
+- **Process:** The agent receives a malicious or out-of-scope prompt.
+- **Validation:** The test asserts that the AI terminates the workflow generation and remains in a conversational state. The **Rejection Judge** then evaluates:
+    - *Refusal Quality:* Did the AI safely and politely refuse the request?
+    - *Alternatives:* Did the AI offer a valid alternative solution instead of wasting lab resources?
+
+#### e. Module Recreation Feature
+- **Goal:** Ensure the AI generated code strictly adheres to the lab's manual coding standards.
+- **Process:** The AI is asked to recreate existing standard pipelines.
+- **Validation:** A **Recreation Judge** performs a comparative analysis against a human-written reference codebase. It checks:
+    - *Structure:* Does the code look human-readable and standard?
+    - *Data Logic:* Are the data connections mathematically and logically identical to the reference?
+
+#### f. Report Generation
+- **Process:** Once all validation and benchmark tests finish, the system automatically collects all deterministic scores and LLM Judge explanations.
+- **Validation:** It aggregates this data to create markdown (`.md`) and spreadsheet (`.csv`) reports (e.g., `pairwise_report_latest.md`), giving developers actionable debugging information and detailed judge reasoning.

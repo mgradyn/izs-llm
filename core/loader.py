@@ -14,6 +14,7 @@ from core.utils.logger import logger
 class DataLoader:
     def __init__(self):
         self.vector_store = None
+        self.patterns_vector_store = None
         self.code_db = {}
         self.comp_db = {}
         self.tmpl_db = {}
@@ -69,6 +70,17 @@ class DataLoader:
             logger.warning("plugin_not_available_using_defaults", error=str(e))
         return paths
 
+    def _resolve_patterns_index_path(self) -> str | None:
+        """Resolve the patterns sub-index path from the active plugin config."""
+        try:
+            from core.plugin_loader import get_active_plugin
+            plugin = get_active_plugin()
+            if hasattr(plugin, "patterns_index_path") and plugin.patterns_index_path and Path(plugin.patterns_index_path).exists():
+                return str(plugin.patterns_index_path)
+        except Exception:
+            pass
+        return None
+
     def _load_lookups(self, store: Any=None) -> None:  # noqa: C901
         paths = self._resolve_paths()
 
@@ -122,6 +134,21 @@ class DataLoader:
                     for p in patterns_data:
                         store.put(("patterns",), p["id"], p)
 
+        # Load Tool Graph (deterministic AST-derived DAG from ingestion)
+        graph_path = os.path.join(os.path.dirname(paths["catalog_components"]), "tool_graph.json")
+        if os.path.exists(graph_path):
+            with open(graph_path, encoding="utf-8") as f:
+                graph_data = json.load(f)
+            if store:
+                store.put(("graph",), "adjacency", graph_data)
+            logger.info(
+                "tool_graph_loaded",
+                nodes=len(graph_data.get("nodes", [])),
+                edges=len(graph_data.get("edges", [])),
+            )
+        else:
+            logger.info("tool_graph_not_found", path=graph_path)
+
         # Build reverse index: component_id → list of templates that use it
         if store:
             self._build_usage_index(store)
@@ -171,6 +198,19 @@ class DataLoader:
             store.put(("usage",), comp_id, {"usages": usages})
 
         logger.info("usage_index_built", components_mapped=len(usage_map))
+
+        # Build the offline knowledge graph once all catalog + usage data is loaded.
+        # Graphify-style: nx.DiGraph with EXTRACTED/INFERRED/AMBIGUOUS edge tiers.
+        try:
+            from core.services.knowledge_graph import kg
+            kg.build_nx_graph(store)
+            try:
+                kg.export_graph_json("graphify-out/catalog_graph.json")
+            except Exception as _exp_err:
+                logger.debug("catalog_graph_export_skipped", error=str(_exp_err))
+        except Exception as _kg_err:
+            logger.warning("knowledge_graph_build_skipped", error=str(_kg_err))
+
 
     def _extract_usage_snippet(self, template_code: str, component_id: str) -> str:
         """Extract lines around a component's usage in template code.
@@ -232,6 +272,17 @@ class DataLoader:
                 self.vector_store = FaissAdapter(index_path=faiss_path, embeddings=embeddings)
         except Exception as e:
             logger.error("vector_store_error", error=str(e))
+
+        # Load patterns sub-index (separate FAISS, always FAISS regardless of main db type)
+        patterns_path = self._resolve_patterns_index_path()
+        if patterns_path:
+            try:
+                logger.info("loading_patterns_vector_store", path=patterns_path)
+                self.patterns_vector_store = FaissAdapter(index_path=patterns_path, embeddings=embeddings)
+            except Exception as e:
+                logger.warning("patterns_vector_store_error", error=str(e))
+        else:
+            logger.info("patterns_vector_store_not_found_skipping")
 
 # Global Instance - Note: We keep this for now to prevent breaking existing imports,
 # but it should ideally be injected using FastAPI Depends.

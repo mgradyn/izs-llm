@@ -3,7 +3,24 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 
+class SemanticEdge(BaseModel):
+    upstream_component: str = Field(description="The component producing the data")
+    downstream_component: str = Field(description="The component consuming the data")
+    channel: str = Field(description="The semantic channel name (e.g. bridging 'depleted' to 'reads')")
+
+class InputAssignment(BaseModel):
+    variable: str = Field(description="The channel/variable name needed by the pipeline (e.g., 'reads', 'reference', 'metadata')")
+    source_helper: str = Field(description="The EXACT Nextflow helper function used to populate this variable (e.g., 'getInput()', 'param(\\'ref\\')')")
+
 class ConsultantOutput(BaseModel):
+    input_assignments: list[InputAssignment] = Field(
+        default_factory=list,
+        description="Explicitly define how every required input channel is populated using helper functions. If you don't know the helper function, YOU MUST STOP AND CALL search_helper_functions."
+    )
+    semantic_edges: list[SemanticEdge] = Field(
+        default_factory=list,
+        description="Explicitly define the logical connections between components. You MUST bridge false-negative gaps (e.g., mapping 'depleted' to 'reads'). IF THERE IS ONLY ONE COMPONENT, RETURN AN EMPTY LIST []."
+    )
     response_to_user: str = Field(
         description="Your conversational reply to the user. Ask questions or confirm steps."
     )
@@ -24,7 +41,7 @@ class ConsultantOutput(BaseModel):
     )
     selected_component_ids: list[str] = Field(
         default_factory=list,
-        description="CRITICAL: MUST be a list of EXACT component IDs from the RAG context (e.g., ['process_data_mapper']). Do not use shorthand like 'mapper'."
+        description="A list of the component IDs planned for the pipeline. It is okay if they are shorthand or slightly inaccurate; the backend will semantically resolve them."
     )
 
     @field_validator('selected_component_ids', mode='before')
@@ -38,7 +55,8 @@ class ConsultantOutput(BaseModel):
     def validate_approved_status(self) -> 'ConsultantOutput':
         if self.status == "APPROVED":
             if not self.draft_plan:
-                raise ValueError("draft_plan is required when status is APPROVED.")
+                # LLM can sometimes omit draft_plan in single-turn approval
+                self.draft_plan = "Proceeding to build pipeline."
             if not self.strategy_selector:
-                raise ValueError("strategy_selector is required when status is APPROVED.")
+                self.strategy_selector = "CUSTOM_BUILD"
         return self

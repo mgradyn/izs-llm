@@ -27,14 +27,22 @@ flowchart TD
         JSON --> CS_JSON["code_store.jsonl"]
     end
 
-    subgraph 4. The Embedding Engine (embedder.py)
+    subgraph 4. Pattern Discovery (ingest_patterns.py & dedup_patterns.py)
+        PD["Structural AST Fingerprinting"]
+        PD --> PD_LLM["LLM (cyankiwi) Pattern Extraction"]
+        PD_LLM --> PD_Dedup["Lossless Semantic Deduplication"]
+        PD_Dedup --> P_JSON["patterns.json"]
+    end
+
+    subgraph 5. The Embedding Engine (embedder.py)
         EmbedModel["HuggingFace Embeddings\n(Dynamically Configured Model)"]
-        EmbedModel --> FAISS["Vector Semantic Space\n(chroma_index/faiss_index)"]
+        EmbedModel --> FAISS["Vector Semantic Space\n(chroma_index/faiss_index/patterns_index)"]
     end
 
     NF --> ParseAST
     ExtProc & ExtWF --> JSON
-    C_JSON & T_JSON --> EmbedModel
+    ExtWF --> PD
+    C_JSON & T_JSON & P_JSON --> EmbedModel
     
     FAISS -.-> PluginVault[(plugin.yaml / Final Vault)]
     CS_JSON -.-> PluginVault
@@ -55,8 +63,16 @@ Takes the raw parse trees and transforms them into relational JSON objects.
 - It splits the physical string blocks into `code_store.jsonl` (to keep the embedding matrix lightweight).
 - It generates the metadata blocks (e.g. `domain`, `description`, `take_channels`, `emit_channels`) used in `catalog/components.json`.
 
+### `ingest_patterns.py` (Pattern Harvester & Online Filter)
+Extracts recurring Nextflow workflow structures from raw `.nf` files via LLMs, utilizing a **Hybrid Preprocess Filter** to avoid LLM token waste.
+- **Structural Fingerprint:** Before hitting the LLM, the parser builds an exact token sequence of channel operators (e.g., `["cross", "multiMap"]`).
+- **Semantic Gate:** If a structural duplicate is found, it evaluates Dense Embeddings via local models (`Qwen3`). It only skips the LLM call if the logic is both structurally identical *and* semantically similar (`> 92%`).
+
+### `dedup_patterns.py` (Lossless Post-Pass)
+Runs a final sweep after LLM extraction to cluster and deduplicate patterns. Instead of discarding overlapping templates, it performs a **Lossless Set Union**, merging different `use_cases`, `caveats`, and `tags` together to preserve all biological context.
+
 ### `embedder.py` (Vector Synthesizer)
-The Vector DB embedder. Uses HuggingFace models to turn the `catalog` JSON schemas into floating-point vectors. Developers can build either a persistent local `ChromaDB` directory or a `FAISS` index via the `--vector-db` flag, and can inject arbitrary geometry sizes via the `--embedding-model` parameter. This dimension parameter is serialized into the `plugin.yaml`, ensuring the FastAPI app boots using identical model parameters to query the index.
+The Vector DB embedder. Uses HuggingFace models to turn the `catalog` JSON schemas (and newly mined `patterns.json`) into floating-point vectors. Developers can build persistent `FAISS` indices, enabling advanced retrieval techniques like the **Reciprocal Rank Fusion (RRF) Hybrid Search** used by the Consultant tools. This dimension parameter is serialized into the `plugin.yaml`, ensuring the FastAPI app boots using identical model parameters to query the indices.
 
 ## 3. The `Plugin.yaml` Specification
 

@@ -46,7 +46,7 @@ def check_syntax(code: str) -> dict:
         test_dir.mkdir(parents=True, exist_ok=True)
         test_file.write_text(code)
 
-        args = ["nextflow", "run", str(test_file), "-preview"]
+        args = ["nextflow", "run", str(test_file.absolute()), "-preview"]
         if E2E_PARAMS_CONFIG.exists():
             args += ["-c", str(E2E_PARAMS_CONFIG)]
 
@@ -58,13 +58,25 @@ def check_syntax(code: str) -> dict:
             timeout=30,
         )
 
+        parsed = parse_nextflow_output(result.stdout, result.stderr)
+        has_fatal = len(parsed["fatal_errors"]) > 0
+        has_unmatched = len(parsed["unmatched_errors"]) > 0
+        
+        is_success = (result.returncode == 0) or (not has_fatal and not has_unmatched)
+        
+        parsed_errors = []
+        if has_fatal:
+            parsed_errors = [f"{e.get('label')}: {e.get('raw', '')}" for e in parsed["fatal_errors"]]
+        elif has_unmatched:
+            parsed_errors = parsed["unmatched_errors"]
+
         return {
             "level": "syntax",
-            "success": result.returncode == 0,
+            "success": is_success,
             "returncode": result.returncode,
             "stdout": result.stdout,
             "stderr": result.stderr,
-            "parsed_errors": _format_parsed_errors(result.stdout, result.stderr)
+            "parsed_errors": parsed_errors
         }
 
     except subprocess.TimeoutExpired:
@@ -99,7 +111,7 @@ def check_stub(code: str) -> dict:
 
         result = subprocess.run(
             [
-                "nextflow", "run", str(test_file),
+                "nextflow", "run", str(test_file.absolute()),
                 "-stub",
                 "-work-dir", str(work_dir),
                 "--outdir", str(test_dir / "output"),
@@ -110,13 +122,25 @@ def check_stub(code: str) -> dict:
             timeout=60,
         )
 
+        parsed = parse_nextflow_output(result.stdout, result.stderr)
+        has_fatal = len(parsed["fatal_errors"]) > 0
+        has_unmatched = len(parsed["unmatched_errors"]) > 0
+        
+        is_success = (result.returncode == 0) or (not has_fatal and not has_unmatched)
+        
+        parsed_errors = []
+        if has_fatal:
+            parsed_errors = [f"{e.get('label')}: {e.get('raw', '')}" for e in parsed["fatal_errors"]]
+        elif has_unmatched:
+            parsed_errors = parsed["unmatched_errors"]
+
         return {
             "level": "stub",
-            "success": result.returncode == 0,
+            "success": is_success,
             "returncode": result.returncode,
             "stdout": result.stdout[-2000:] if len(result.stdout) > 2000 else result.stdout,
             "stderr": result.stderr[-2000:] if len(result.stderr) > 2000 else result.stderr,
-            "parsed_errors": _format_parsed_errors(result.stdout, result.stderr)
+            "parsed_errors": parsed_errors
         }
 
     except subprocess.TimeoutExpired:

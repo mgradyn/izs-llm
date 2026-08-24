@@ -16,7 +16,15 @@ Subset control:
 """
 from __future__ import annotations
 
+import os
 import uuid
+from pathlib import Path
+
+# Enable automatic LangGraph trace dumping for all benchmark runs
+import time
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+run_timestamp = time.strftime("%Y%m%d_%H%M%S")
+os.environ["IZS_LOG_DIR"] = str(PROJECT_ROOT / "tests" / "reports" / "logs" / f"run_{run_timestamp}")
 
 from dotenv import load_dotenv
 
@@ -138,8 +146,10 @@ def test_multi_turn_benchmark(conv, api_client, judge_llm, store, elo_tracker, r
         step_metrics = compute_step_metrics(nf_code, gt_code)
 
         val_result = validate_nextflow(nf_code, run_stub=True)
-        if not val_result.get("valid", False):
-            print(f"❌ Syntax error in {turn_key}: {val_result.get('error', 'Unknown Error')}")
+        if not val_result.get("nf_syntax_passed", False):
+            print(f"❌ Syntax error in {turn_key}: {val_result.get('nf_syntax_error', 'Unknown Error')}")
+        elif not val_result.get("nf_stub_passed", True):
+            print(f"❌ Stub error in {turn_key}: {val_result.get('nf_stub_error', 'Unknown Error')}")
 
         with open(f"/Users/grady/.gemini/antigravity-ide/brain/e6c889b1-5343-40cb-b833-447a216f1102/artifacts/{turn_key}_comparison.md", "w") as f:
             f.write(f"# Comparison for {turn_key}\n\n")

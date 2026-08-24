@@ -9,8 +9,13 @@ instead of relying solely on bulk RAG context injection.
 """
 
 import re
+import json
+import logging
+import math
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from langchain.tools import tool, ToolRuntime
+
 
 from core.config import settings
 from core.loader import data_loader
@@ -26,7 +31,7 @@ from core.services.query_normalizer import (
 # ──────────────────────────────────────────────────────────────────────────────
 
 @tool
-def lookup_catalog_item(item_id: str, include_code: bool, runtime: ToolRuntime) -> dict:
+def lookup_catalog_item(item_id: str, include_code: bool, runtime: ToolRuntime) -> str:
     """Look up a component or template from the knowledge base to get its exact details.
     Use this to get metadata, inputs, outputs, and optionally the source code or template logic.
     This replaces separate calls for verifying IDs or fetching code.
@@ -42,7 +47,40 @@ def lookup_catalog_item(item_id: str, include_code: bool, runtime: ToolRuntime) 
     tmpl_item = store.get(("templates",), item_id) if not comp_item else None
 
     if not comp_item and not tmpl_item:
-        return {"valid": False, "error": f"ID '{item_id}' not found in catalog"}
+        # Check code store dynamically
+        code_item = store.get(("code",), item_id)
+        if code_item:
+            code = code_item.value.get("content", "") if isinstance(code_item.value, dict) else str(code_item.value or "")
+            parsed = _parse_nextflow_channels(code)
+            res = {
+                "valid": True,
+                "id": item_id,
+                "namespace": "component",
+                "tool": item_id,
+                "description": f"Dynamically resolved component '{item_id}' from DSL2 source.",
+                "inputs": parsed["takes"],
+                "outputs": parsed["emits"],
+                "code_available": True,
+            }
+            if include_code:
+                res["source_code"] = code[:settings.MAX_CODE_DISPLAY_LENGTH] + ("\n// ... (truncated)" if len(code) > settings.MAX_CODE_DISPLAY_LENGTH else "")
+            return json.dumps(res, indent=2)
+
+        from core.services.knowledge_graph import kg
+        if kg.is_built and item_id in kg.nx_graph:
+            node_data = kg.nx_graph.nodes[item_id]
+            return json.dumps({
+                "valid": True,
+                "id": item_id,
+                "namespace": node_data.get("type", "component"),
+                "tool": item_id,
+                "description": node_data.get("description", f"Graph vertex '{item_id}'"),
+                "inputs": node_data.get("takes", []),
+                "outputs": node_data.get("emits", []),
+                "code_available": False,
+            }, indent=2)
+
+        return json.dumps({"valid": False, "error": f"ID '{item_id}' not found in catalog"}, indent=2)
 
     result = {"valid": True, "id": item_id}
 
@@ -71,7 +109,7 @@ def lookup_catalog_item(item_id: str, include_code: bool, runtime: ToolRuntime) 
     if include_code:
         code_item = store.get(("code",), item_id)
         if code_item:
-            code = code_item.value.get("content", "")
+            code = code_item.value.get("content", "") if isinstance(code_item.value, dict) else str(code_item.value or "")
             result["code_available"] = True
             result["source_code"] = code[:settings.MAX_CODE_DISPLAY_LENGTH] + ("\n// ... (truncated)" if len(code) > settings.MAX_CODE_DISPLAY_LENGTH else "")
 
@@ -85,14 +123,100 @@ def lookup_catalog_item(item_id: str, include_code: bool, runtime: ToolRuntime) 
             result["code_available"] = False
             result["warning"] = "Source code not found in the code store."
 
-    return result
+    return json.dumps(result, indent=2)
+
+
+@tool
+def lookup_components_batch(item_ids: list[str], runtime: ToolRuntime, include_code: bool = False) -> str:
+    """Batch lookup multiple catalog components or templates in a single tool call to minimize roundtrips.
+
+    Args:
+        item_ids: List of catalog item IDs to look up (e.g. ['step_1PP_trimming__fastp', 'step_2AS_denovo__spades']).
+        include_code: Whether to include truncated Nextflow DSL2 source code.
+    """
+    store = runtime.store
+    from core.services.knowledge_graph import kg
+    if not kg.is_built:
+        kg.build_nx_graph(store)
+
+    results = {}
+    for item_id in item_ids:
+        item_id_clean = str(item_id).strip()
+        if not item_id_clean:
+            continue
+        comp_item = store.get(("components",), item_id_clean)
+        if comp_item and comp_item.value:
+            c_val = comp_item.value
+            entry = {
+                "valid": True,
+                "id": item_id_clean,
+                "namespace": "component",
+                "tool": c_val.get("tool"),
+                "domain": c_val.get("domain"),
+                "description": str(c_val.get("description") or "")[:200],
+                "inputs": c_val.get("input_channels") or c_val.get("input_types") or [],
+                "outputs": c_val.get("output_channels") or c_val.get("out") or [],
+            }
+            if include_code:
+                code_item = store.get(("code",), item_id_clean)
+                if code_item and code_item.value:
+                    code = code_item.value.get("content", "") if isinstance(code_item.value, dict) else str(code_item.value or "")
+                    entry["source_code"] = code[:settings.MAX_CODE_DISPLAY_LENGTH]
+            results[item_id_clean] = entry
+            continue
+
+        tmpl_item = store.get(("templates",), item_id_clean)
+        if tmpl_item and tmpl_item.value:
+            t_val = tmpl_item.value
+            entry = {
+                "valid": True,
+                "id": item_id_clean,
+                "namespace": "template",
+                "domain": t_val.get("domain"),
+                "description": str(t_val.get("description") or "")[:200],
+                "inputs": t_val.get("input_channels") or [],
+                "outputs": t_val.get("output_channels") or [],
+                "components_used": t_val.get("components_used") or [],
+            }
+            if include_code:
+                code_item = store.get(("code",), item_id_clean)
+                if code_item and code_item.value:
+                    code = code_item.value.get("content", "") if isinstance(code_item.value, dict) else str(code_item.value or "")
+                    entry["source_code"] = code[:settings.MAX_CODE_DISPLAY_LENGTH]
+            results[item_id_clean] = entry
+            continue
+
+        # Dynamic AST fallback
+        code_item = store.get(("code",), item_id_clean)
+        if code_item and code_item.value:
+            code = code_item.value.get("content", "") if isinstance(code_item.value, dict) else str(code_item.value or "")
+            parsed = _parse_nextflow_channels(code)
+            results[item_id_clean] = {
+                "valid": True,
+                "id": item_id_clean,
+                "namespace": "component",
+                "tool": item_id_clean,
+                "description": f"Dynamically resolved component '{item_id_clean}' from DSL2 source.",
+                "inputs": parsed["takes"],
+                "outputs": parsed["emits"],
+            }
+            if include_code:
+                results[item_id_clean]["source_code"] = code[:settings.MAX_CODE_DISPLAY_LENGTH]
+            continue
+
+        results[item_id_clean] = {"valid": False, "error": f"ID '{item_id_clean}' not found in catalog"}
+
+    return json.dumps(results, indent=2)
 
 # ──────────────────────────────────────────────────────────────────────────────
 # TOOL 2: Search components/templates (Full Hybrid: Keyword + FAISS)
 # ──────────────────────────────────────────────────────────────────────────────
 
+import threading
+_faiss_lock = threading.Lock()
+
 @tool
-def search_components(query: str, runtime: ToolRuntime) -> list:  # noqa: C901
+def search_components(query: str, runtime: ToolRuntime, input_channel: str = None, output_channel: str = None, limit: int = 50, offset: int = 0) -> str:  # noqa: C901
     """Search for catalog components using natural language or semantic descriptions.
     Use this when you don't know the exact ID but know what the component should do.
 
@@ -117,18 +241,34 @@ def search_components(query: str, runtime: ToolRuntime) -> list:  # noqa: C901
         pass
 
     if is_discovery_query(clean_query) and len(query_tokens) < 2:
-        return [
+        return json.dumps([
             {
                 "type": "meta",
                 "warning": "Query is too broad for targeted search.",
                 "hint": "Add organism, sequencing type, and analysis goal to refine results.",
             }
-        ]
+        ], indent=2)
+
+    # ── Dynamic Negative Constraint Detection ──
+    negated_tokens = set()
+    neg_matches = re.findall(r'\b(?:without|no|not|exclude|excluding|except|do\s+not\s+use|dont\s+use)\s+([a-zA-Z0-9_\-\s,]+?)(?:\.|$|;|\buse\b|\bwith\b|\band\b)', query_lower)
+    for match in neg_matches:
+        for word in re.split(r'[^a-z0-9]', match):
+            if len(word) > 2 and word not in ("and", "the", "use", "using", "for", "with"):
+                negated_tokens.add(word)
+
+    def _is_negated(item_id: str, tool_name: str = "") -> bool:
+        if not negated_tokens:
+            return False
+        combined = f"{item_id.lower()} {tool_name.lower()}"
+        return any(neg in combined for neg in negated_tokens)
 
     # ── Keyword: Template Scan ──
     try:
         for tmpl in store.search(("templates",), limit=settings.SEARCH_SCAN_LIMIT):
             tmpl_id = tmpl.key.lower()
+            if _is_negated(tmpl_id):
+                continue
             tmpl_data = tmpl.value
             score = 0
 
@@ -151,6 +291,8 @@ def search_components(query: str, runtime: ToolRuntime) -> list:  # noqa: C901
                     "id": tmpl.key,
                     "type": "template",
                     "description": str(tmpl_data.get("description") or "")[:settings.DESCRIPTION_TRUNCATE_TMPL],
+                    "inputs": tmpl_data.get("input_channels") or [],
+                    "outputs": tmpl_data.get("output_channels") or [],
                     "components_used": tmpl_data.get("components_used") or [],
                     "_score": score,
                 })
@@ -163,9 +305,10 @@ def search_components(query: str, runtime: ToolRuntime) -> list:  # noqa: C901
         for comp in store.search(("components",), limit=settings.SEARCH_SCAN_LIMIT):
             comp_id = comp.key.lower()
             comp_data = comp.value
-            score = 0
-
             tool_name = str(comp_data.get('tool', '')).lower()
+            if _is_negated(comp_id, tool_name):
+                continue
+            score = 0
             domain_name = str(comp_data.get('domain', '')).lower()
 
             if '__' in comp_id:
@@ -218,6 +361,43 @@ def search_components(query: str, runtime: ToolRuntime) -> list:  # noqa: C901
                         "outputs": comp_data.get("output_channels") or comp_data.get("out") or [],
                         "_score": score,
                     })
+
+        # ── Dynamic Multi-Intent Conjunction Direct AST Projection ──
+        from core.services.knowledge_graph import kg
+        if not kg.is_built:
+            kg.build_nx_graph(store)
+
+        sub_intents = kg.decompose_conjunction_query(query)
+        if len(sub_intents) > 1:
+            for sub_q in sub_intents:
+                v_proj = kg.project_vertex(sub_q)
+                if v_proj and v_proj not in found_ids:
+                    comp_item = store.get(("components",), v_proj)
+                    if comp_item and comp_item.value:
+                        found_ids.add(v_proj)
+                        c_val = comp_item.value
+                        results.append({
+                            "id": v_proj,
+                            "type": "component",
+                            "tool": c_val.get("tool"),
+                            "domain": c_val.get("domain"),
+                            "description": str(c_val.get("description") or "")[:settings.DESCRIPTION_TRUNCATE_COMP],
+                            "inputs": c_val.get("input_channels") or c_val.get("input_types") or [],
+                            "outputs": c_val.get("output_channels") or c_val.get("out") or [],
+                            "_score": 90,
+                        })
+                    else:
+                        tmpl_item = store.get(("templates",), v_proj)
+                        if tmpl_item and tmpl_item.value:
+                            found_ids.add(v_proj)
+                            t_val = tmpl_item.value
+                            results.append({
+                                "id": v_proj,
+                                "type": "template",
+                                "description": str(t_val.get("description") or "")[:settings.DESCRIPTION_TRUNCATE_TMPL],
+                                "components_used": t_val.get("components_used") or [],
+                                "_score": 90,
+                            })
     except Exception as e:
         logger.error(f"--- [NODE] CONSULTANT TOOL ERROR component scan error: {e}")
 
@@ -231,7 +411,8 @@ def search_components(query: str, runtime: ToolRuntime) -> list:  # noqa: C901
                 warnings.append("Semantic search skipped because the query was empty after normalization.")
                 semantic_query = clean_query
 
-            docs_and_scores = data_loader.vector_store.similarity_search_with_score(
+            with _faiss_lock:
+                docs_and_scores = data_loader.vector_store.similarity_search_with_score(
                 semantic_query, k=settings.RAG_FAISS_K
             )
 
@@ -247,9 +428,9 @@ def search_components(query: str, runtime: ToolRuntime) -> list:  # noqa: C901
                     item_id = meta.get('id')
                     item_type = meta.get('type')
 
-                    if item_id in found_ids or item_id in excluded_templates:
+                    if item_id in excluded_templates or _is_negated(item_id, meta.get('tool', '')):
                         continue
-
+                    # Allow duplicates in results so RRF can see both lists
                     found_ids.add(item_id)
 
                     if item_type == 'template':
@@ -291,10 +472,60 @@ def search_components(query: str, runtime: ToolRuntime) -> list:  # noqa: C901
         r.pop("_score", None)
         r.pop("_semantic", None)
 
-    final_results = results[:settings.MAX_SEARCH_RESULTS]
+    # ── RRF Merging ──
+    # Split into keyword and semantic lists
+    keyword_ranked = []
+    semantic_ranked = []
+    
+    # Sort them by their original metrics
+    kw_results = [r for r in results if not r.get("_semantic")]
+    kw_results.sort(key=lambda x: x.get("_score", 0), reverse=True)
+    keyword_ranked = [r["id"] for r in kw_results]
+    
+    sem_results = [r for r in results if r.get("_semantic")]
+    sem_results.sort(key=lambda x: x.get("_score", 999.0)) # L2 distance, lower is better
+    semantic_ranked = [r["id"] for r in sem_results]
+    
+    RRF_K = 60
+    MIN_RRF = 0.008
+    all_ids = dict.fromkeys(keyword_ranked + semantic_ranked)
+    
+    rrf_scores = {}
+    for pid in all_ids:
+        kw_pos = keyword_ranked.index(pid) if pid in keyword_ranked else len(keyword_ranked)
+        sem_pos = semantic_ranked.index(pid) if pid in semantic_ranked else len(semantic_ranked)
+        rrf_scores[pid] = 1.0 / (RRF_K + kw_pos) + 1.0 / (RRF_K + sem_pos)
+        
+    merged_ids = sorted(rrf_scores.keys(), key=lambda k: rrf_scores[k], reverse=True)
+    
+    # Build final results based on RRF rank
+    results_map = {r["id"]: r for r in results}
+    final_results = []
+    
+    from core.services.knowledge_graph import kg
+    if input_channel or output_channel:
+        if not kg.is_built:
+            store = runtime.store
+            kg.build_graph(store)
+
+    for pid in merged_ids:
+        if rrf_scores[pid] >= MIN_RRF:
+            r = results_map[pid]
+            # Graph RAG Constraint Filtering
+            if input_channel and not kg.find_path(input_channel, pid, runtime.store):
+                continue
+            if output_channel and not kg.find_path(pid, output_channel, runtime.store):
+                continue
+            r.pop("_score", None)
+            r.pop("_semantic", None)
+            final_results.append(r)
+            
+    # Apply limit and offset
+    final_results = final_results[offset:offset+limit]
+                
     if warnings:
         final_results.append({"type": "meta", "warnings": warnings})
-    return final_results
+    return json.dumps(final_results, indent=2)
 
 
 
@@ -302,58 +533,41 @@ def search_components(query: str, runtime: ToolRuntime) -> list:  # noqa: C901
 # TOOL 5: Check channel compatibility between two components
 # ──────────────────────────────────────────────────────────────────────────────
 
-def _parse_nextflow_channels(code: str) -> dict:  # noqa: C901
-    """Parse take: and emit: blocks from Nextflow DSL2 workflow code.
-    Returns {"takes": [...], "emits": [...], "partial": bool}
-    """
+def _parse_nextflow_channels(code: str) -> dict:
+    """Helper: parses a Nextflow DSL2 source code block for its take/emit channels."""
     takes = []
     emits = []
-    partial = False
+    
+    # First isolate the NAMED workflow block to avoid the anonymous entrypoint
+    workflow_match = re.search(r'\bworkflow\s+([_a-zA-Z0-9]+)\s*\{(.*)', code, re.DOTALL)
+    workflow_body = workflow_match.group(2) if workflow_match else code
 
-    if not code or not code.strip():
-        return {"takes": [], "emits": [], "partial": True}
-
-    # Check for truncation indicators
-    if "// ... (truncated)" in code or code.strip().endswith("..."):
-        partial = True
-
-    # Parse take: block — lines after "take:" until "main:" or "emit:" or "}"
+    # Parse take: block — lines after "take:" until "main:" or "emit:" or "\n}"
     take_match = re.search(
-        r'\btake\s*:\s*\n(.*?)(?=\bmain\s*:|\bemit\s*:|\}\s*$|$)',
-        code, re.DOTALL
+        r'\btake\s*:(.*?)(?=\bmain\s*:|\bemit\s*:|\n\s*\}|$)',
+        workflow_body, re.DOTALL
     )
     if take_match:
-        take_block = take_match.group(1)
-        # Each non-empty, non-comment line in the take block is a channel name
-        for line in take_block.strip().split('\n'):
+        for line in take_match.group(1).split('\n'):
             line = line.strip()
-            if line and not line.startswith('//') and not line.startswith('*') and line != '}':
-                # Clean up any trailing comments
-                clean = re.split(r'\s*//', line)[0].strip()
-                if clean:
-                    takes.append(clean)
+            if line and not line.startswith('//'):
+                # Extract first token (the channel name)
+                name = re.split(r'\s', line)[0]
+                takes.append(name)
 
-    # Parse emit: block — lines after "emit:" until "}" or end
+    # Parse emit: block — lines after "emit:" until "\n}" or next top-level block
     emit_match = re.search(
-        r'\bemit\s*:\s*\n(.*?)(?=\}\s*$|\bworkflow\s*\{|$)',
-        code, re.DOTALL
+        r'\bemit\s*:(.*?)(?=\n\s*\}|\n\s*\bworkflow\b|\n\s*\bprocess\b|$)',
+        workflow_body, re.DOTALL
     )
     if emit_match:
-        emit_block = emit_match.group(1)
-        for line in emit_block.strip().split('\n'):
+        for line in emit_match.group(1).split('\n'):
             line = line.strip()
-            if line and not line.startswith('//') and not line.startswith('*') and line != '}':
-                # Handle "channel_name = expression" and "channel_name" forms
-                clean = re.split(r'\s*//', line)[0].strip()
-                # Extract the channel name (left side of = or the whole line)
-                if '=' in clean:
-                    chan_name = clean.split('=')[0].strip()
-                else:
-                    chan_name = clean.split('.')[0].strip()  # e.g. "process_out.data" → "process_out"
-                if chan_name and chan_name != '}':
-                    emits.append(chan_name)
+            if line and not line.startswith('//'):
+                name = re.split(r'\s|=', line)[0]
+                emits.append(name)
 
-    return {"takes": takes, "emits": emits, "partial": partial}
+    return {"takes": takes, "emits": emits, "partial": False}
 
 
 def _parse_include_statements(code: str) -> list:
@@ -384,7 +598,7 @@ def _parse_include_statements(code: str) -> list:
 # ──────────────────────────────────────────────────────────────────────────────
 
 @tool
-def check_plan_logic(component_ids: list, template_id: str, runtime: ToolRuntime) -> dict:  # noqa: C901
+def check_plan_logic(component_ids: list, template_id: str, runtime: ToolRuntime) -> str:  # noqa: C901
     """Validate that the components selected exist and that the plan aligns with a reference template.
     Use this as a final sanity check before writing your formal plan.
 
@@ -400,11 +614,11 @@ def check_plan_logic(component_ids: list, template_id: str, runtime: ToolRuntime
 
     if not component_ids:
         logger.info("--- [NODE] CONSULTANT TOOL no component ids provided")
-        return {
+        return json.dumps({
             "valid": False,
             "issues": ["No component IDs provided"],
             "warnings": [],
-        }
+        }, indent=2)
 
     # we check if all ids are real
     valid_ids = []
@@ -565,7 +779,7 @@ def check_plan_logic(component_ids: list, template_id: str, runtime: ToolRuntime
     if template_coverage:
         result["template_coverage"] = template_coverage
 
-    return result
+    return json.dumps(result, indent=2)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -574,7 +788,7 @@ def check_plan_logic(component_ids: list, template_id: str, runtime: ToolRuntime
 # ──────────────────────────────────────────────────────────────────────────────
 
 @tool
-def find_component_usage(component_id: str, runtime: ToolRuntime) -> dict:
+def find_component_usage(component_id: str, runtime: ToolRuntime) -> str:
     """Find real examples of how a specific component is used inside existing templates.
     Use this to see what channels it typically takes, what helpers it uses, etc.
 
@@ -586,16 +800,16 @@ def find_component_usage(component_id: str, runtime: ToolRuntime) -> dict:
     comp = store.get(("components",), component_id)
     tmpl = store.get(("templates",), component_id) if not comp else None
     if not comp and not tmpl:
-        return {"error": f"Component '{component_id}' not found in catalog"}
+        return json.dumps({"error": f"Component '{component_id}' not found in catalog"}, indent=2)
 
     # Look up the pre-built usage index
     usage_item = store.get(("usage",), component_id)
     if not usage_item:
-        return {
+        return json.dumps({
             "component_id": component_id,
             "used_in_templates": [],
             "note": "This component is not used in any template. You will need to wire it based on its take/emit channels."
-        }
+        }, indent=2)
 
     usages = usage_item.value.get("usages", [])
     logger.info(f"--- [NODE] CONSULTANT TOOL find_component_usage: {component_id} found in {len(usages)} templates")
@@ -608,11 +822,11 @@ def find_component_usage(component_id: str, runtime: ToolRuntime) -> dict:
             "usage_snippet": u.get("snippet", "(no snippet)"),
         })
 
-    return {
+    return json.dumps({
         "component_id": component_id,
         "used_in_templates": results,
         "count": len(results),
-    }
+    }, indent=2)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -620,117 +834,448 @@ def find_component_usage(component_id: str, runtime: ToolRuntime) -> dict:
 # ──────────────────────────────────────────────────────────────────────────────
 
 @tool
-def search_helper_functions(query: str, runtime: ToolRuntime) -> list:
+def search_helper_functions(query: str, runtime: ToolRuntime) -> str:
     """Search for available helper functions by keyword (e.g., 'input', 'reference', 'metadata').
     Use this to find built-in data retrieval and formatting functions.
 
     Args:
         query: Search terms describing the helper function (e.g., 'retrieve fastq', 'parse riscd').
     """
+    import json
     store = runtime.store
     res_item = store.get(("resources",), "helper_functions")
     res_list = res_item.value.get("list", []) if res_item else []
 
     if not res_list:
-        return [{"error": "No helper functions found in the catalog."}]
+        return json.dumps([{"error": "No helper functions found in the catalog."}], indent=2)
 
-    query_tokens = [q.lower() for q in re.split(r'[^a-z0-9]', query.lower()) if q]
+    def dice_coefficient(a: str, b: str) -> float:
+        a, b = a.lower(), b.lower()
+        if not a or not b: return 0.0
+        if a == b: return 1.0
+        if len(a) == 1 or len(b) == 1: return 1.0 if a == b else 0.0
+        a_bigrams = {a[i:i+2] for i in range(len(a)-1)}
+        b_bigrams = {b[i:i+2] for i in range(len(b)-1)}
+        overlap = len(a_bigrams & b_bigrams)
+        return overlap * 2.0 / (len(a_bigrams) + len(b_bigrams))
+
+    query_tokens = [q.lower() for q in re.split(r'[^a-z0-9]', query.lower()) if len(q) >= 2]
     if not query_tokens:
-        return [{"error": "Invalid search query."}]
+        return json.dumps([{"error": "Invalid search query."}], indent=2)
 
     results = []
     for h in res_list:
-        score = 0
-        name = h.get('name', '').lower()
-        desc = h.get('description', '').lower()
-        keywords = [k.lower() for k in h.get('keywords', [])]
-        aliases = [a.lower() for a in h.get('aliases', [])]
-
+        score = 0.0
+        name = h.get('name', '')
+        desc = h.get('description', '')
+        keywords = h.get('keywords', [])
+        aliases = h.get('aliases', [])
+        
+        target_strings = [name, desc] + keywords + aliases
+        
         for q in query_tokens:
-            if len(q) < 3: continue
-            if q in name: score += 10
-            if q in desc: score += 5
-            if any(q in k for k in keywords): score += 8
-            if any(q in a for a in aliases): score += 8
-
-        if score > 0:
+            if q == name.lower():
+                score += 10.0
+            elif q in name.lower():
+                score += 3.0
+            best_dice = max((dice_coefficient(q, t) for t in target_strings if t), default=0.0)
+            score += best_dice
+            # Bonus for exact substring match
+            if any(q in t.lower() for t in target_strings if t):
+                score += 0.5
+                
+        if score > 0.3:
             results.append((score, h))
 
     results.sort(key=lambda x: x[0], reverse=True)
 
     if not results:
-        return [{"warning": "No helper functions matched your query."}]
+        return json.dumps([{"warning": "No helper functions matched your query."}], indent=2)
 
-    return [
+    return json.dumps([
         {
             "name": h.get('name'),
             "description": h.get('description'),
-            "usage": h.get('usage')
+            "usage": h.get('usage'),
+            "num_args": h.get('num_args', 0),
+            "arguments": h.get('arguments', [])
         } for _, h in results[:5]
-    ]
+    ], indent=2)
 
 
 @tool
-def search_design_patterns(query: str, runtime: ToolRuntime) -> list:
-    """Search for domain-specific data-shaping design patterns by keyword.
-    Use this when you are unsure how to wire domain-specific components
+def search_design_patterns(query: str, runtime: ToolRuntime) -> str:
+    """Search for domain-specific data-shaping design patterns using semantic and keyword hybrid search.
+    Use this when you are unsure how to wire domain-specific components.
 
     Args:
-        query: Search terms describing the pattern (e.g., 'host depletion').
+        query: Search terms describing the pattern (e.g., 'host depletion', 'cross multiMap').
     """
+    import json
+    from core.loader import data_loader
+    from core.services.query_normalizer import build_semantic_query, normalize_query
+
     store = runtime.store
     items = store.search(("patterns",))
     if not items:
-        return [{"error": "No design patterns found in the catalog."}]
+        return json.dumps([{"error": "No design patterns found in the catalog."}], indent=2)
 
-    query_tokens = [q.lower() for q in re.split(r'[^a-z0-9]', query.lower()) if q]
+    query_info = normalize_query(query)
+    query_tokens = query_info["query_tokens"]
+    clean_query = query_info["clean_query"]
+    
     if not query_tokens:
-        return [{"error": "Invalid search query."}]
+        return json.dumps([{"warning": "Invalid search query."}], indent=2)
 
     results = []
+    
+    # ── 1. Keyword Search (Exact Match) ──
     for item in items:
         p = item.value
-        score = 0
-        name = p.get('title', '').lower()
-        desc = p.get('description', '').lower()
-        use_cases = str(p.get('use_cases', '')).lower()
-        code = str(p.get('groovy_code', '')).lower()
-
+        score = 0.0
+        
+        target_strings = [
+            p.get('title', '').lower(),
+            p.get('description', '').lower(),
+            str(p.get('use_cases', '')).lower(),
+            str(p.get('groovy_code', '')).lower()
+        ]
+        
         for q in query_tokens:
             if len(q) < 3: continue
-            if q in name: score += 10
-            if q in desc: score += 5
-            if q in use_cases: score += 5
-            if q in code: score += 3
-
+            if any(q in t for t in target_strings):
+                score += 5.0
+                
         if score > 0:
-            results.append((score, p))
+            p["_score"] = score
+            p["id"] = p.get("title", str(id(p)))
+            results.append(p)
+            
+    # ── 2. FAISS Semantic Search ──
+    if data_loader.vector_store:
+        semantic_query = build_semantic_query(clean_query, query_tokens)
+        if semantic_query:
+            with _faiss_lock:
+                docs_and_scores = data_loader.vector_store.similarity_search_with_score(
+                    semantic_query, k=10
+                )
+            
+            MAX_L2 = 1.0
+            for doc, l2_dist in docs_and_scores:
+                if l2_dist > MAX_L2: continue
+                
+                doc_type = doc.metadata.get("type")
+                if doc_type != "patterns":
+                    continue
+                    
+                doc_title = doc.metadata.get("id")
+                matched_item = None
+                for item in items:
+                    if item.value.get("title") == doc_title:
+                        matched_item = item.value
+                        break
+                        
+                if matched_item:
+                    sem_res = dict(matched_item)
+                    sem_res["id"] = doc_title
+                    sem_res["_score"] = l2_dist
+                    sem_res["_semantic"] = True
+                    results.append(sem_res)
+                    
+    # ── RRF Merging ──
+    keyword_ranked = []
+    semantic_ranked = []
+    
+    kw_results = [r for r in results if not r.get("_semantic")]
+    kw_results.sort(key=lambda x: x.get("_score", 0), reverse=True)
+    keyword_ranked = [r["id"] for r in kw_results]
+    
+    sem_results = [r for r in results if r.get("_semantic")]
+    sem_results.sort(key=lambda x: x.get("_score", 999.0))
+    semantic_ranked = [r["id"] for r in sem_results]
+    
+    RRF_K = 60
+    MIN_RRF = 0.008
+    all_ids = dict.fromkeys(keyword_ranked + semantic_ranked)
+    
+    rrf_scores = {}
+    for pid in all_ids:
+        kw_pos = keyword_ranked.index(pid) if pid in keyword_ranked else len(keyword_ranked)
+        sem_pos = semantic_ranked.index(pid) if pid in semantic_ranked else len(semantic_ranked)
+        rrf_scores[pid] = 1.0 / (RRF_K + kw_pos) + 1.0 / (RRF_K + sem_pos)
+        
+    merged_ids = sorted(rrf_scores.keys(), key=lambda k: rrf_scores[k], reverse=True)
+    
+    results_map = {r["id"]: r for r in results}
+    final_results = []
+    for pid in merged_ids:
+        if rrf_scores[pid] >= MIN_RRF:
+            r = results_map[pid]
+            r.pop("_score", None)
+            r.pop("_semantic", None)
+            r.pop("id", None)
+            final_results.append(r)
+            if len(final_results) >= 3:
+                break
+                
+    if not final_results:
+        return json.dumps([{"warning": "No design patterns matched your query."}], indent=2)
+        
+    return json.dumps(final_results, indent=2)
 
-    results.sort(key=lambda x: x[0], reverse=True)
 
-    if not results:
-        return [{"warning": "No design patterns matched your query."}]
 
-    return [
-        {
-            "title": p.get('title'),
-            "description": p.get('description'),
-            "use_cases": p.get('use_cases', []),
-            "groovy_code": p.get('groovy_code', ''),
-            "caveats": p.get('caveats', []),
-        } for _, p in results[:3]
-    ]
+# ──────────────────────────────────────────────────────────────────────────────
+# TOOL 7: Grep Codebase
+# ──────────────────────────────────────────────────────────────────────────────
+
+@tool
+def grep_codebase(pattern: str, runtime: ToolRuntime) -> str:
+    """Find pattern matches within the Nextflow templates and components.
+    Use this to look for specific variable names, process calls, or groovy syntax.
+
+    Args:
+        pattern: The search term or pattern to look for.
+    """
+    import re
+    import json
+    from core.loader import data_loader
+
+    try:
+        regex = re.compile(pattern, re.IGNORECASE)
+        matches = []
+
+        # 1. Search in-memory code_db
+        code_db = getattr(data_loader, "code_db", {})
+        for name, content in code_db.items():
+            if not isinstance(content, str):
+                continue
+            for line_no, line in enumerate(content.split("\n"), 1):
+                if regex.search(line):
+                    matches.append({
+                        "file": f"{name}.nf",
+                        "line": str(line_no),
+                        "content": line.strip()
+                    })
+                    if len(matches) >= 50:
+                        break
+            if len(matches) >= 50:
+                break
+
+        if not matches:
+            return json.dumps([{"warning": "No matches found."}], indent=2)
+
+        return json.dumps(matches, indent=2)
+    except Exception as e:
+        return json.dumps([{"error": str(e)}], indent=2)
+
+@tool
+def auto_complete_pipeline_dag(component_ids: list, runtime: ToolRuntime) -> str:
+    """Use the Knowledge Graph to automatically find the missing components needed to connect a list of disjoint components.
+    
+    Args:
+        component_ids: A list of component IDs you want to connect.
+    """
+    import json
+    from core.services.knowledge_graph import kg
+    store = runtime.store
+    
+    if not kg.is_built:
+        kg.build_graph(store)
+        
+    if not component_ids:
+        return json.dumps({"error": "No component IDs provided."}, indent=2)
+        
+    if len(component_ids) == 1:
+        return json.dumps({"warning": "Only one component provided. Nothing to connect."}, indent=2)
+        
+    issues = []
+    result_path = [component_ids[0]]
+    
+    for i in range(len(component_ids) - 1):
+        source = component_ids[i]
+        target = component_ids[i+1]
+        
+        try:
+            path = kg.find_path(source, target, store)
+            if not path:
+                issues.append(f"No logical path found between {source} and {target}")
+                result_path.append(target)
+            else:
+                for p in path[1:]:
+                    result_path.append(p)
+        except Exception as e:
+            issues.append(f"Error connecting {source} and {target}: {str(e)}")
+            result_path.append(target)
+            
+    final_path = []
+    for p in result_path:
+        if not final_path or final_path[-1] != p:
+            final_path.append(p)
+            
+    return json.dumps({
+        "original_ids": component_ids,
+        "completed_ids": final_path,
+        "issues": issues,
+        "auto_completed": len(final_path) > len(component_ids)
+    }, indent=2)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
 # EXPORT: Tool list for ToolNode registration
 # ──────────────────────────────────────────────────────────────────────────────
+# GRAPHIFY TOOLS: Knowledge Graph Query, Traversal, Explain, and Pathfinding
+# ──────────────────────────────────────────────────────────────────────────────
+
+@tool
+def query_knowledge_graph(
+    question: str,
+    mode: str = "bfs",
+    depth: int = 2,
+    token_budget: int = 2000,
+    confidence_filter: Optional[str] = None,
+) -> str:
+    """Execute Graphify natural-language search and traversal over the Nextflow Component Catalog.
+
+    Returns an extracted subgraph of components and directed dataflow channels with confidence tiers:
+      - EXTRACTED: Real Nextflow AST wiring from tool_graph.json
+      - INFERRED: Co-occurrence in production pipeline templates
+      - AMBIGUOUS: Channel name heuristic match
+
+    Args:
+        question: Natural language question or bioinformatic task (e.g. 'how to trim fastq and call variants with freebayes')
+        mode: 'bfs' for broad exploration of alternative tools, 'dfs' for tracing a linear execution pipeline
+        depth: Traversal hops (1 to 3, default 2)
+        token_budget: Maximum tokens in formatted response (default 2000)
+        confidence_filter: Optional comma-separated filter (e.g. 'EXTRACTED,INFERRED' to ignore ambiguous edges)
+    """
+    from core.services.knowledge_graph import kg
+
+    if not kg.is_built:
+        return json.dumps({"error": "Knowledge graph not yet built. Will be ready after initialization."})
+
+    filters = [c.strip() for c in confidence_filter.split(",")] if confidence_filter else None
+    return kg.query_graph(
+        question=question,
+        mode=mode,
+        depth=depth,
+        token_budget=token_budget,
+        context_filters=filters,
+    )
+
+
+@tool
+def search_component_graph(query: str, depth: int = 2) -> str:
+    """Backward-compatible alias for query_knowledge_graph (BFS mode)."""
+    return query_knowledge_graph(question=query, mode="bfs", depth=depth)
+
+
+@tool
+def explain_component(component_id_or_name: str) -> str:
+    """Inspect full architectural details and all incoming/outgoing dataflow connections for a component.
+
+    Use this when you want to verify what exact channels feed into a tool and what tools can consume its output.
+
+    Args:
+        component_id_or_name: Component ID (e.g. 'step_1PP_trimming__fastp') or tool name (e.g. 'fastp')
+    """
+    from core.services.knowledge_graph import kg
+
+    if not kg.is_built:
+        return json.dumps({"error": "Knowledge graph not yet built."})
+
+    return kg.explain_node(component_id_or_name)
+
+
+@tool
+def get_component_neighbors(
+    component_id: str,
+    direction: str = "both",
+    relation_filter: Optional[str] = None,
+) -> str:
+    """Get direct upstream or downstream connected components in the dataflow graph.
+
+    Args:
+        component_id: The ID of the component to inspect
+        direction: 'in' for upstream producers, 'out' for downstream consumers, or 'both'
+        relation_filter: Optional filter ('dataflow', 'co_usage')
+    """
+    from core.services.knowledge_graph import kg
+
+    if not kg.is_built:
+        return json.dumps({"error": "Knowledge graph not yet built."})
+
+    return kg.get_neighbors(component_id, direction=direction, relation_filter=relation_filter)
+
+
+@tool
+def get_community_components(community_id: int) -> str:
+    """List all catalog components belonging to a functional subworkflow community/cluster.
+
+    Args:
+        community_id: Numeric community ID discovered from query_knowledge_graph or explain_component
+    """
+    from core.services.knowledge_graph import kg
+
+    if not kg.is_built:
+        return json.dumps({"error": "Knowledge graph not yet built."})
+
+    return kg.get_community(community_id)
+
+
+@tool
+def get_catalog_god_nodes(top_n: int = 10) -> str:
+    """List the most central, highly-connected tools in the catalog (god nodes / hubs).
+
+    Args:
+        top_n: Number of hubs to list (default 10)
+    """
+    from core.services.knowledge_graph import kg
+
+    if not kg.is_built:
+        return json.dumps({"error": "Knowledge graph not yet built."})
+
+    return kg.get_god_nodes(top_n=top_n)
+
+
+@tool
+def find_dataflow_path(source_component: str, target_component: str, directed: bool = True) -> str:
+    """Find the shortest dataflow path between two components in the structural knowledge graph.
+
+    Prefers EXTRACTED edges (real Nextflow AST wiring) over INFERRED/AMBIGUOUS edges.
+
+    Args:
+        source_component: The ID or name of the producer component
+        target_component: The ID or name of the consumer component
+        directed: True to follow dataflow direction (source -> target), False for undirected
+    """
+    from core.services.knowledge_graph import kg
+
+    if not kg.is_built:
+        return json.dumps({"error": "Knowledge graph not yet built."})
+
+    return kg.find_path_detailed(source_component, target_component, directed=directed)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
 
 CONSULTANT_TOOLS = [
     lookup_catalog_item,
+    lookup_components_batch,
     search_components,
     check_plan_logic,
     find_component_usage,
     search_helper_functions,
     search_design_patterns,
+    auto_complete_pipeline_dag,
+    grep_codebase,
+    query_knowledge_graph,
+    search_component_graph,
+    explain_component,
+    get_component_neighbors,
+    get_community_components,
+    get_catalog_god_nodes,
+    find_dataflow_path,
 ]
+
+

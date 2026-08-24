@@ -51,26 +51,12 @@ def _detect_approval(messages: list) -> bool:
 # ──────────────────────────────────────────────────────────────────────────────
 
 def _sanitize_messages_for_api(messages: list) -> list:
-    """Removes orphaned tool calls and patches missing tool responses."""
+    """Ensures every tool call has a corresponding tool response for strict API compliance."""
     answered_ids = {m.tool_call_id for m in messages if isinstance(m, LCToolMessage)}
 
     patched = []
     for msg in messages:
-        if isinstance(msg, AIMessage) and getattr(msg, "tool_calls", None):
-            # If all tool calls are unanswered AND they belong to the architect, we skip the AI message entirely
-            tc_ids = {tc.get("id") or tc.get("tool_call_id") for tc in msg.tool_calls}
-            tc_names = {tc.get("name", "") for tc in msg.tool_calls}
-
-            is_orphan = (
-                tc_names <= {"lookup_component_code", "validate_body_code"}
-                and all(t_id not in answered_ids for t_id in tc_ids if t_id)
-            )
-            if is_orphan:
-                continue
-
         patched.append(msg)
-
-        # Patch any missing tool responses for remaining AI tool calls
         if isinstance(msg, AIMessage) and getattr(msg, "tool_calls", None):
             for tc in msg.tool_calls:
                 tc_id = tc.get("id") or tc.get("tool_call_id")
@@ -113,19 +99,17 @@ def consultant_node(state: GraphState) -> Any:
 
     is_approval_turn = _detect_approval(current_messages)
 
-    revision_context = f"""
-    # CURRENT PIPELINE STATE
-    If you are making a revision, here is the current approved state of the pipeline:
-    - Current Modules: {current_components}
-    - Current Template: {current_template}
-    - Current Plan: {current_plan}
+    revision_context = f"""### CURRENT PIPELINE STATE & REVISION CONTEXT
+- Current Modules: {current_components}
+- Current Template: {current_template}
+- Current Plan: {current_plan}
 
-    ## Previously Gathered Tool Facts (from earlier in this conversation):
-    {formatted_facts if formatted_facts else '(none yet)'}
-    """
+## Previously Gathered Tool Facts:
+{formatted_facts if formatted_facts else '(none yet)'}"""
 
     from langchain_core.messages import SystemMessage
-    system_msg = SystemMessage(content=CONSULTANT_SYSTEM_PROMPT + "\n\n" + revision_context)
+    # [Head / Fixed Prefix]: Invariant system prompt ensures 100% vLLM prefix cache hits across turns
+    system_msg = SystemMessage(content=CONSULTANT_SYSTEM_PROMPT)
     prompt = ChatPromptTemplate.from_messages([
         system_msg,
         MessagesPlaceholder(variable_name="messages")
@@ -133,23 +117,29 @@ def consultant_node(state: GraphState) -> Any:
 
     from core.tool_registry import get_consultant_tools
     if is_approval_turn:
+        # Skip LLM entirely — the extract node shortcircuits this turn anyway.
+        # Calling the model without tools causes Devstral/Mistral to emit
+        # "I don't have the tools to help" which pollutes message history.
         logger.info("consultant_approval_turn_no_tools")
-        chain = prompt | llm
-    else:
-        llm_with_tools = llm.bind_tools(get_consultant_tools())
-        chain = prompt | llm_with_tools
+        approval_msg = AIMessage(content="Understood — proceeding to build the pipeline as planned.")
+        logger.info("consultant_tool_calls", count=0)
+        return {"messages": [approval_msg]}
 
+    llm_with_tools = llm.bind_tools(get_consultant_tools())
+    chain = prompt | llm_with_tools
     safe_messages = _sanitize_messages_for_api(current_messages)
+
+    # [Middle-Tail / Dynamic Context]: Prepend revision state to dynamic messages if state/facts exist
+    has_active_state = (current_plan != "No plan generated yet.") or bool(current_components) or bool(formatted_facts)
+    if has_active_state and safe_messages:
+        # If the first message is a HumanMessage, prepend the revision context into the prompt stream
+        if isinstance(safe_messages[0], HumanMessage) and "### CURRENT PIPELINE STATE" not in str(safe_messages[0].content):
+            safe_messages = [HumanMessage(content=f"{revision_context.strip()}\n\n{safe_messages[0].content}")] + safe_messages[1:]
+        elif not isinstance(safe_messages[0], HumanMessage):
+            safe_messages = [HumanMessage(content=revision_context.strip())] + safe_messages
 
     try:
         result = with_exponential_backoff(chain.invoke)({"messages": safe_messages})
-
-        if is_approval_turn and getattr(result, "tool_calls", None):
-            logger.info("consultant_stripped_hallucinated_tool_calls", count=len(result.tool_calls))
-            result = AIMessage(
-                content=result.content or "Understood — I'll proceed to build the pipeline as planned.",
-                id=getattr(result, "id", None),
-            )
 
         tool_call_count = len(result.tool_calls) if getattr(result, "tool_calls", None) else 0
         logger.info("consultant_tool_calls", count=tool_call_count)
@@ -199,45 +189,40 @@ def _get_approval_shortcircuit(messages: list, state: GraphState) -> dict:
     }
 
 
-def _synthesize_ai_content(messages: list) -> str | None:
+def _get_ai_content(messages: list) -> str:
+    """Extract real assistant response text without injecting artificial filler."""
     for msg in reversed(messages):
         if isinstance(msg, AIMessage) and msg.content and not getattr(msg, 'tool_calls', None):
-            return msg.content
+            return str(msg.content)
 
     for msg in reversed(messages):
         if isinstance(msg, AIMessage) and msg.content:
-            return msg.content
+            return str(msg.content)
 
-    tool_summaries = []
-    for msg in reversed(messages[-settings.CONTEXT_WINDOW_REPAIR:]):
-        if hasattr(msg, 'type') and msg.type == 'tool' and msg.content:
-            tool_summaries.append(str(msg.content)[:settings.MAX_TOOL_RESULT_PREVIEW])
-        if len(tool_summaries) >= 5:
-            break
-
-    if tool_summaries:
-        logger.info("consultant_extract_synthesized_reasoning")
-        return (
-            "The consultant was investigating with tools but did not produce "
-            "a final text response. Here are the most recent tool results:\n"
-            + "\n---\n".join(reversed(tool_summaries))
-        )
-    return None
+    return ""
 
 
 def _validate_approved_components(result: ConsultantOutput, store: BaseStore) -> None:
-    if result.used_template_id and not store.get(("templates",), result.used_template_id):
-        logger.warning("hallucinated_template", id=result.used_template_id)
-        result.used_template_id = None
+    from core.services.knowledge_graph import kg
+    if store and not kg.is_built:
+        kg.build_nx_graph(store)
 
-    verified_components = []
+    if result.used_template_id:
+        proj_tmpl = kg.project_vertex(result.used_template_id) if kg.is_built else None
+        if proj_tmpl:
+            result.used_template_id = proj_tmpl
+        elif store and not store.get(("templates",), result.used_template_id):
+            logger.warning("hallucinated_template", id=result.used_template_id)
+            result.used_template_id = None
+
+    if kg.is_built and result.selected_component_ids:
+        # Check and bridge topological path reachability
+        bridged = kg.bridge_pipeline_path(result.selected_component_ids)
+        result.selected_component_ids = bridged
+
     for mod_id in result.selected_component_ids:
-        if store.get(("components",), mod_id) or store.get(("templates",), mod_id):
-            verified_components.append(mod_id)
-        else:
-            logger.warning("hallucinated_module", id=mod_id)
-
-    result.selected_component_ids = verified_components
+        if store and not store.get(("components",), mod_id) and not store.get(("templates",), mod_id):
+            logger.warning("hallucinated_module_passed_to_hydrator", id=mod_id)
 
 
 def _build_extraction_context(messages: list) -> tuple[str, list[dict]]:
@@ -245,6 +230,8 @@ def _build_extraction_context(messages: list) -> tuple[str, list[dict]]:
     conversation_summary = []
     tool_memory_new = []
 
+    from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+    
     for msg in messages[-settings.CONTEXT_WINDOW_EXTRACT:]:
         if isinstance(msg, AIMessage):
             if getattr(msg, "tool_calls", None):
@@ -263,6 +250,8 @@ def _build_extraction_context(messages: list) -> tuple[str, list[dict]]:
                 })
         elif isinstance(msg, HumanMessage):
             conversation_summary.append(f"[USER] {msg.content}")
+        elif isinstance(msg, SystemMessage):
+            conversation_summary.append(f"[SYSTEM] {msg.content}")
 
     return "\n".join(conversation_summary), tool_memory_new
 
@@ -281,30 +270,42 @@ def consultant_extract_node(state: GraphState, store: BaseStore) -> Any:  # noqa
         # If not, let the extractor LLM run so it can pull them from the conversation history.
         return _get_approval_shortcircuit(messages, state)
 
-    last_ai_content = _synthesize_ai_content(messages)
-    if not last_ai_content:
+    last_ai_content = _get_ai_content(messages)
+    context_text, tool_memory_new = _build_extraction_context(messages)
+    if not last_ai_content and not context_text:
         return {
             "messages": [AIMessage(content="I couldn't generate a response. Please try rephrasing your request.")],
             "error": "No consultant response to extract from"
         }
 
-    context_text, tool_memory_new = _build_extraction_context(messages)
-
+    reasoning_payload = last_ai_content if last_ai_content else "(Direct tool actions — see conversation context above)"
     extraction_prompt = ChatPromptTemplate.from_messages([
         ("system", EXTRACTOR_SYSTEM_PROMPT),
         ("human", "CONVERSATION CONTEXT:\n{context}\n\nFINAL CONSULTANT MESSAGE:\n{reasoning}")
     ])
 
-    extractor = llm.with_structured_output(ConsultantOutput)
+    extractor = llm.with_structured_output(ConsultantOutput, method="json_schema", include_raw=False)
     chain = extraction_prompt | extractor
 
     try:
         result = chain.invoke({
             "context": context_text,
-            "reasoning": last_ai_content
+            "reasoning": reasoning_payload
         })
 
+        if _detect_approval(messages):
+            result.status = "APPROVED"
+            
         logger.info("consultant_extract_status", status=result.status)
+
+        # 1. Active Bipartite Vertex Partitioning & Canonical Projection on Knowledge Graph
+        from core.services.knowledge_graph import kg
+        if store and not kg.is_built:
+            kg.build_nx_graph(store)
+
+        if kg.is_built and result.selected_component_ids:
+            valid_comps, helper_funcs = kg.partition_raw_ids(result.selected_component_ids)
+            result.selected_component_ids = kg.expand_composite_components(valid_comps, store=store)
 
         if result.status == "APPROVED":
             if not result.selected_component_ids:
@@ -319,22 +320,36 @@ def consultant_extract_node(state: GraphState, store: BaseStore) -> Any:  # noqa
                                 extracted.append(data.get("id"))
                         except Exception:
                             pass
-                result.selected_component_ids = extracted
+                result.selected_component_ids = kg.expand_composite_components(extracted, store=store) if kg.is_built else extracted
 
             _validate_approved_components(result, store)
 
         is_hard_reset = (result.status == "CHATTING" and not result.draft_plan and len(result.selected_component_ids) == 0)
 
+        # In CHATTING mode without a concrete draft plan (e.g. diagnostic probing / conflict refusal), ensure components list stays empty
+        if result.status == "CHATTING" and (not result.draft_plan or len(str(result.draft_plan).strip()) < 15):
+            result.selected_component_ids = []
+            final_ids = []
+        else:
+            final_ids = result.selected_component_ids if result.selected_component_ids else ([] if is_hard_reset else state.get("selected_component_ids", []))
+            if final_ids and kg.is_built:
+                final_ids = kg.expand_composite_components(final_ids, store=store)
+
         # FIX: Ensure we slice the *combined* array, not just the new additions, to prevent infinite growth.
         combined_memory = (state.get("tool_memory", []) or []) + tool_memory_new
         pruned_memory = combined_memory[-settings.MEMORY_MAX_TOOL_FACTS:]
 
-        final_ids = result.selected_component_ids if result.selected_component_ids else ([] if is_hard_reset else state.get("selected_component_ids", []))
+        if result.draft_plan:
+            edges_str = "\n".join([f"- {e.upstream_component} -> [{e.channel}] -> {e.downstream_component}" for e in result.semantic_edges]) if result.semantic_edges else "None"
+            inputs_str = "\n".join([f"- `{i.variable}` = `{i.source_helper}`" for i in result.input_assignments]) if result.input_assignments else "None"
+            enriched_plan = f"{result.draft_plan}\n\n### INPUT ASSIGNMENTS:\n{inputs_str}\n\n### SEMANTIC BRIDGES:\n{edges_str}"
+        else:
+            enriched_plan = None
 
         state_updates = {
             "messages": [AIMessage(content=result.response_to_user)],
             "consultant_status": result.status,
-            "design_plan": result.draft_plan if result.draft_plan else (None if is_hard_reset else state.get("design_plan")),
+            "design_plan": enriched_plan if enriched_plan else (None if is_hard_reset else state.get("design_plan")),
             "strategy_selector": result.strategy_selector if result.strategy_selector else (None if is_hard_reset else state.get("strategy_selector", "CUSTOM_BUILD")),
             "used_template_id": result.used_template_id if result.used_template_id else (None if is_hard_reset else state.get("used_template_id")),
             "selected_component_ids": final_ids,

@@ -68,7 +68,7 @@ except Exception:
 def build_faiss_index(
     catalog_dir: Path,
     output_dir: Path,
-    embedding_model: str = "nomic-ai/nomic-embed-text-v1.5",
+    embedding_model: str = "Qwen/Qwen3-Embedding-0.6B",
 ) -> dict:
     """Build a FAISS index from catalog JSON files.
 
@@ -82,7 +82,7 @@ def build_faiss_index(
     Returns:
         Summary dict with entry count
     """
-    from langchain.schema import Document
+    from langchain_core.documents import Document
     from langchain_community.vectorstores import FAISS
     from langchain_huggingface import HuggingFaceEmbeddings
 
@@ -143,7 +143,7 @@ def build_faiss_index(
 def build_chroma_index(
     catalog_dir: Path,
     output_dir: Path,
-    embedding_model: str = "nomic-ai/nomic-embed-text-v1.5",
+    embedding_model: str = "Qwen/Qwen3-Embedding-0.6B",
 ) -> dict:
     """Build a ChromaDB index from catalog JSON files.
 
@@ -158,7 +158,7 @@ def build_chroma_index(
         Summary dict with entry count
     """
     import chromadb
-    from langchain.schema import Document
+    from langchain_core.documents import Document
     from langchain_community.vectorstores import Chroma
     from langchain_huggingface import HuggingFaceEmbeddings
 
@@ -262,3 +262,90 @@ def _template_to_text(tmpl: dict) -> str:
     if seq_types:
         parts.append(f"seq_types: {', '.join(str(s) for s in seq_types)}")
     return " | ".join(p for p in parts if p)
+
+
+def _pattern_to_text(p: dict) -> str:
+    """Convert a pattern entry to searchable text for embedding.
+
+    Deliberately excludes groovy_code — DSL2 operators like .cross() and .multiMap()
+    appear verbatim in dozens of patterns and would collapse the embedding space.
+    Tags explicitly capture operator names for recall; title/description/use_cases
+    capture the semantic intent.
+    """
+    parts = [
+        str(p.get("title") or ""),
+        str(p.get("description") or ""),
+        " ".join(str(u) for u in (p.get("use_cases") or [])),
+        " ".join(str(t) for t in (p.get("tags") or [])),
+    ]
+    return " | ".join(x for x in parts if x)
+
+
+def build_patterns_index(
+    catalog_dir: Path,
+    output_dir: Path,
+    embedding_model: str = "Qwen/Qwen3-Embedding-0.6B",
+) -> dict:
+    """Build a separate FAISS index for design patterns.
+
+    Patterns are embedded into a dedicated sub-index rather than the main
+    component/template index. This allows independent L2 threshold tuning
+    and prevents pattern docs from contaminating search_components results.
+
+    Args:
+        catalog_dir: Path to directory containing patterns.json
+        output_dir: Path to write the patterns FAISS index files
+        embedding_model: HuggingFace model name for embeddings
+
+    Returns:
+        Summary dict with entry count
+    """
+    from langchain_core.documents import Document
+    from langchain_community.vectorstores import FAISS
+    from langchain_huggingface import HuggingFaceEmbeddings
+
+    patterns_path = catalog_dir / "patterns.json"
+    if not patterns_path.exists():
+        print(f"  [EMBEDDER] No patterns.json found at {patterns_path}, skipping.")
+        return {"entries": 0}
+
+    with open(patterns_path, encoding="utf-8") as f:
+        patterns = json.load(f).get("patterns") or []
+
+    if not patterns:
+        print("  [EMBEDDER] patterns.json is empty, skipping.")
+        return {"entries": 0}
+
+    documents = []
+    for p in patterns:
+        text = _pattern_to_text(p)
+        if not text.strip():
+            continue
+        doc = Document(
+            page_content=text,
+            metadata={
+                "id": str(p.get("id") or ""),
+                "type": "pattern",
+            }
+        )
+        documents.append(doc)
+
+    if not documents:
+        print("  [EMBEDDER] No embeddable pattern documents, skipping.")
+        return {"entries": 0}
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    print(f"  [EMBEDDER] Embedding {len(documents)} patterns with {embedding_model}...")
+
+    embeddings = HuggingFaceEmbeddings(
+        model_name=embedding_model,
+        model_kwargs={'device': 'cpu', 'trust_remote_code': True},
+        encode_kwargs={'normalize_embeddings': True, 'batch_size': 4},
+    )
+
+    vector_store = FAISS.from_documents(documents, embeddings)
+    vector_store.save_local(str(output_dir))
+
+    print(f"  [EMBEDDER] Patterns FAISS index saved → {output_dir} ({len(documents)} docs)")
+    return {"entries": len(documents)}
+

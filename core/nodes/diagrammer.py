@@ -44,7 +44,7 @@ def diagram_reason_node(state: GraphState) -> dict:
         HumanMessage(content=f"Here is the Architect's Data Flow Plan and the FINAL GENERATED CODE. Please read the code to understand the exact data operations, then submit the final diagram structure and detailed operation descriptions.\n\n### DATA FLOW PLAN (Component IDs)\n```json\n{plan_context}\n```\n\n### FINAL PIPELINE CODE\n```groovy\n{code_context}\n```")
     ]
     
-    llm = get_llm().with_structured_output(DiagramData)
+    llm = get_llm().with_structured_output(DiagramData, method="json_schema", include_raw=False)
     
     try:
         diagram_data = llm.invoke(diagram_messages)

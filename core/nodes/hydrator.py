@@ -107,7 +107,83 @@ def hydrator_node(state: GraphState, store: BaseStore) -> Any:
     else:
         _build_custom_match(component_ids, context_parts, store)
 
+    resolved_ids = []
+    
+    if component_ids:
+        context_parts.append("### EXACT COMPONENT SCHEMAS")
+        context_parts.append("Use the following deterministic input/output signatures to build the pipeline correctly. You do not need to use check_component_channels for these components:")
+        
+        from core.loader import data_loader
+        
+        for node_id in component_ids:
+            comp_item = store.get(("components",), node_id)
+            if comp_item and comp_item.value:
+                if node_id not in resolved_ids:
+                    resolved_ids.append(node_id)
+            else:
+                logger.warning(f"Hydrator: Hallucinated ID '{node_id}'. Attempting direct FAISS resolution...")
+                try:
+                    if data_loader.vector_store:
+                        # Direct FAISS search without strict L2 distance thresholds
+                        docs_and_scores = data_loader.vector_store.similarity_search_with_score(node_id, k=5)
+                        
+                        # Filter to components only
+                        valid_matches = []
+                        for doc, score in docs_and_scores:
+                            meta = doc.metadata
+                            if meta.get("namespace") == "component":
+                                valid_matches.append(meta.get("id"))
+                                
+                        if valid_matches:
+                            # Take top 2 matches to handle ambiguity but prevent prompt explosion
+                            top_matches = valid_matches[:2]
+                            logger.info(f"Hydrator: Semantically resolved '{node_id}' to {top_matches}")
+                            for match_id in top_matches:
+                                if match_id not in resolved_ids:
+                                    resolved_ids.append(match_id)
+                        else:
+                            logger.error(f"Hydrator: Direct FAISS yielded no components for '{node_id}'")
+                            if node_id not in resolved_ids:
+                                resolved_ids.append(node_id)
+                    else:
+                        logger.error(f"Hydrator: Vector store not loaded, cannot resolve '{node_id}'")
+                        if node_id not in resolved_ids:
+                            resolved_ids.append(node_id)
+                except Exception as e:
+                    logger.error(f"Hydrator: FAISS resolution failed for '{node_id}': {e}")
+                    if node_id not in resolved_ids:
+                        resolved_ids.append(node_id)
+                        
+        for match_id in resolved_ids:
+            match_item = store.get(("components",), match_id)
+            if match_item and match_item.value:
+                data = match_item.value
+                inputs = data.get("input_channels") or data.get("input_types") or []
+                raw_outputs = data.get("output_channels") or data.get("out") or []
+                outputs = [f"{match_id}.out.{o}" for o in raw_outputs] if raw_outputs else []
+                context_parts.append(
+                    f"<component id='{match_id}'>\n"
+                    f"  <inputs>{', '.join(inputs) if inputs else 'none'}</inputs>\n"
+                    f"  <outputs>{', '.join(outputs) if outputs else 'none'}</outputs>\n"
+                    f"</component>"
+                )
+
+        # ── Graphify Topological Blueprint for Architect ──
+        try:
+            from core.services.knowledge_graph import kg
+            if not kg.is_built and store:
+                kg.build_nx_graph(store)
+            if kg.is_built and resolved_ids:
+                blueprint = kg.generate_architect_blueprint(resolved_ids, store)
+                if blueprint:
+                    context_parts.append(blueprint)
+        except Exception as e:
+            logger.warning(f"Hydrator: Failed to generate Graphify blueprint: {e}")
+
     # Compile the final technical context
     full_context = "\n\n".join(context_parts)
 
-    return {"technical_context": full_context}
+    return {
+        "technical_context": full_context,
+        "selected_component_ids": resolved_ids if resolved_ids else component_ids
+    }

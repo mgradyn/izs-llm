@@ -250,20 +250,35 @@ _STEP_INCLUDE_RE = re.compile(r"include\s*\{\s*([^}]+?)\s*\}\s*from\s*'([^']+)'"
 
 
 def extract_steps_from_code(nf_code: str) -> list[str]:
-    """Extract step IDs from Nextflow include statements.
+    """Extract step IDs from Nextflow include statements and capture critical channel operators.
 
-    >>> extract_steps_from_code("include { step_4TY_MLST__mlst } from '../steps/step_4TY_MLST__mlst'")
-    ['step_4TY_MLST__mlst']
+    >>> extract_steps_from_code("include { step_4TY_MLST__mlst } from '../steps/step_4TY_MLST__mlst'\\ninput.collect().set { out }")
+    ['_OP_collect', '_OP_set', 'step_4TY_MLST__mlst']
     """
     if not nf_code:
         return []
 
     step_ids: set[str] = set()
-    for sym_list, _path in _STEP_INCLUDE_RE.findall(nf_code):
+    
+    # 1. Extract Components (no hardcoded path exclusions)
+    for sym_list, path in _STEP_INCLUDE_RE.findall(nf_code):
         for sym in sym_list.split(";"):
             sym = sym.strip()
-            if sym.startswith("step_"):
-                step_ids.add(sym.split()[0])  # Handle "step_X as alias"
+            # Handle "name as alias", just take the original name
+            step_name = sym.split()[0]
+            if step_name:
+                step_ids.add(step_name)
+                
+    # 2. Extract Dynamic Data-Shaping Operators
+    # We strip out comments first to avoid matching commented operators
+    code_no_comments = re.sub(r'//.*', '', nf_code)
+    code_no_comments = re.sub(r'/\*.*?\*/', '', code_no_comments, flags=re.DOTALL)
+    
+    operators = re.findall(r'\.([a-zA-Z0-9_]+)\s*(?:\{|\()', code_no_comments)
+    for op in operators:
+        # Ignore common native string methods that aren't NF operators just to reduce noise, though it doesn't strictly matter
+        if op not in ('toString', 'getName', 'getBaseName', 'getSimpleName', 'Extension'):
+            step_ids.add(f"_OP_{op}")
 
     return sorted(step_ids)
 

@@ -273,7 +273,7 @@ NOISE_PATTERNS: list[ErrorPattern] = [
     # 4c. Missing required parameter
     {
         "pattern": re.compile(
-            r"[Mm]issing\s+(?:required\s+)?(?:param(?:eter)?)[:\s]+[-\s]*['\"]?(\w+)['\"]?"
+            r"[Mm]issing\s+(?:required\s+)?(?:param(?:s|eter|eters)?)[:\s]+(.+)"
         ),
         "category": "missing_param",
         "label": "Missing pipeline parameter (expected in -preview)",

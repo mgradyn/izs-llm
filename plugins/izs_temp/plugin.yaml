@@ -1,0 +1,40 @@
+name: "izs_temp"
+description: "Auto-generated plugin for izs_temp"
+version: "0.1.0"
+
+model:
+  embedding_model: "Qwen/Qwen3-Embedding-0.6B"
+
+# Paths (relative to this plugin directory)
+catalog:
+  components: "catalog/components.json"
+  templates: "catalog/templates.json"
+  resources: "catalog/resources.json"
+
+code_store: "code_store.jsonl"
+faiss_index: "faiss_index"
+chroma_index: "chroma_index"
+
+# Module source directory for framework validation (optional)
+modules_dir: null
+
+# Prompts (create these files to customize agent behavior)
+prompts:
+  domain_context: "prompts/domain_context.md"
+  idioms: "prompts/idioms.md"
+  rejection_rules: "prompts/rejection_rules.md"
+
+# Void tool detection
+# Components with no output_channels are auto-detected as void.
+# Add explicit overrides here if needed.
+void_tools:
+  suffixes: []
+  exact_names: []
+
+# RAG tuning overrides (optional, falls back to core defaults)
+rag:
+  excluded_templates: []
+  search_keywords: []
+
+# Void tool exceptions (optional)
+void_tool_exceptions: []

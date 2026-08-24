@@ -23,9 +23,38 @@ class Pattern(BaseModel):
     use_cases: list[str] = Field(description="Specific scenarios where this pattern should be applied.")
     groovy_code: str = Field(description="The exact Nextflow DSL2 groovy code snippet demonstrating the pattern.")
     caveats: list[str] = Field(description="Common pitfalls, strict syntax rules, or edge cases related to this pattern.")
+    tags: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Flat list of short operator/concept tags for keyword and semantic search. "
+            "Include: DSL2 channel operators used (cross, multiMap, combine, mix, branch, map, flatMap, collect, groupTuple, splitCsv, toList, toSortedList), "
+            "structural concepts (fan-out, fan-in, tuple-unpacking, conditional, publishDir, channel-merge, data-shaping, scatter-gather, chaining), "
+            "and any specific Groovy/Nextflow method names from the groovy_code snippet."
+        )
+    )
 
 class PatternsOutput(BaseModel):
     patterns: list[Pattern] = Field(description="List of patterns found in the file")
+
+def _get_structural_fingerprint(code: str) -> str:
+    """Extract a pseudo-AST signature of Nextflow channel operators."""
+    import re
+    # Strip comments roughly
+    clean_code = re.sub(r'//.*', '', code)
+    clean_code = re.sub(r'/\*.*?\*/', '', clean_code, flags=re.DOTALL)
+    
+    operators = {"map", "flatMap", "filter", "reduce", "groupTuple", "join", "cross", 
+                 "combine", "multiMap", "branch", "splitCsv", "splitFasta", "splitFastq",
+                 "mix", "concat", "collect", "toList", "toSortedList", "count", "min", "max",
+                 "subscribe", "view"}
+                 
+    found = []
+    for match in re.finditer(r'\.([a-zA-Z_]+)\b', clean_code):
+        op = match.group(1)
+        if op in operators:
+            found.append(op)
+            
+    return ",".join(found)
 
 def main():
     force_clean = "--force-clean" in sys.argv
@@ -77,7 +106,19 @@ def main():
     except Exception as e:
         logger.error("failed_to_initialize_llm", error=str(e))
         sys.exit(1)
+        
+    try:
+        from sentence_transformers import SentenceTransformer
+        embedding_model = SentenceTransformer("Qwen/Qwen3-Embedding-0.6B")
+    except ImportError:
+        logger.error("sentence_transformers_not_installed")
+        sys.exit(1)
+        
+    from ingestion.parser import _extract_workflows
+    from scripts.dedup_patterns import cosine_similarity
+    from collections import defaultdict
     
+    seen_workflows = defaultdict(list)
     new_patterns_count = 0
     
     with open(code_store_path, "r", encoding="utf-8") as f:
@@ -94,23 +135,52 @@ def main():
                 
             content = entry.get("content", "")
             
-            # Stricter heuristic to find complex data shaping
-            shape_keywords = [".cross", ".multiMap", ".combine", ".mix", ".branch", ".map"]
-            matches = sum(1 for k in shape_keywords if k in content)
+            # Step 1: Pre-Parse to isolate workflows
+            workflows = _extract_workflows(content)
+            novel_workflows = []
             
-            if matches < 1 or "process " in content and "workflow " not in content:
-                # If it's just a simple process without workflow logic, skip it
-                if "workflow " not in content and ".cross" not in content and ".multiMap" not in content:
-                    # Mark as processed so we don't re-check it
-                    processed_file_ids.add(file_id)
-                    with open(processed_file, "w") as pf:
-                        json.dump(list(processed_file_ids), pf)
-                    continue
+            # Step 2: Online Hybrid Semantic Filter
+            shape_keywords = [".cross", ".multiMap", ".combine", ".mix", ".branch", ".map", ".flatMap", ".groupTuple"]
+            
+            for wf in workflows:
+                wf_body = wf.get("body", "")
+                if not wf_body.strip(): continue
                 
-            logger.info("analyzing_file", file_id=file_id, progress=f"{i+1}/{len(lines)}")
+                # Fast heuristic: if it doesn't even contain an operator, skip embedding entirely
+                if not any(k in wf_body for k in shape_keywords):
+                    continue
+                    
+                # 1. Structural Gate
+                fingerprint = _get_structural_fingerprint(wf_body)
+                    
+                # Embed the workflow block
+                emb = embedding_model.encode(wf_body, show_progress_bar=False).tolist()
+                
+                # 2. Semantic Gate
+                is_duplicate = False
+                if fingerprint in seen_workflows:
+                    for seen_emb in seen_workflows[fingerprint]:
+                        if cosine_similarity(emb, seen_emb) > 0.92:
+                            is_duplicate = True
+                            break
+                        
+                if not is_duplicate:
+                    seen_workflows[fingerprint].append(emb)
+                    novel_workflows.append(wf_body)
+            
+            # Step 3: Targeted LLM Extraction
+            if not novel_workflows:
+                # Mark as processed so we don't re-check it
+                processed_file_ids.add(file_id)
+                with open(processed_file, "w") as pf:
+                    json.dump(list(processed_file_ids), pf)
+                continue
+                
+            novel_code = "\n\n".join(novel_workflows)
+            logger.info("analyzing_file", file_id=file_id, novel_blocks=len(novel_workflows), progress=f"{i+1}/{len(lines)}")
             
             prompt = f"""
-You are an expert Nextflow DSL2 Engineer. Analyze the following Nextflow code and extract any unique, reusable data-shaping design patterns.
+You are an expert Nextflow DSL2 Engineer. Analyze the following Nextflow workflow blocks and extract any unique, reusable data-shaping design patterns.
 We are looking for complex, non-trivial uses of channel operators (e.g. chained `.cross()`, `.multiMap()`, `.combine()`, conditional `.branch()`, or tuple unpacking tricks) that serve as excellent learning examples for other engineers.
 
 CRITICAL INSTRUCTIONS:
@@ -119,13 +189,13 @@ CRITICAL INSTRUCTIONS:
 3. Be highly detailed. Populate `use_cases` with specific scenarios where this is helpful.
 4. Populate `caveats` with any gotchas, strict syntax constraints, or index out-of-bounds risks.
 5. Provide the exact clean `groovy` code snippet.
+6. Populate `tags` with ALL DSL2 channel operators found (cross, multiMap, combine, mix, branch, map, flatMap, collect, groupTuple, etc.) plus structural concept labels (fan-out, fan-in, tuple-unpacking, conditional, publishDir, channel-merge, data-shaping, scatter-gather). Include Groovy/Nextflow method names used in the snippet.
 
 File ID: {file_id}
-Code:
+Code (Isolated Novel Workflows):
 ```groovy
-{content}
-```
-"""
+{novel_code}
+```"""
             
             # Retry logic for robustness
             max_retries = 3

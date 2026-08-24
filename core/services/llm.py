@@ -13,11 +13,13 @@ _judge_cache: dict[str, BaseChatModel] = {}
 
 
 def _resolve_api_key(*env_vars: str) -> str:
-    """Return the first non-empty env var value, or raise."""
+    """Return the first non-empty env var value, or fallback if base_url is set."""
     for var in env_vars:
         val = (os.environ.get(var) or "").strip()
         if val:
             return val
+    if os.environ.get("OPENAI_BASE_URL") or os.environ.get("LOCAL_LLM_URL"):
+        return "not-needed"
     raise ValueError(
         f"None of {list(env_vars)} are set. "
         "Please configure an API key."
@@ -46,10 +48,20 @@ def get_llm() -> BaseChatModel:
         base_url = os.environ.get("OPENAI_BASE_URL") or None
         if base_url:
             kwargs["base_url"] = base_url
+            kwargs["model_kwargs"] = {"parallel_tool_calls": False}
+            kwargs["extra_body"] = {"chat_template_kwargs": {"preserve_thinking": True}}
+            kwargs["timeout"] = 600
+            kwargs["max_retries"] = 1
+        else:
+            kwargs["model_kwargs"] = {"parallel_tool_calls": False}
+            kwargs["timeout"] = 600
+            kwargs["max_retries"] = 1
     elif provider == "anthropic":
         kwargs["api_key"] = _resolve_api_key("TEMP_API_KEY", "ANTHROPIC_API_KEY")
     elif provider == "local":
         kwargs["base_url"] = os.environ.get("LOCAL_LLM_URL", "http://localhost:8000/v1").strip()
+        kwargs["model_kwargs"] = {"parallel_tool_calls": False}
+        kwargs["extra_body"] = {"chat_template_kwargs": {"preserve_thinking": True}}
     elif provider == "google":
         kwargs["api_key"] = _resolve_api_key("TEMP_API_KEY", "GOOGLE_API_KEY")
 
@@ -76,10 +88,16 @@ def get_judge_llm(temperature: float = 0.0) -> BaseChatModel:
         base_url = settings.JUDGE_BASE_URL or os.environ.get("OPENAI_BASE_URL") or None
         if base_url:
             kwargs["base_url"] = base_url
+            kwargs["model_kwargs"] = {"parallel_tool_calls": False}
+            kwargs["extra_body"] = {"chat_template_kwargs": {"preserve_thinking": True}}
+        else:
+            kwargs["model_kwargs"] = {"parallel_tool_calls": False}
     elif provider == "anthropic":
         kwargs["api_key"] = _resolve_api_key("JUDGE_API_KEY", "TEMP_API_KEY", "ANTHROPIC_API_KEY")
     elif provider == "local":
         kwargs["base_url"] = settings.JUDGE_BASE_URL or os.environ.get("LOCAL_LLM_URL", "http://localhost:8000/v1").strip()
+        kwargs["model_kwargs"] = {"parallel_tool_calls": False}
+        kwargs["extra_body"] = {"chat_template_kwargs": {"preserve_thinking": True}}
     elif provider == "google":
         kwargs["api_key"] = _resolve_api_key("JUDGE_API_KEY", "TEMP_API_KEY", "GOOGLE_API_KEY")
 

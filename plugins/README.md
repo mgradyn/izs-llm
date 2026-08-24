@@ -51,7 +51,7 @@ erDiagram
 ### `synthetic/` (The Sandbox)
 The default testing domain. It contains:
 - `nf_source/`: Raw nextflow code used to test the ingestion pipeline (`task_a`, `process_b`, etc.).
-- `chroma_index/` or `faiss_index/`: The pre-computed Nomic vectors.
+- `chroma_index/` or `faiss_index/`: The pre-computed Qwen3 embedding vectors.
 - `prompts/`: Domain rules. For example, `rejection_rules.md` explicitly teaches the AI when to refuse to build a pipeline based on domain impossibilities or logical constraints.
 
 ### `izs/` (Production Domain)

@@ -24,6 +24,14 @@ import contextlib
 import sys
 import uuid
 
+# Enable automatic LangGraph trace dumping for all benchmark runs
+import os
+import time
+from pathlib import Path
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+run_timestamp = time.strftime("%Y%m%d_%H%M%S")
+os.environ["IZS_LOG_DIR"] = str(PROJECT_ROOT / "tests" / "reports" / "logs" / f"run_{run_timestamp}")
+
 from dotenv import load_dotenv
 
 load_dotenv()
