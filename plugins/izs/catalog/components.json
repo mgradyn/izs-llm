@@ -147,7 +147,11 @@
       "domain": "General",
       "description": "multi_clustering__reportree_alleles \u2014 'multi_clustering__reportree_alleles'.",
       "keywords": [
-        "multi_clustering__reportree_alleles"
+        "multi_clustering__reportree_alleles",
+        "reportree alleles",
+        "cgmlst allele clustering",
+        "phylogenetic tree from cgmlst allele profiles",
+        "allele profile clustering"
       ],
       "use_cases": [],
       "compatible_seq_types": [],
@@ -238,7 +242,12 @@
       "domain": "General",
       "description": "step_0SQ_rawreads__fastq \u2014 'step_0SQ_rawreads__fastq'.",
       "keywords": [
-        "step_0SQ_rawreads__fastq"
+        "step_0SQ_rawreads__fastq",
+        "raw sequencing quality check",
+        "check quality of raw sequencing files",
+        "raw fastq qc",
+        "fastqc raw reads",
+        "quality control raw reads"
       ],
       "use_cases": [],
       "compatible_seq_types": [],
@@ -449,10 +458,14 @@
       "domain": "General",
       "description": "step_1PP_trimming__fastp \u2014 'step_1PP_trimming__fastp'.",
       "keywords": [
-        "step_1PP_trimming__fastp"
+        "step_1PP_trimming__fastp",
+        "fastp",
+        "trimming",
+        "trim adapters and low-quality bases",
+        "adapter trimming",
+        "read quality trimming",
+        "preprocessing"
       ],
-      "use_cases": [],
-      "compatible_seq_types": [],
       "variables_needed": [
         "params.outdir"
       ],
@@ -541,7 +554,13 @@
       "domain": "General",
       "description": "step_2AS_denovo__shovill \u2014 'step_2AS_denovo__shovill'.",
       "keywords": [
-        "step_2AS_denovo__shovill"
+        "step_2AS_denovo__shovill",
+        "shovill",
+        "bacterial isolate assembly",
+        "de novo isolate assembler",
+        "assemble genomes de novo isolate",
+        "foodborne outbreak isolate assembler",
+        "bacterial isolates de novo assembly"
       ],
       "use_cases": [],
       "compatible_seq_types": [],
@@ -827,7 +846,12 @@
       "domain": "General",
       "description": "step_3TX_class__confindr \u2014 'step_3TX_class__confindr'.",
       "keywords": [
-        "step_3TX_class__confindr"
+        "step_3TX_class__confindr",
+        "confindr",
+        "contamination detection",
+        "flag mixed samples",
+        "intra-species contamination",
+        "cross-sample contamination"
       ],
       "use_cases": [],
       "compatible_seq_types": [],
@@ -847,7 +871,7 @@
       "id": "step_3TX_class__kraken",
       "tool": "step_3TX_class__kraken",
       "domain": "General",
-      "description": "step_3TX_class__kraken \u2014 'step_3TX_class__kraken'.",
+      "description": "step_3TX_class__kraken — 'step_3TX_class__kraken'.",
       "keywords": [
         "step_3TX_class__kraken"
       ],
@@ -870,9 +894,14 @@
       "id": "step_3TX_class__kraken2",
       "tool": "step_3TX_class__kraken2",
       "domain": "General",
-      "description": "step_3TX_class__kraken2 \u2014 'step_3TX_class__kraken2'.",
+      "description": "step_3TX_class__kraken2 — 'step_3TX_class__kraken2'.",
       "keywords": [
-        "step_3TX_class__kraken2"
+        "step_3TX_class__kraken2",
+        "kraken2",
+        "taxonomic classification",
+        "classify reads taxonomically",
+        "confirm pathogen identity",
+        "metagenomic taxonomy"
       ],
       "use_cases": [],
       "compatible_seq_types": [],
@@ -893,9 +922,13 @@
       "id": "step_3TX_species__kmerfinder",
       "tool": "step_3TX_species__kmerfinder",
       "domain": "General",
-      "description": "step_3TX_species__kmerfinder \u2014 'step_3TX_species__kmerfinder'.",
+      "description": "step_3TX_species__kmerfinder — 'step_3TX_species__kmerfinder'.",
       "keywords": [
-        "step_3TX_species__kmerfinder"
+        "step_3TX_species__kmerfinder",
+        "kmerfinder",
+        "species identification",
+        "identify species from assemblies",
+        "kmer species prediction"
       ],
       "use_cases": [],
       "compatible_seq_types": [],
@@ -960,7 +993,13 @@
       "domain": "General",
       "description": "step_4AN_AMR__abricate \u2014 'step_4AN_AMR__abricate'.",
       "keywords": [
-        "step_4AN_AMR__abricate"
+        "step_4AN_AMR__abricate",
+        "abricate",
+        "screen antimicrobial resistance genes",
+        "screen amr genes abricate",
+        "amr screening abricate",
+        "antimicrobial resistance screening",
+        "screen for antimicrobial resistance genes using two different databases"
       ],
       "use_cases": [],
       "compatible_seq_types": [],
@@ -980,7 +1019,11 @@
       "domain": "General",
       "description": "step_4AN_AMR__filtering \u2014 'step_4AN_AMR__filtering'.",
       "keywords": [
-        "step_4AN_AMR__filtering"
+        "step_4AN_AMR__filtering",
+        "amr filtering",
+        "filter amr results",
+        "confidence thresholds",
+        "coverage identity filtering"
       ],
       "use_cases": [],
       "compatible_seq_types": [],
@@ -1003,7 +1046,13 @@
       "domain": "General",
       "description": "step_4AN_AMR__resfinder \u2014 'step_4AN_AMR__resfinder'.",
       "keywords": [
-        "step_4AN_AMR__resfinder"
+        "step_4AN_AMR__resfinder",
+        "resfinder",
+        "antimicrobial resistance resfinder",
+        "amr screening resfinder",
+        "screen antimicrobial resistance two different databases",
+        "dual amr screening resfinder",
+        "dual database amr resfinder"
       ],
       "use_cases": [],
       "compatible_seq_types": [],
@@ -1047,7 +1096,12 @@
       "domain": "General",
       "description": "step_4AN_genes__prokka \u2014 'step_4AN_genes__prokka'.",
       "keywords": [
-        "step_4AN_genes__prokka"
+        "step_4AN_genes__prokka",
+        "prokka",
+        "annotate all genes",
+        "gene annotation",
+        "functional annotation",
+        "bacterial genome annotation"
       ],
       "use_cases": [],
       "compatible_seq_types": [],
@@ -1066,9 +1120,14 @@
       "id": "step_4TY_MLST__mlst",
       "tool": "step_4TY_MLST__mlst",
       "domain": "General",
-      "description": "step_4TY_MLST__mlst \u2014 'step_4TY_MLST__mlst'.",
+      "description": "step_4TY_MLST__mlst — 'step_4TY_MLST__mlst'.",
       "keywords": [
-        "step_4TY_MLST__mlst"
+        "step_4TY_MLST__mlst",
+        "mlst",
+        "classical mlst",
+        "determine classical mlst sequence type",
+        "7 gene mlst typing",
+        "sequence type"
       ],
       "use_cases": [],
       "compatible_seq_types": [],
@@ -1087,9 +1146,15 @@
       "id": "step_4TY_cgMLST__chewbbaca",
       "tool": "step_4TY_cgMLST__chewbbaca",
       "domain": "General",
-      "description": "step_4TY_cgMLST__chewbbaca \u2014 'step_4TY_cgMLST__chewbbaca'.",
+      "description": "step_4TY_cgMLST__chewbbaca — 'step_4TY_cgMLST__chewbbaca'.",
       "keywords": [
-        "step_4TY_cgMLST__chewbbaca"
+        "step_4TY_cgMLST__chewbbaca",
+        "chewbbaca",
+        "core-genome mlst",
+        "cgmlst typing",
+        "perform core-genome mlst typing",
+        "allele calling",
+        "cgmlst allele extraction"
       ],
       "use_cases": [],
       "compatible_seq_types": [],
@@ -1102,7 +1167,9 @@
         "genus_species",
         "schema"
       ],
-      "output_channels": [],
+      "output_channels": [
+        "alleles"
+      ],
       "container": "ghcr.io/genpat-it/chewbbaca-w-chewie-schemas:2.8.5--16b816c96d",
       "file_path": "steps/step_4TY_cgMLST__chewbbaca"
     },
@@ -1110,9 +1177,13 @@
       "id": "step_4TY_flaA__flaA",
       "tool": "step_4TY_flaA__flaA",
       "domain": "General",
-      "description": "step_4TY_flaA__flaA \u2014 'step_4TY_flaA__flaA'.",
+      "description": "step_4TY_flaA__flaA — 'step_4TY_flaA__flaA'.",
       "keywords": [
-        "step_4TY_flaA__flaA"
+        "step_4TY_flaA__flaA",
+        "flaa",
+        "flagellar antigen typing",
+        "run flagellar antigen typing",
+        "campylobacter flagellar typing"
       ],
       "use_cases": [],
       "compatible_seq_types": [],
@@ -1179,7 +1250,13 @@
       "domain": "General",
       "description": "step_4TY_plasmid__mobsuite \u2014 'step_4TY_plasmid__mobsuite'.",
       "keywords": [
-        "step_4TY_plasmid__mobsuite"
+        "step_4TY_plasmid__mobsuite",
+        "mobsuite",
+        "plasmid typing",
+        "type plasmids present",
+        "mob_recon",
+        "replicon typing",
+        "plasmid identification"
       ],
       "use_cases": [],
       "compatible_seq_types": [],

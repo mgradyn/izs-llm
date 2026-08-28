@@ -22,6 +22,7 @@ class OpenAIAdapter(LLMAdapter):
         model: str,
         temperature: float = 0.2,
         base_url: str | None = None,
+        max_tokens: int | None = None,
         max_retries: int = 5,
         timeout: float = 180.0,
         model_kwargs: dict = None,
@@ -36,6 +37,8 @@ class OpenAIAdapter(LLMAdapter):
             max_retries=max_retries,
             timeout=timeout,
         )
+        if max_tokens:
+            kwargs["max_tokens"] = max_tokens
         if base_url:
             kwargs["base_url"] = base_url
         if model_kwargs:

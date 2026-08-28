@@ -226,7 +226,7 @@ def check_component_channels(component_name: str, runtime: ToolRuntime) -> str:
     Use this to pull specific constraints into your working memory to avoid hallucinations.
 
     Args:
-        component_name: The name of the component (e.g., 'step_2AS_mapping__ivar')
+        component_name: The name of the component (e.g., 'step_process_name')
     """
     res = _get_component_channels_internal(component_name)
     if "error" in res:

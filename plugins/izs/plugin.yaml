@@ -146,7 +146,6 @@ void_tools:
     - "__resfinder"
     - "__mlst"
     - "__flaa"
-    - "__chewbbaca"
     - "__centrifuge"
     - "__confindr"
     - "__mash"
@@ -236,7 +235,7 @@ rag:
     "trim": ["trimming", "adapter", "quality", "fastp", "trimmomatic", "chopper", "preprocessing", "clean"]
     "downsample": ["downsampling", "normalize", "depth", "bbnorm", "subsampling", "coverage"]
     "hostdepl": ["host", "depletion", "decontamination", "bowtie", "minimap2", "background"]
-    "filtering": ["filter", "positive", "selection", "retain", "enrich", "extract"]
+    "filtering": ["filter", "positive", "selection", "retain", "enrich", "extract", "confidence", "threshold", "thresholds"]
     "assembly": ["assemble", "assembler", "denovo", "contigs", "scaffolds", "spades", "shovill", "unicycler", "flye"]
     "hybrid": ["hybrid", "short", "long", "combined", "unicycler"]
     "consensus": ["mapping", "alignment", "reference", "bowtie", "minimap2", "medaka", "ivar", "snippy", "polish"]
@@ -260,6 +259,10 @@ rag:
   query_replacements:
     "point mutation": "pointfinder staramr amr"
     "point mutations": "pointfinder staramr amr"
+    "tree from cgmlst allele profiles": "multi_clustering__reportree_alleles"
+    "tree from the cgmlst allele profiles": "multi_clustering__reportree_alleles"
+    "tree from allele profiles": "multi_clustering__reportree_alleles"
+    "tree from the allele profiles": "multi_clustering__reportree_alleles"
 
   # Domain-specific keywords that boost search ranking when found in component IDs
   search_keywords:

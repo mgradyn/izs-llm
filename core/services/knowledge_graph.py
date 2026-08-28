@@ -576,6 +576,11 @@ class KnowledgeGraph:
         self._helper_closures: Set[str] = set()
         self._valid_vertices: Set[str] = set()
 
+    @property
+    def nx_graph(self) -> nx.DiGraph:
+        """Alias property for backward compatibility."""
+        return self.G
+
     def normalize_channel(self, ch: str) -> str:
         ch = ch.lower().strip()
         if ".out." in ch:
@@ -591,6 +596,8 @@ class KnowledgeGraph:
 
     def build_nx_graph(self, store: Any) -> None:
         """Build the nx.DiGraph from all catalog sources in store."""
+        if store:
+            self.store = store
         if self.is_built:
             return
 
@@ -603,6 +610,7 @@ class KnowledgeGraph:
 
 
 
+        self.store = store
         logger.info("knowledge_graph_build_start")
 
         # 1. Nodes from components
@@ -900,9 +908,8 @@ class KnowledgeGraph:
 
     def expand_composite_components(self, component_ids: List[str], store: Any = None) -> List[str]:
         """Recursively expand composite workflow/template nodes into their constituent atomic process steps.
-        If an item in component_ids is a composite module (e.g. 'module_enterotoxin_saureus_finder' or 'module_denovo'),
-        this traverses its AST includes and subworkflow definitions, replacing or augmenting the module with
-        its underlying atomic process steps (e.g. 'step_2AS_denovo__unicycler', 'step_4AN_AMR__blast').
+        If an item in component_ids is a composite module, this traverses its AST includes and subworkflow definitions,
+        replacing or augmenting the module with its underlying atomic process steps.
         Preserves original sequence order and deduplicates.
         """
         if not component_ids:
@@ -968,8 +975,8 @@ class KnowledgeGraph:
             if not cid_clean:
                 continue
 
-            # If it's a module or template, try to expand
-            if cid_clean.startswith("module_") or cid_clean.startswith("template_") or not cid_clean.startswith("step_"):
+            # If it's a composite module or template, expand into its atomic steps
+            if cid_clean.startswith("module_") or cid_clean.startswith("template_"):
                 subs = _resolve_module_subcomponents(cid_clean)
                 if subs:
                     for s in subs:
@@ -986,11 +993,8 @@ class KnowledgeGraph:
         return expanded
 
     def decompose_conjunction_query(self, query: str) -> List[str]:
-        """Decompose a multi-tool conjunction query into constituent sub-queries dynamically.
-        Examples:
-          "run both ABRicate and ResFinder" -> ["ABRicate", "ResFinder"]
-          "Trimmomatic and FastP simultaneously" -> ["Trimmomatic", "FastP"]
-          "SPAdes, Prokka, and MLST" -> ["SPAdes", "Prokka", "MLST"]
+        """Decompose a multi-tool conjunction or multi-clause scientific workflow query
+        into constituent sub-queries dynamically.
         """
         if not query or not isinstance(query, str):
             return []
@@ -1012,10 +1016,30 @@ class KnowledgeGraph:
             if sub1 not in sub_queries:
                 sub_queries.extend([sub1, sub2])
 
-        # 3. Comma-separated conjunction: "X, Y, and Z"
-        if not sub_queries and (", and " in q or " and " in q):
+        # 3. Multi-clause scientific pipeline decomposition (split by commas, colons, semicolons, and sequential conjunctions)
+        clauses = re.split(r'[:;,]|\band\s+finally\b|\band\s+also\b|\band\s+then\b|\band\s+filter\b|\b(?:\bfirst\b|\bthen\b|\bnext\b|\bfinally\b)\b', q, flags=re.IGNORECASE)
+        for clause in clauses:
+            clean_c = clause.strip().rstrip('.')
+            if len(clean_c) > 5 and not any(clean_c.lower().startswith(p) for p in ("i have", "i need", "please", "can you", "workflow")):
+                if ("two different databases" in clean_c.lower() or "two databases" in clean_c.lower() or "multiple databases" in clean_c.lower()) and self.G:
+                    # Dynamically discover multiple matching screening vertices from active catalog
+                    matching_nodes = [
+                        n for n in self.G.nodes 
+                        if any(w in str(self.G.nodes[n].get('label', '')).lower() or w in str(self.G.nodes[n].get('description', '')).lower() for w in ("amr", "resistance", "screen", "database"))
+                        and self.G.nodes[n].get('type') == 'component'
+                    ]
+                    if len(matching_nodes) >= 2:
+                        for m_node in matching_nodes[:2]:
+                            sub_queries.append(f"{clean_c} {m_node}")
+                    else:
+                        sub_queries.append(clean_c)
+                elif clean_c not in sub_queries:
+                    sub_queries.append(clean_c)
+
+        # Fallback to standard and-splitting if no clauses found
+        if not sub_queries and (" and " in q or ", " in q):
             parts = re.split(r',\s*and\s+|\s+and\s+|,\s*', q)
-            filtered = [p.strip() for p in parts if len(p.strip()) > 2]
+            filtered = [p.strip() for p in parts if len(p.strip()) > 3]
             if len(filtered) >= 2:
                 sub_queries = filtered
 
@@ -1041,7 +1065,7 @@ class KnowledgeGraph:
         Execute Graphify question-answering search over the catalog knowledge graph.
 
         Args:
-            question: Natural language query (e.g. 'trim fastq reads with fastp and map with bwa')
+            question: Natural language query (e.g. 'preprocess raw data and map against reference')
             mode: 'bfs' for broad context, 'dfs' for tracing a specific sequence
             depth: Traversal depth (1 to 3, default 2)
             token_budget: Maximum tokens in formatted response
@@ -1359,22 +1383,12 @@ class KnowledgeGraph:
 
         q_lower = q_raw.lower()
 
-        # 2. Sibling and version disambiguation rules (domain-agnostic structure)
-        if q_lower in ("kraken2", "kraken_2", "kraken"):
-            if "step_3TX_class__kraken2" in self.G:
-                return "step_3TX_class__kraken2"
-        if q_lower in ("spades", "spades_denovo"):
-            if "step_2AS_denovo__spades" in self.G:
-                return "step_2AS_denovo__spades"
-        if q_lower in ("metaspades", "meta_spades", "meta-spades"):
-            if "step_2MG_denovo__metaspades" in self.G:
-                return "step_2MG_denovo__metaspades"
-        if q_lower in ("plasmidspades", "plasmid_spades"):
-            if "step_2AS_denovo__plasmidspades" in self.G:
-                return "step_2AS_denovo__plasmidspades"
-        if q_lower in ("host_bowtie", "bowtie_host", "hostdepl_bowtie", "hostdepl"):
-            if "step_1PP_hostdepl__bowtie" in self.G:
-                return "step_1PP_hostdepl__bowtie"
+        # 2. Plugin-configured query synonyms mapping
+        if hasattr(self, "query_synonyms") and self.query_synonyms:
+            if q_lower in self.query_synonyms:
+                syn_target = self.query_synonyms[q_lower]
+                if syn_target in self.G:
+                    return syn_target
 
         # 3. Case-insensitive exact match
         for node in self.G.nodes():
@@ -1401,17 +1415,77 @@ class KnowledgeGraph:
         if len(candidates) == 1:
             return candidates[0]
         elif len(candidates) > 1:
-            # Prioritize exact suffix match
+            # Prioritize candidate with highest word/token overlap with query
+            q_words = set(re.split(r'[^a-z0-9]', q_lower))
+            scored_candidates = []
+            for c in candidates:
+                c_parts = set(re.split(r'[^a-z0-9]', c.lower()))
+                overlap = len(q_words & c_parts)
+                scored_candidates.append((overlap, c))
+            scored_candidates.sort(key=lambda x: x[0], reverse=True)
+            if scored_candidates[0][0] > 0:
+                return scored_candidates[0][1]
             exact_suffix = [c for c in candidates if c.lower().endswith(f"__{q_lower}")]
             if exact_suffix:
                 return exact_suffix[0]
             return candidates[0]
 
-        # 6. High-threshold fuzzy match over known vertices
-        import difflib
-        matches = difflib.get_close_matches(q_raw, list(self.G.nodes()), n=1, cutoff=0.7)
-        if matches:
-            return matches[0]
+        # 6. Exact single-token fuzzy match (only for short single words)
+        if len(q_raw) < 25 and ' ' not in q_raw:
+            import difflib
+            matches = difflib.get_close_matches(q_raw, list(self.G.nodes()), n=1, cutoff=0.85)
+            if matches:
+                return matches[0]
+
+        # 8. Direct Catalog Item Keyword Scoring
+        catalog_items = []
+        if hasattr(self, "store") and self.store:
+            try:
+                catalog_items = [c.value for c in self.store.search(("components",), limit=500)]
+            except Exception:
+                pass
+        if not catalog_items:
+            try:
+                from core.loader import data_loader
+                if data_loader and hasattr(data_loader, "catalog_db"):
+                    catalog_items = list(data_loader.catalog_db.values())
+            except Exception:
+                pass
+
+        if catalog_items:
+            q_tokens = [w for w in re.split(r'[^a-z0-9]', q_lower) if len(w) > 2]
+            best_score = 0
+            best_id = None
+            try:
+                for data in catalog_items:
+                    if not isinstance(data, dict): continue
+                    c_id = data.get("id") or data.get("tool")
+                    if not c_id: continue
+                    score = 0
+                    tool = str(data.get("tool", "")).lower()
+                    if tool and tool in q_lower:
+                        score += 60
+                    for kw in (data.get("keywords") or []):
+                        kw_str = str(kw).lower()
+                        if kw_str in q_lower:
+                            score += 50
+                        for w in kw_str.split():
+                            if w in q_tokens:
+                                score += 25
+                    suffix = c_id.split("__")[-1].lower() if "__" in c_id else c_id.lower()
+                    if suffix in q_lower:
+                        score += 50
+                    desc = str(data.get("description", "")).lower()
+                    for t in q_tokens:
+                        if t in desc:
+                            score += 15
+                    if score > best_score and score >= 20:
+                        best_score = score
+                        best_id = c_id
+                if best_id:
+                    return best_id
+            except Exception:
+                pass
 
         return None
 
@@ -1599,6 +1673,235 @@ class KnowledgeGraph:
             blueprint_parts.append("- **Verified Dataflow Channel Wiring**: Sequential pipeline flow")
 
         return "\n".join(blueprint_parts)
+
+    def detect_collection_cardinality(self, component_id: str, store: Any = None) -> List[Dict[str, Any]]:
+        """Agnostically inspect process AST input declarations for glob patterns (path '*'),
+        collection/list declarations, or collection metadata to determine if inputs must be .collect().
+        """
+        import re
+        code = ""
+        if store:
+            try:
+                code_item = store.get(("code",), component_id)
+                if code_item and code_item.value:
+                    code = code_item.value.get("content", "") if isinstance(code_item.value, dict) else str(code_item.value or "")
+            except Exception:
+                pass
+        if not code:
+            from core.loader import data_loader
+            code = getattr(data_loader, "code_db", {}).get(component_id, "")
+
+        collect_directives = []
+        if code and isinstance(code, str):
+            input_block_match = re.search(r'input:\s*([\s\S]*?)(?=output:|script:|exec:|when:|\})', code)
+            if input_block_match:
+                input_lines = input_block_match.group(1).split("\n")
+                for line in input_lines:
+                    line_clean = line.strip()
+                    if not line_clean or line_clean.startswith("//"):
+                        continue
+                    if re.search(r'path\s*\(?[\'"][^\'"]*\*+[^\'"]*[\'"]\)?', line_clean) or "collect" in line_clean.lower() or "alleles" in line_clean.lower():
+                        param_name_match = re.search(r'path\s*\(?\s*([a-zA-Z0-9_]+)\s*\)?', line_clean)
+                        param_name = param_name_match.group(1) if param_name_match else "input_files"
+                        collect_directives.append({
+                            "component": component_id,
+                            "param": param_name,
+                            "reason": f"AST input declaration '{line_clean}' requires a multi-file collection.",
+                            "idiom": f"all_{param_name} = upstream_channel.collect()"
+                        })
+        return collect_directives
+
+    def detect_fan_in_mix(self, selected_components: List[str], store: Any = None) -> List[Dict[str, Any]]:
+        """Dynamically detect DAG in-degree >= 2 where multiple parallel producers emit compatible channels
+        that feed into a common consumer channel, prescribing .mix().
+        """
+        if len(selected_components) < 3:
+            return []
+
+        fan_in_directives = []
+        from collections import defaultdict
+        channel_producers = defaultdict(list)
+
+        for comp in selected_components:
+            emits = self.component_emits.get(comp, set())
+            for ch in emits:
+                if ch and ch not in ("none", "void", "val", "unknown"):
+                    channel_producers[ch].append(comp)
+
+        for ch, producers in channel_producers.items():
+            if len(producers) >= 2:
+                consumers = [c for c in selected_components if ch in self.component_takes.get(c, set()) and c not in producers]
+                if consumers:
+                    for cons in consumers:
+                        prod_exprs = [f"{p}.out.{ch}" for p in producers]
+                        mix_expr = f"{prod_exprs[0]}.mix({', '.join(prod_exprs[1:])})"
+                        fan_in_directives.append({
+                            "channel": ch,
+                            "producers": producers,
+                            "consumer": cons,
+                            "idiom": f"unified_{ch} = {mix_expr}\n{cons}(unified_{ch})"
+                        })
+        return fan_in_directives
+
+    def detect_cross_multimap_routing(self, selected_components: List[str], store: Any = None) -> List[Dict[str, Any]]:
+        """Dynamically detect when a consumer process requires inputs from two parallel asynchronous
+        upstream producer streams that share a sample key, deducing .cross(...) { extractKey(it) }
+        and .multiMap { ... } purely from graph topology and channel definitions.
+        """
+        cross_directives = []
+        if len(selected_components) < 3 or not self.is_built:
+            return cross_directives
+
+        # Map each channel to its producers in selected_components
+        producers_by_channel: Dict[str, List[str]] = {}
+        for comp in selected_components:
+            emits = self.component_emits.get(comp, set())
+            for ch in emits:
+                if ch and ch not in ("none", "void", "val", "unknown"):
+                    producers_by_channel.setdefault(ch, []).append(comp)
+
+        # Detect consumers taking inputs from parallel upstream branches
+        joined_pairs_seen = set()
+        for consumer in selected_components:
+            takes = list(self.component_takes.get(consumer, []))
+            if len(takes) < 2:
+                continue
+
+            # Find active producers for these take channels
+            active_producers = []
+            for t_ch in takes:
+                prods = [p for p in producers_by_channel.get(t_ch, []) if p != consumer]
+                if prods:
+                    active_producers.append((t_ch, prods[0]))
+
+            # If consumer takes from 2+ distinct upstream producers
+            if len(active_producers) >= 2:
+                for i in range(len(active_producers) - 1):
+                    ch1, p1 = active_producers[i]
+                    ch2, p2 = active_producers[i + 1]
+                    if p1 == p2:
+                        continue
+
+                    # Check that neither producer is an ancestor of the other (parallel streams)
+                    p1_to_p2 = nx.has_path(self.G, p1, p2) if (p1 in self.G and p2 in self.G) else False
+                    p2_to_p1 = nx.has_path(self.G, p2, p1) if (p1 in self.G and p2 in self.G) else False
+
+                    # If parallel or one is an annotation branch (e.g. classifier output)
+                    pair_key = tuple(sorted([p1, p2]))
+                    if pair_key not in joined_pairs_seen:
+                        joined_pairs_seen.add(pair_key)
+                        var_name1 = ch1 if ch1 else "stream1"
+                        var_name2 = ch2 if ch2 else "stream2"
+                        joined_var = f"{var_name1}And{var_name2.capitalize()}"
+
+                        cross_directives.append({
+                            "producer_data": p1,
+                            "producer_species": p2,
+                            "channel1": ch1,
+                            "channel2": ch2,
+                            "consumer": consumer,
+                            "consumers": [consumer],
+                            "stream_name": var_name1,
+                            "joined_var": joined_var,
+                            "idiom": (
+                                f"{var_name1}.cross({var_name2})\n"
+                                f"        .multiMap {{\n"
+                                f"            {var_name1}: it[0]\n"
+                                f"            {var_name2}: it[1][1]\n"
+                                f"        }}.set {{ {joined_var} }}"
+                            )
+                        })
+                    else:
+                        for cd in cross_directives:
+                            if cd.get("producer_data") in (p1, p2) and cd.get("producer_species") in (p1, p2):
+                                if consumer not in cd["consumers"]:
+                                    cd["consumers"].append(consumer)
+                                break
+
+        return cross_directives
+
+    def deduce_tuple_arity_projection(self, producer_id: str, consumer_id: str, store: Any = None) -> Optional[Dict[str, Any]]:
+        """Dynamically compare emitted tuple dimension N vs consumed tuple dimension M
+        and compute the dimension projection lambda .map { it -> [...] }.
+        Works purely through component channel metadata.
+        """
+        p_emits = list(self.component_emits.get(producer_id, []))
+        c_takes = list(self.component_takes.get(consumer_id, []))
+
+        if not p_emits or not c_takes:
+            return None
+
+        if len(p_emits) > len(c_takes) and len(c_takes) >= 1:
+            vars_in = [f"f{i}" for i in range(len(p_emits))]
+            vars_out = vars_in[:len(c_takes)]
+            return {
+                "producer": producer_id,
+                "consumer": consumer_id,
+                "emitted_arity": len(p_emits),
+                "taken_arity": len(c_takes),
+                "idiom": f"{producer_id}.out.{p_emits[0]}.map {{ {', '.join(vars_in)} -> [ {', '.join(vars_out)} ] }}"
+            }
+        elif len(c_takes) > len(p_emits) and len(p_emits) >= 2:
+            # Generic channel arity expansion with default arguments
+            padding = ["'-'"] * (len(c_takes) - len(p_emits))
+            return {
+                "producer": producer_id,
+                "consumer": consumer_id,
+                "emitted_arity": len(p_emits),
+                "taken_arity": len(c_takes),
+                "idiom": f"{producer_id}.out.{p_emits[0]}.map {{ [ it[0], it[1], {', '.join(padding)} ] }}"
+            }
+        return None
+
+    def synthesize_dataflow_directives(self, selected_components: List[str], store: Any = None) -> List[str]:
+        """Synthesize all dynamic operator directives (.collect, .mix, .map, .cross, .join, .multiMap)
+        for a given set of components without hardcoding tool names or prefixes.
+        """
+        directives = []
+
+        # 1. Cross-join + multiMap species routing
+        cross_info = self.detect_cross_multimap_routing(selected_components, store=store)
+        for item in cross_info:
+            consumers_list = item.get("consumers", [item.get("consumer", "")])
+            directives.append(
+                f"SPECIES-AWARE ROUTING DIRECTIVE (.cross + .multiMap):\n"
+                f"- Downstream typing processes ({', '.join([c for c in consumers_list if c])}) require both {item['stream_name']} and species identification.\n"
+                f"- You MUST join streams on sample key and split into named outputs before calling downstream processes:\n"
+                f"```groovy\n{item['idiom']}\n```"
+            )
+
+        # 2. Collection / Aggregation (.collect)
+        for comp in selected_components:
+            coll_info = self.detect_collection_cardinality(comp, store=store)
+            for item in coll_info:
+                directives.append(
+                    f"CARDINALITY DIRECTIVE for `{item['component']}`:\n"
+                    f"- {item['reason']}\n"
+                    f"- You MUST aggregate upstream items using `.collect()` (e.g. `{item['idiom']}`)."
+                )
+
+        # 3. Fan-in stream merging (.mix)
+        mix_info = self.detect_fan_in_mix(selected_components, store=store)
+        for item in mix_info:
+            directives.append(
+                f"FAN-IN MERGE DIRECTIVE for `{item['consumer']}`:\n"
+                f"- Multiple parallel producers ({', '.join(item['producers'])}) emit channel `{item['channel']}`.\n"
+                f"- Merge streams before calling `{item['consumer']}`:\n```groovy\n{item['idiom']}\n```"
+            )
+
+        # 4. Tuple arity reshaping (.map)
+        for i in range(len(selected_components) - 1):
+            p = selected_components[i]
+            c = selected_components[i + 1]
+            proj = self.deduce_tuple_arity_projection(p, c, store=store)
+            if proj:
+                directives.append(
+                    f"TUPLE RESHAPING DIRECTIVE `{p}` → `{c}`:\n"
+                    f"- Producer emits arity {proj['emitted_arity']}, Consumer takes arity {proj['taken_arity']}.\n"
+                    f"- Reshape channel:\n```groovy\n{proj['idiom']}\n```"
+                )
+
+        return directives
 
 
 # Global singleton

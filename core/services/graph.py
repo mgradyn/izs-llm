@@ -12,12 +12,10 @@ from langgraph.store.memory import InMemoryStore
 from core.config import settings
 from core.nodes.architect import architect_generate_node, architect_precheck_node, architect_reason_node
 from core.nodes.consultant import consultant_extract_node, consultant_node
-from core.nodes.diagrammer import diagram_reason_node
-from core.nodes.hydrator import hydrator_node
 from core.services.graph_state import GraphState
 from core.services.renderer import renderer_node
 from core.services.repair import repair_node, should_repair
-from core.tool_registry import get_architect_tools, get_consultant_tools, get_diagrammer_tools
+from core.tool_registry import get_architect_tools, get_consultant_tools
 from core.utils.logger import logger
 
 # Safety cap on tool-calling iterations to prevent runaway loops
@@ -382,7 +380,6 @@ def build_consultant_subgraph(store: Any = None) -> Any:
 
 def build_execution_subgraph(store: Any = None) -> Any:
     sub = StateGraph(GraphState)
-    sub.add_node("hydrator", hydrator_node)
     sub.add_node("architect_precheck", architect_precheck_node)
     
     # State-Aware Reasoning Node (Handles both Research and Repair)
@@ -392,16 +389,13 @@ def build_execution_subgraph(store: Any = None) -> Any:
     sub.add_node("architect_generate", architect_generate_node)
     sub.add_node("repair", repair_node)
     sub.add_node("renderer", renderer_node)
-    sub.add_node("diagram_reason", diagram_reason_node)
-    # diagram_reason uses structured output, no need for diagram_tools_node
 
     # Inner loop for tool calling
     max_architect_tool_iterations = settings.MAX_ARCHITECT_TOOL_ITERATIONS
     max_architect_tool_iterations_custom = settings.MAX_ARCHITECT_TOOL_ITERATIONS_CUSTOM_BUILD
 
-    sub.set_entry_point("hydrator")
-    sub.add_edge("hydrator", "architect_precheck")  # Deterministic channel/void check
-    sub.add_edge("architect_precheck", "architect_reason")  # Route directly to state-aware reasoning node
+    sub.set_entry_point("architect_precheck")
+    sub.add_edge("architect_precheck", "architect_generate")  # Fast-path directly to code generation!
 
     # Architect generate → check if valid
     sub.add_conditional_edges(
@@ -470,16 +464,9 @@ def build_execution_subgraph(store: Any = None) -> Any:
     sub.add_edge("architect_tools", "incr_arch_iters")
     sub.add_edge("incr_arch_iters", "architect_reason")
     sub.add_edge("sanitize_architect", "architect_generate")
-    sub.add_conditional_edges(
-        "renderer",
-        check_diagram_generation,
-        {
-            "with_diagrams": "diagram_reason",
-            "no_diagrams": END,
-        }
-    )
-
-    sub.add_edge("diagram_reason", END)
+    
+    # Renderer deterministically renders Mermaid DAG and compiles Groovy -> Direct to END
+    sub.add_edge("renderer", END)
 
     # Pass store so LangGraph can inject it into store-dependent nodes (architect_precheck_node, architect_reason_node)
     return sub.compile(store=store)

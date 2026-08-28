@@ -166,7 +166,7 @@ def architect_generate_node(state: GraphState) -> Any:
         return {"error": state['error']}
 
     llm = get_llm()
-    architect_agent = llm.with_structured_output(NextflowPipelineAST, method="json_schema", include_raw=False)
+    architect_agent = llm.with_structured_output(NextflowPipelineAST, method="function_calling", include_raw=True)
 
     architect_findings = ""
     messages = state.get("messages", [])
@@ -183,10 +183,25 @@ def architect_generate_node(state: GraphState) -> Any:
     plan_text = state.get('design_plan', 'No plan provided.')
     tech_context = state.get('technical_context', 'No context provided.')
 
-    # [Middle / Static Reference]: TECHNICAL CONTEXT + APPROVED PLAN at front
+    # [Middle / Static Reference]: TECHNICAL CONTEXT + APPROVED PLAN + APPROVED COMPONENTS at front
+    selected_ids = state.get("selected_component_ids", [])
+    selected_clause = ""
+    if selected_ids:
+        selected_clause = f"\n\n### MANDATORY APPROVED COMPONENTS:\nYou MUST instantiate EXACTLY these {len(selected_ids)} approved components in the pipeline AST (do NOT substitute with other tools):\n" + "\n".join(f"- `{cid}`" for cid in selected_ids)
+
+    directives_clause = (
+        "\n\n### CRITICAL BIOLOGICAL DATAFLOW RULES (MUST FOLLOW):\n"
+        "1. Sequential Preprocessing & Assembly: QC and trimming consume `rawreads` and produce `trimmed`. Read-based classification, screening, and de novo assembly consume `trimmed`.\n"
+        "2. Species-Aware Stream Crossing: Pair assembled contigs with species identification using standard Nextflow DSL2 `.cross()` and `.multiMap{}` before typing tools.\n"
+        "3. Assembly & Downstream Profiling: De novo assembly produces `assembly`. Downstream species identification, AMR screening, plasmid typing, gene annotation, and typing consume `assembly`.\n"
+        "4. Cohort Clustering & Multi-Sample Aggregation: Aggregate sample-level intermediate channels using `.collect()` before invoking multi-sample cohort analysis tools.\n"
+    )
+
     human_msg = (
         f"### TECHNICAL CONTEXT (Available Tools & Code):\n{tech_context}\n\n"
         f"### APPROVED PLAN:\n{plan_text}"
+        f"{selected_clause}"
+        f"{directives_clause}"
     )
     # [Tail / Dynamic Payload]: Variable research findings
     if architect_findings:
@@ -198,12 +213,42 @@ def architect_generate_node(state: GraphState) -> Any:
     ]
 
     try:
-        result = architect_agent.invoke(gen_messages)
-        logger.info("architect_generate_success")
-        return {
-            "ast_json": result.model_dump(),
-            "validation_error": None
-        }
+        response_dict = architect_agent.invoke(gen_messages)
+        parsed = response_dict.get("parsed") if isinstance(response_dict, dict) else response_dict
+        raw_msg = response_dict.get("raw") if isinstance(response_dict, dict) else None
+
+        if parsed is not None:
+            logger.info("architect_generate_success")
+            return {
+                "ast_json": parsed.model_dump(),
+                "validation_error": None
+            }
+
+        # Fallback to raw message parsing
+        raw_ast = {}
+        if raw_msg:
+            if getattr(raw_msg, "tool_calls", None):
+                raw_ast = raw_msg.tool_calls[0].get("args", {})
+            elif hasattr(raw_msg, "content") and raw_msg.content:
+                content = str(raw_msg.content)
+                match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', content, re.DOTALL)
+                if match:
+                    content = match.group(1)
+                try:
+                    raw_ast = json.loads(content)
+                except Exception:
+                    pass
+
+        if raw_ast:
+            validated = NextflowPipelineAST.model_validate(raw_ast)
+            logger.info("architect_generate_success_via_fallback")
+            return {
+                "ast_json": validated.model_dump(),
+                "validation_error": None
+            }
+
+        parsing_err = response_dict.get("parsing_error") if isinstance(response_dict, dict) else None
+        raise ValueError(f"Model returned invalid AST output: {parsing_err or 'No structured output received'}")
     except Exception as e:
         logger.error("architect_validation_failed", error=str(e))
         raw_ast = {}
@@ -330,10 +375,22 @@ def architect_precheck_node(state: GraphState, store: BaseStore) -> Any:
     has_preprocessing = any("1pp_" in mid.lower() or "trimming" in mid.lower() for mid in component_ids)
     if "raw read" in user_query and has_assembly and not has_preprocessing:
         warnings.append(
-            "WARNING: The user requested assembly/mapping from 'raw reads', but no preprocessing/trimming "
-            "tool (e.g. step_1PP_trimming__fastp) is in the pipeline. Assembly typically requires trimmed reads."
+            "WARNING: The user requested downstream processing from 'raw reads', but no preprocessing/trimming "
+            "step is in the pipeline. Downstream tasks typically consume cleaned input."
         )
 
+    # ── Template & Strategy Hydration ─────────────────────────────────────────
+    strategy = state.get('strategy_selector', 'CUSTOM_BUILD')
+    used_template_id = state.get('used_template_id')
+    template_parts = []
+    if used_template_id:
+        t_item = store.get(("code",), used_template_id)
+        tmpl_code = t_item.value.get("content") if t_item else None
+        if tmpl_code:
+            template_parts.append(f"### TEMPLATE BASE: {used_template_id}\n```groovy\n{tmpl_code.strip()}\n```")
+    elif strategy == "CUSTOM_BUILD":
+        template_parts.append("### STRATEGY: CUSTOM_BUILD (Synthesize pipeline modularly)")
+    
     # ── Deterministic Helper Injection for Unmet Inputs ─────────────────────
     all_takes = set()
     all_emits = set()
@@ -430,9 +487,183 @@ def architect_precheck_node(state: GraphState, store: BaseStore) -> Any:
     except Exception as e:
         logger.warning(f"Error extracting patterns: {e}")
 
-    if warnings or channel_map_lines or helper_injections or pattern_injections:
-        precheck_block = "\n## CHANNEL MAP (verified from code store)\n"
+    # ── Dynamic AST Dataflow Operator Directives ──────────────────────────────
+    dataflow_directives = []
+    try:
+        dataflow_directives = kg.synthesize_dataflow_directives(component_ids, store=store)
+    except Exception as e:
+        logger.warning(f"Error synthesizing dataflow directives: {e}")
+
+    # ── Topological Wireframe Synthesis (Zero-Repair Blueprint) ─────────────
+    wireframe_lines = []
+    if component_ids:
+        try:
+            topological_seq = component_ids
+            if kg.is_built:
+                import networkx as nx
+                sub_g = kg.G.subgraph(set(component_ids))
+                if nx.is_directed_acyclic_graph(sub_g):
+                    topological_seq = list(nx.topological_sort(sub_g))
+
+            # Track variable names assigned to process outputs
+            assigned_vars = {}
+            cross_directives = kg.detect_cross_multimap_routing(topological_seq, store=store) if kg.is_built else []
+            cross_inserted = set()
+
+            # Prepend standard entrypoint input getter
+            wireframe_lines.append("    // 1. Initial Input Channel")
+            wireframe_lines.append("    rawreads = getSingleInput()")
+            assigned_vars['rawreads'] = 'rawreads'
+
+            for proc_id in topological_seq:
+                parsed = _get_channels_for_component(proc_id, store)
+                takes = parsed.get("takes", [])
+                emits = parsed.get("emits", [])
+
+                # Check if this process is a consumer of a cross-join directive that hasn't been emitted yet
+                for cd in cross_directives:
+                    if cd["consumer"] == proc_id and cd["joined_var"] not in cross_inserted:
+                        wireframe_lines.append("")
+                        wireframe_lines.append("    // Keyed channel join & decomposition for parallel asynchronous streams")
+                        wireframe_lines.append(f"    {cd['idiom']}")
+                        wireframe_lines.append("")
+                        cross_inserted.add(cd["joined_var"])
+
+                # Determine variable name for process output
+                var_name = None
+                if emits and emits[0] not in ("none", "void", ""):
+                    primary_emit = emits[0]
+                    var_name = primary_emit
+                    assigned_vars[primary_emit] = primary_emit
+                    assigned_vars[proc_id] = primary_emit
+
+                # Determine arguments for this process based on channel types & upstream dataflow
+                args = []
+                is_multi = False
+                if kg.is_built:
+                    collect_info = kg.detect_collection_cardinality(proc_id, store=store)
+                    if collect_info or proc_id.startswith("multi_"):
+                        is_multi = True
+
+                # Check if arity projection is needed
+                arity_proj = None
+                if takes and kg.is_built:
+                    for prev in topological_seq:
+                        if prev == proc_id: break
+                        proj = kg.deduce_tuple_arity_projection(prev, proc_id, store=store)
+                        if proj and "idiom" in proj:
+                            arity_proj = proj["idiom"]
+                            break
+
+                if arity_proj:
+                    args.append(arity_proj)
+                else:
+                    for take_ch in takes:
+                        if not take_ch or take_ch.lower() in ("none", ""): continue
+                        arg_expr = take_ch
+
+                        # Check if channel comes from a cross-joined multiMap variable
+                        matched_cross = False
+                        for cd in cross_directives:
+                            if cd["joined_var"] in cross_inserted:
+                                if proc_id in cd.get("consumers", []) or take_ch in (cd.get("channel1"), cd.get("stream_name"), cd.get("channel2"), "species", "genus_species"):
+                                    if take_ch in (cd.get("channel1"), cd.get("stream_name"), "assembly", "assembled", "data"):
+                                        arg_expr = f"{cd['joined_var']}.{cd.get('channel1', cd.get('stream_name'))}"
+                                        matched_cross = True
+                                        break
+                                    elif take_ch in ("species", "genus_species", "assigned_species", cd.get("channel2")):
+                                        arg_expr = f"{cd['joined_var']}.species"
+                                        matched_cross = True
+                                        break
+
+                        if not matched_cross:
+                            # For multi-sample consumers, prioritize typed intermediate channels (alleles, matrix, vcf, counts)
+                            if is_multi and take_ch in ("input", "data", "alleles"):
+                                found_typed = False
+                                for preferred_ch in ("alleles", "matrix", "vcf", "counts", "table", "tree"):
+                                    if preferred_ch in assigned_vars:
+                                        arg_expr = assigned_vars[preferred_ch]
+                                        found_typed = True
+                                        break
+                                if not found_typed:
+                                    for prev_proc in reversed(topological_seq):
+                                        if prev_proc == proc_id: continue
+                                        prev_parsed = _get_channels_for_component(prev_proc, store)
+                                        if prev_parsed.get("emits"):
+                                            pe = prev_parsed["emits"][0]
+                                            if pe not in ("none", "void", ""):
+                                                arg_expr = assigned_vars.get(pe, f"{prev_proc}.out.{pe}")
+                                                break
+                            else:
+                                # Semantic channel alias mapping:
+                                if take_ch in ("rawreads", "reads") and "trimmed" in assigned_vars:
+                                    arg_expr = assigned_vars["trimmed"]
+                                elif take_ch in ("rawreads", "reads") and "clean_reads" in assigned_vars:
+                                    arg_expr = assigned_vars["clean_reads"]
+                                elif "filter" in proc_id and take_ch in ("data", "input", "report"):
+                                    found_scr = False
+                                    for prev_proc in reversed(topological_seq):
+                                        if prev_proc == proc_id: continue
+                                        prev_parsed = _get_channels_for_component(prev_proc, store)
+                                        if any(out_name in prev_parsed.get("emits", []) for out_name in ("report", "results", "table", "summary", "hits", "data")):
+                                            arg_expr = assigned_vars.get(prev_proc, f"{prev_proc}.out")
+                                            found_scr = True
+                                            break
+                                    if not found_scr:
+                                        arg_expr = "assembly"
+                                else:
+                                    # Look for upstream producer of this exact take channel
+                                    for prev_proc in reversed(topological_seq):
+                                        if prev_proc == proc_id: continue
+                                        prev_parsed = _get_channels_for_component(prev_proc, store)
+                                        if take_ch in prev_parsed.get("emits", []):
+                                            if prev_proc in assigned_vars:
+                                                arg_expr = assigned_vars[prev_proc]
+                                            else:
+                                                arg_expr = f"{prev_proc}.out.{take_ch}"
+                                            break
+                                        elif take_ch in ("data", "input") and prev_parsed.get("emits"):
+                                            pe = prev_parsed["emits"][0]
+                                            if pe not in ("none", "void", ""):
+                                                arg_expr = assigned_vars.get(pe, f"{prev_proc}.out.{pe}")
+                                                break
+
+                        # If multi-sample consumer, wrap data channel in .collect()
+                        if is_multi and not arg_expr.endswith(".collect()") and not any(kw in take_ch for kw in ("schema", "param", "meta")):
+                            arg_expr = f"{arg_expr}.collect()"
+
+                        # If take channel is a parameter/schema helper
+                        if take_ch in ("schema", "scheme"):
+                            arg_expr = "getSchema()"
+                        elif take_ch in ("coverage", "identity", "threshold", "min_len", "threads", "raw_metadata", "geodata", "nomenclature", "genus_species"):
+                            arg_expr = f"param('{take_ch}')"
+
+                        args.append(arg_expr)
+
+                args_str = ", ".join(args) if args else "/* input channel */"
+                if var_name:
+                    assigned_vars[proc_id] = var_name
+                    assigned_vars[var_name] = var_name
+                    wireframe_lines.append(f"    {var_name} = {proc_id}({args_str}).{emits[0] if emits else var_name}")
+                else:
+                    wireframe_lines.append(f"    {proc_id}({args_str})")
+        except Exception as e:
+            logger.warning(f"Error synthesizing topological wireframe: {e}")
+
+    if template_parts or warnings or channel_map_lines or helper_injections or pattern_injections or dataflow_directives or wireframe_lines:
+        precheck_block = ""
+        if template_parts:
+            precheck_block += "\n".join(template_parts) + "\n\n"
+        if wireframe_lines:
+            precheck_block += "## TOPOLOGICAL EXECUTION WIREFRAME (Zero-Repair Blueprint)\n"
+            precheck_block += "The Knowledge Graph deduced the exact workflow execution sequence and dataflow connections:\n```groovy\nworkflow {\n"
+            precheck_block += "\n".join(wireframe_lines) + "\n}\n```\n\n"
+        precheck_block += "## CHANNEL MAP (verified from code store)\n"
         precheck_block += "\n".join(channel_map_lines)
+        if dataflow_directives:
+            precheck_block += "\n\n## DYNAMIC NEXTFLOW DSL2 OPERATOR DIRECTIVES\n"
+            precheck_block += "The system deduced the following structural operator requirements from the active code AST:\n"
+            precheck_block += "\n\n".join(dataflow_directives)
         if helper_injections:
             precheck_block += "\n\n## DEDUCED HELPER FUNCTIONS (For Unmet Inputs)\n"
             precheck_block += "You MUST use these specific helper functions to instantiate the missing input channels in your entrypoint:\n"
@@ -444,10 +675,11 @@ def architect_precheck_node(state: GraphState, store: BaseStore) -> Any:
         if warnings:
             precheck_block += "\n\n## WARNINGS\n" + "\n".join(warnings)
 
-        logger.info("architect_precheck_warnings", count=len(warnings))
+        logger.info("architect_precheck_warnings", count=len(warnings), directives=len(dataflow_directives), wireframe=len(wireframe_lines))
         return {"technical_context": state.get("technical_context", "") + "\n\n" + precheck_block}
 
     logger.info("architect_precheck_clear")
     return {}
+
 
 

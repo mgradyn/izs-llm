@@ -131,7 +131,7 @@ def lookup_components_batch(item_ids: list[str], runtime: ToolRuntime, include_c
     """Batch lookup multiple catalog components or templates in a single tool call to minimize roundtrips.
 
     Args:
-        item_ids: List of catalog item IDs to look up (e.g. ['step_1PP_trimming__fastp', 'step_2AS_denovo__spades']).
+        item_ids: List of catalog item IDs to look up (e.g. ['step_module_a', 'step_module_b']).
         include_code: Whether to include truncated Nextflow DSL2 source code.
     """
     store = runtime.store
@@ -144,6 +144,22 @@ def lookup_components_batch(item_ids: list[str], runtime: ToolRuntime, include_c
         item_id_clean = str(item_id).strip()
         if not item_id_clean:
             continue
+            
+        # Extract graph neighbors if available with confidence tiers
+        graph_up = []
+        graph_down = []
+        comm_id = None
+        if kg.is_built and item_id_clean in kg.G:
+            graph_up = [
+                f"{u} ({kg.G[u][item_id_clean].get('confidence', 'AMBIGUOUS')})"
+                for u in kg.G.predecessors(item_id_clean)
+            ][:5]
+            graph_down = [
+                f"{v} ({kg.G[item_id_clean][v].get('confidence', 'AMBIGUOUS')})"
+                for v in kg.G.successors(item_id_clean)
+            ][:5]
+            comm_id = kg.G.nodes[item_id_clean].get("community")
+
         comp_item = store.get(("components",), item_id_clean)
         if comp_item and comp_item.value:
             c_val = comp_item.value
@@ -156,7 +172,11 @@ def lookup_components_batch(item_ids: list[str], runtime: ToolRuntime, include_c
                 "description": str(c_val.get("description") or "")[:200],
                 "inputs": c_val.get("input_channels") or c_val.get("input_types") or [],
                 "outputs": c_val.get("output_channels") or c_val.get("out") or [],
+                "upstream_tools": graph_up,
+                "downstream_tools": graph_down,
             }
+            if comm_id is not None:
+                entry["community"] = comm_id
             if include_code:
                 code_item = store.get(("code",), item_id_clean)
                 if code_item and code_item.value:
@@ -177,6 +197,8 @@ def lookup_components_batch(item_ids: list[str], runtime: ToolRuntime, include_c
                 "inputs": t_val.get("input_channels") or [],
                 "outputs": t_val.get("output_channels") or [],
                 "components_used": t_val.get("components_used") or [],
+                "upstream_tools": graph_up,
+                "downstream_tools": graph_down,
             }
             if include_code:
                 code_item = store.get(("code",), item_id_clean)
@@ -191,7 +213,7 @@ def lookup_components_batch(item_ids: list[str], runtime: ToolRuntime, include_c
         if code_item and code_item.value:
             code = code_item.value.get("content", "") if isinstance(code_item.value, dict) else str(code_item.value or "")
             parsed = _parse_nextflow_channels(code)
-            results[item_id_clean] = {
+            entry = {
                 "valid": True,
                 "id": item_id_clean,
                 "namespace": "component",
@@ -199,9 +221,12 @@ def lookup_components_batch(item_ids: list[str], runtime: ToolRuntime, include_c
                 "description": f"Dynamically resolved component '{item_id_clean}' from DSL2 source.",
                 "inputs": parsed["takes"],
                 "outputs": parsed["emits"],
+                "upstream_tools": graph_up,
+                "downstream_tools": graph_down,
             }
             if include_code:
-                results[item_id_clean]["source_code"] = code[:settings.MAX_CODE_DISPLAY_LENGTH]
+                entry["source_code"] = code[:settings.MAX_CODE_DISPLAY_LENGTH]
+            results[item_id_clean] = entry
             continue
 
         results[item_id_clean] = {"valid": False, "error": f"ID '{item_id_clean}' not found in catalog"}
@@ -331,6 +356,12 @@ def search_components(query: str, runtime: ToolRuntime, input_channel: str = Non
                 for st_word in str(st).lower().replace('_', ' ').split():
                     if st_word and len(st_word) > 3 and st_word in query_tokens:
                         score += 5
+
+            # Keywords defined in catalog components.json
+            for kw in (comp_data.get('keywords') or []):
+                for kw_word in str(kw).lower().replace('_', ' ').split():
+                    if kw_word and len(kw_word) > 3 and kw_word in query_tokens and kw_word not in IGNORE_WORDS:
+                        score += 25
 
             # Structural keyword boosting from plugin config
             try:
@@ -522,6 +553,33 @@ def search_components(query: str, runtime: ToolRuntime, input_channel: str = Non
             
     # Apply limit and offset
     final_results = final_results[offset:offset+limit]
+
+    # ── Knowledge Graph BFS Depth=1 Discovery ──
+    if kg.is_built and final_results:
+        existing_ids = {r.get("id") for r in final_results if isinstance(r, dict)}
+        discovered = []
+        for r in final_results[:5]:
+            hit_id = r.get("id")
+            if hit_id and hit_id in kg.G:
+                for succ in kg.G.successors(hit_id):
+                    if succ not in existing_ids and succ not in [d.get("id") for d in discovered]:
+                        edata = kg.G[hit_id][succ]
+                        conf = edata.get("confidence", "AMBIGUOUS")
+                        if conf in ("EXTRACTED", "INFERRED"):
+                            comp_item = store.get(("components",), succ) or store.get(("templates",), succ)
+                            if comp_item and comp_item.value:
+                                c_val = comp_item.value
+                                discovered.append({
+                                    "id": succ,
+                                    "type": "component" if store.get(("components",), succ) else "template",
+                                    "tool": c_val.get("tool", succ),
+                                    "description": str(c_val.get("description") or "")[:settings.DESCRIPTION_TRUNCATE_COMP],
+                                    "inputs": c_val.get("input_channels") or c_val.get("input_types") or [],
+                                    "outputs": c_val.get("output_channels") or c_val.get("out") or [],
+                                    "discovered_via_graph": f"{hit_id} ({conf})",
+                                })
+        if discovered:
+            final_results.extend(discovered[:3])
                 
     if warnings:
         final_results.append({"type": "meta", "warnings": warnings})
@@ -634,6 +692,22 @@ def check_plan_logic(component_ids: list, template_id: str, runtime: ToolRuntime
 
     logger.info(f"--- [NODE] CONSULTANT TOOL found {len(invalid_ids)} invalid ids")
 
+    # ── Topological Knowledge Graph Validation ──
+    from core.services.knowledge_graph import kg
+    if not kg.is_built:
+        kg.build_nx_graph(store)
+
+    topological_order = valid_ids
+    if kg.is_built and valid_ids:
+        try:
+            import networkx as nx
+            subgraph_nodes = set(valid_ids)
+            sub_g = kg.nx_graph.subgraph(subgraph_nodes)
+            if nx.is_directed_acyclic_graph(sub_g):
+                topological_order = list(nx.topological_sort(sub_g))
+        except Exception:
+            pass
+
     # we look at how the data flows between the steps
     channel_report = []
     for i in range(len(valid_ids) - 1):
@@ -685,6 +759,11 @@ def check_plan_logic(component_ids: list, template_id: str, runtime: ToolRuntime
             "source_emits": effective_outputs,
             "target_takes": effective_inputs,
         }
+
+        # Knowledge Graph edge confidence
+        if kg.is_built and kg.G.has_edge(src_id, tgt_id):
+            edata = kg.G[src_id][tgt_id]
+            pair_info["graph_edge_confidence"] = edata.get("confidence", "AMBIGUOUS")
 
         if not effective_outputs:
             warnings.append(f"No output channels detected for '{src_id}' so we cannot verify connection to '{tgt_id}'")
@@ -1124,7 +1203,7 @@ def auto_complete_pipeline_dag(component_ids: list, runtime: ToolRuntime) -> str
 # ──────────────────────────────────────────────────────────────────────────────
 # EXPORT: Tool list for ToolNode registration
 # ──────────────────────────────────────────────────────────────────────────────
-# GRAPHIFY TOOLS: Knowledge Graph Query, Traversal, Explain, and Pathfinding
+# TOPOLOGICAL KNOWLEDGE GRAPH TOOLS: Query, Traversal, and Pathfinding
 # ──────────────────────────────────────────────────────────────────────────────
 
 @tool
@@ -1135,7 +1214,7 @@ def query_knowledge_graph(
     token_budget: int = 2000,
     confidence_filter: Optional[str] = None,
 ) -> str:
-    """Execute Graphify natural-language search and traversal over the Nextflow Component Catalog.
+    """Execute natural-language structural search and topological traversal over the Nextflow Component Catalog.
 
     Returns an extracted subgraph of components and directed dataflow channels with confidence tiers:
       - EXTRACTED: Real Nextflow AST wiring from tool_graph.json
@@ -1177,7 +1256,7 @@ def explain_component(component_id_or_name: str) -> str:
     Use this when you want to verify what exact channels feed into a tool and what tools can consume its output.
 
     Args:
-        component_id_or_name: Component ID (e.g. 'step_1PP_trimming__fastp') or tool name (e.g. 'fastp')
+        component_id_or_name: Component ID (e.g. 'step_identifier') or tool name (e.g. 'tool_name')
     """
     from core.services.knowledge_graph import kg
 
@@ -1260,22 +1339,12 @@ def find_dataflow_path(source_component: str, target_component: str, directed: b
 # ──────────────────────────────────────────────────────────────────────────────
 
 CONSULTANT_TOOLS = [
-    lookup_catalog_item,
-    lookup_components_batch,
     search_components,
-    check_plan_logic,
-    find_component_usage,
-    search_helper_functions,
-    search_design_patterns,
-    auto_complete_pipeline_dag,
-    grep_codebase,
+    lookup_components_batch,
     query_knowledge_graph,
-    search_component_graph,
-    explain_component,
-    get_component_neighbors,
-    get_community_components,
-    get_catalog_god_nodes,
-    find_dataflow_path,
+    check_plan_logic,
+    search_design_patterns,
+    search_helper_functions,
 ]
 
 

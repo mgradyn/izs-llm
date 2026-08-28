@@ -90,14 +90,8 @@ If you encounter an `UNDEFINED VAR` error during validation, it means a variable
 
 ---
 
-# 4. Scoping & Emit Rules
-
-- Sub-workflows are **isolated** — they cannot see entrypoint variables.
-- Every `take_channels` entry **must** appear in `body_code`.
-- `emit_channels`: only variable names or property assignments. No function calls.
-  - ✓ `["result = mapper_res.result"]` (Direct extraction in emit)
-  - ✗ `["out = some_process(data, config)"]`
-- **NO `.set` ALIASING ANYWHERE**: Do NOT use `.set {}` to assign variables in DSL2. Use direct assignment (`var = expr`).
+- **NO DUPLICATION (CRITICAL)**: If you define `sub_workflows`, the `entrypoint` must act as a modular orchestrator that calls the sub-workflows. DO NOT re-execute all the child processes flatly inside the entrypoint if they are already executed inside sub-workflows.
+- **`multiMap` & `.set`**: For `.multiMap { ... }` blocks, always close with `.set { myMultiMapVar }` so named branches can be accessed via `myMultiMapVar.branchName`. For normal process assignments, use standard assignment (`my_var = my_process(...)`).
   - ✗ `body_code`: `assembled.map { ... }.set { assembly_data }`
   - ✓ `body_code`: `assembly_data = assembled.map { ... }`
   - ✗ `emit_channels`: `["report_file"]` (when using `.set` inside body_code)
@@ -142,8 +136,30 @@ This blueprint attempts to map upstream producers to downstream consumers based 
    - *Example:* A host depletion tool emits `depleted`, but the downstream mapping tool takes `reads`. The graph will sever the pipeline here because it doesn't know `depleted` == `reads`.
    - **Your Job:** You must use your semantic reasoning as a bioinformatician to bridge these gaps. If it is logically obvious that `depleted` should feed into the mapping tool's `reads` channel, DO IT. Ignore the fact that the graph missed the connection.
    
-2. **The Recursive Hairball (False Positives):** The graph will often chain parallel tools together simply because they share a generic channel name.
-   - *Example:* `ivar` (a mapper), `bowtie` (a mapper), and `medaka` (a mapper) all take and emit `consensus`. The programmatic graph will mistakenly tell you that `ivar` feeds into `bowtie` which feeds into `medaka`.
+   - *Example:* Multiple parallel analysis tools may all take and emit the same channel type. The programmatic graph will mistakenly suggest chaining them sequentially.
    - **Your Job:** You must recognize when tools are *parallel alternatives* rather than a sequential chain. DO NOT build spaghetti pipelines just because the graph linked them laterally. Only chain tools that logically make sense.
 
-Your ultimate goal is to build a logically sound, biologically accurate Nextflow pipeline. Treat the injected `<c>` tags as a **lightweight hint engine**, not strict gospel.
+# 7. Biological Realism & Dataflow Quality Rules (Scientist-Grade)
+
+1. **Sequential Preprocessing & Assembly**:
+   - Upstream QC and Trimming processes consume raw input channels (`rawreads`) and produce cleaned channels (`trimmed`).
+   - Read-based classification, screening, and de novo assembly consume cleaned channels (`trimmed`).
+
+2. **Species-Aware Stream Crossing**:
+   - When pairing assembly contigs with species classification channels, use standard Nextflow DSL2 `.cross()` and `.multiMap{}`:
+     ```groovy
+     assembly.cross(assigned_species) { extractKey(it) }.multiMap {
+         assembly: it[0]
+         species: it[1][1]
+     }.set { assemblyAndSpecies }
+     ```
+
+3. **Downstream Characterization & Screening**:
+   - Downstream typing and annotation tools consume the paired streams (`assemblyAndSpecies.assembly`, `assemblyAndSpecies.species`).
+   - Tabular confidence evaluation steps consume the outputs of upstream analysis along with threshold parameters.
+
+4. **Cohort Aggregation for Multi-Sample Processing**:
+   - Multi-sample cohort clustering or phylogenetic analysis requires aggregated outputs across all samples. Aggregate intermediate channel outputs using `.collect()` before invoking multi-sample processes:
+     ```groovy
+     multi_process(intermediate_channel.collect(), param('param1'), param('param2'))
+     ```

@@ -22,13 +22,23 @@ EXTRACTOR_SYSTEM_PROMPT = load_extractor_prompt()
 
 _APPROVAL_PHRASES = (
     "approved", "i approve", "yes, build", "yes build",
-    "please build", "go ahead", "looks good", "lgtm",
+    "please build", "go ahead", "looks good", "lgtm", "sounds good",
     "build the pipeline", "build it", "proceed", "confirm", "execute",
+    "generate the pipeline", "generate it", "run it", "start building",
+    "yes please", "yes", "yeah", "yep", "sure", "ok", "okay", "agreed", "great", "perfect",
 )
 
 
 def _detect_approval(messages: list) -> bool:
-    """Return True if the last human message is an approval of the proposed plan."""
+    """Return True if the LAST human message is a short approval of the proposed plan.
+
+    Guards:
+    - Only inspects the very last HumanMessage (not all messages) to avoid
+      false positives when a long pipeline request happens to contain a phrase
+      like "pipeline for" or "proceed".
+    - Short-circuits to False if the message is longer than 300 characters
+      (genuine approvals are brief; full pipeline descriptions are long).
+    """
     for m in reversed(messages):
         if isinstance(m, HumanMessage):
             content = m.content
@@ -41,8 +51,30 @@ def _detect_approval(messages: list) -> bool:
                 text = content
             else:
                 text = ""
-            text = text.strip().lower().rstrip("!.,;:?")
-            return any(phrase in text for phrase in _APPROVAL_PHRASES)
+            text = text.strip()
+            # A real approval is short — reject long messages immediately
+            if len(text) > 300:
+                return False
+            text_lower = text.lower().rstrip("!.,;:?")
+            words = text_lower.split()
+            # Exact 1-2 word affirmations
+            if text_lower in ("yes", "yep", "yeah", "sure", "ok", "okay", "lgtm", "approved", "proceed", "build", "continue"):
+                return True
+            return any(phrase in text_lower for phrase in _APPROVAL_PHRASES)
+    return False
+
+
+def _detect_explicit_build_request(messages: list) -> bool:
+    """Return True if the user request is an explicit command to construct a pipeline."""
+    for m in messages:
+        if isinstance(m, HumanMessage):
+            content = str(m.content).strip().lower()
+            explicit_prefixes = (
+                "build", "generate", "create", "assemble", "construct", "produce",
+                "run", "make", "draft", "screen", "align", "characterize", "end-to-end",
+                "pipeline for", "workflow for"
+            )
+            return any(content.startswith(v) or f" {v} " in content for v in explicit_prefixes)
     return False
 
 
@@ -231,7 +263,7 @@ def _build_extraction_context(messages: list) -> tuple[str, list[dict]]:
     tool_memory_new = []
 
     from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
-    
+
     for msg in messages[-settings.CONTEXT_WINDOW_EXTRACT:]:
         if isinstance(msg, AIMessage):
             if getattr(msg, "tool_calls", None):
@@ -256,20 +288,98 @@ def _build_extraction_context(messages: list) -> tuple[str, list[dict]]:
     return "\n".join(conversation_summary), tool_memory_new
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Consultant extract node
-# ──────────────────────────────────────────────────────────────────────────────
+def _get_verified_plan_shortcircuit(messages: list, state: GraphState, store: BaseStore) -> dict | None:
+    """If the consultant called check_plan_logic with valid components and emitted a plan,
+    extract the plan deterministically in <1ms without calling the extraction LLM."""
+    verified_comps = []
+    template_id = None
+
+    # Walk backwards through messages to find the last check_plan_logic call
+    for msg in reversed(messages):
+        if isinstance(msg, AIMessage) and getattr(msg, "tool_calls", None):
+            for tc in msg.tool_calls:
+                if tc.get("name") == "check_plan_logic":
+                    args = tc.get("args", {})
+                    comps = args.get("component_ids", [])
+                    if comps and isinstance(comps, list):
+                        verified_comps = comps
+                        template_id = args.get("template_id")
+                        break
+            if verified_comps:
+                break
+
+    if not verified_comps:
+        return None
+
+    last_ai_content = _get_ai_content(messages)
+    if not last_ai_content or len(last_ai_content.strip()) < 10:
+        return None
+
+    # Check if approval or direct execution mode
+    is_direct_mode = state.get("execution_mode") == "direct"
+    is_approved = is_direct_mode or _detect_approval(messages) or _detect_explicit_build_request(messages)
+    status = "APPROVED" if is_approved else "CHATTING"
+
+    from core.services.knowledge_graph import kg
+    if store and not kg.is_built:
+        kg.build_nx_graph(store)
+
+    if kg.is_built and verified_comps:
+        # Dynamic query decomposition to capture all scientific sub-goals from user prompt
+        user_msg = ""
+        for m in state.get("messages", []):
+            if hasattr(m, "content") and m.content and type(m).__name__ in ("HumanMessage", "UserMessage"):
+                user_msg = str(m.content).lower()
+                break
+            elif hasattr(m, "content") and m.content and not getattr(m, "tool_calls", None) and type(m).__name__ not in ("AIMessage", "SystemMessage", "ToolMessage"):
+                user_msg = str(m.content).lower()
+                break
+
+        if user_msg:
+            sub_queries = kg.decompose_conjunction_query(user_msg)
+            if len(sub_queries) > 1:
+                projected_comps = []
+                for sub_q in sub_queries:
+                    proj_id = kg.project_vertex(sub_q)
+                    if proj_id and proj_id in kg.G and proj_id not in projected_comps:
+                        projected_comps.append(proj_id)
+                if len(projected_comps) >= 8:
+                    verified_comps = projected_comps
+                else:
+                    for p in projected_comps:
+                        if p not in verified_comps:
+                            verified_comps.append(p)
+
+        valid_comps, _ = kg.partition_raw_ids(verified_comps)
+        verified_comps = kg.expand_composite_components(valid_comps, store=store)
+
+    logger.info("consultant_extract_fastpath_hit", status=status, components=verified_comps)
+
+    return {
+        "messages": [AIMessage(content=last_ai_content)],
+        "consultant_status": status,
+        "design_plan": last_ai_content,
+        "strategy_selector": "TEMPLATE" if template_id else "CUSTOM_BUILD",
+        "used_template_id": template_id,
+        "selected_component_ids": verified_comps,
+        "tool_memory": state.get("tool_memory") or [],
+        "error": None
+    }
+
 
 def consultant_extract_node(state: GraphState, store: BaseStore) -> Any:  # noqa: C901
     logger.info("node_start", node="consultant_extract")
-    llm = get_llm()
     messages = state.get("messages", [])
 
     if _detect_approval(messages) and state.get("selected_component_ids"):
-        # If we already have the components, shortcircuit.
-        # If not, let the extractor LLM run so it can pull them from the conversation history.
         return _get_approval_shortcircuit(messages, state)
 
+    # ── Fast-Path Deterministic Extraction (0ms, 0 GPU tokens) ───────────────
+    fastpath_res = _get_verified_plan_shortcircuit(messages, state, store)
+    if fastpath_res:
+        return fastpath_res
+
+    llm = get_llm()
     last_ai_content = _get_ai_content(messages)
     context_text, tool_memory_new = _build_extraction_context(messages)
     if not last_ai_content and not context_text:
@@ -293,9 +403,10 @@ def consultant_extract_node(state: GraphState, store: BaseStore) -> Any:  # noqa
             "reasoning": reasoning_payload
         })
 
-        if _detect_approval(messages):
+        is_direct_mode = state.get("execution_mode") == "direct"
+        if is_direct_mode or _detect_approval(messages) or (_detect_explicit_build_request(messages) and result.selected_component_ids and len(result.selected_component_ids) >= 1):
             result.status = "APPROVED"
-            
+
         logger.info("consultant_extract_status", status=result.status)
 
         # 1. Active Bipartite Vertex Partitioning & Canonical Projection on Knowledge Graph
@@ -304,7 +415,17 @@ def consultant_extract_node(state: GraphState, store: BaseStore) -> Any:  # noqa
             kg.build_nx_graph(store)
 
         if kg.is_built and result.selected_component_ids:
-            valid_comps, helper_funcs = kg.partition_raw_ids(result.selected_component_ids)
+            # Context-aware disambiguation based on original user prompt
+            user_msg = ""
+            for m in state.get("messages", []):
+                if hasattr(m, "content") and m.content and type(m).__name__ in ("HumanMessage", "UserMessage"):
+                    user_msg = str(m.content).lower()
+                    break
+                elif hasattr(m, "content") and m.content and not getattr(m, "tool_calls", None) and type(m).__name__ not in ("AIMessage", "SystemMessage", "ToolMessage"):
+                    user_msg = str(m.content).lower()
+                    break
+
+            valid_comps, _helper_funcs = kg.partition_raw_ids(result.selected_component_ids)
             result.selected_component_ids = kg.expand_composite_components(valid_comps, store=store)
 
         if result.status == "APPROVED":
@@ -313,11 +434,17 @@ def consultant_extract_node(state: GraphState, store: BaseStore) -> Any:  # noqa
                 extracted = []
                 # Fallback: extract from verified tool memory
                 for fact in ((state.get("tool_memory", []) or []) + tool_memory_new):
-                    if fact.get("tool") == "lookup_catalog_item":
+                    tool_name = fact.get("tool")
+                    if tool_name in ("lookup_catalog_item", "lookup_components_batch"):
                         try:
                             data = json.loads(fact.get("result", "{}"))
-                            if data.get("valid") and data.get("id") and data.get("id") not in extracted:
-                                extracted.append(data.get("id"))
+                            if isinstance(data, dict):
+                                if tool_name == "lookup_components_batch":
+                                    for k, v in data.items():
+                                        if isinstance(v, dict) and v.get("valid") and k not in extracted:
+                                            extracted.append(k)
+                                elif data.get("valid") and data.get("id") and data.get("id") not in extracted:
+                                    extracted.append(data.get("id"))
                         except Exception:
                             pass
                 result.selected_component_ids = kg.expand_composite_components(extracted, store=store) if kg.is_built else extracted

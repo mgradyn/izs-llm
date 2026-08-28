@@ -205,6 +205,105 @@
         "aliases": [],
         "num_args": 0,
         "arguments": []
+      },
+      {
+        "name": "getSingleInput",
+        "description": "Groovy helper function getSingleInput. Returns a Channel containing a single (riscd, reads) tuple for the input sample. Use this in the entrypoint workflow to obtain the primary input FASTQ/FASTA channel.",
+        "usage": "def getSingleInput()",
+        "num_args": 0,
+        "arguments": [],
+        "keywords": [
+          "input",
+          "reads",
+          "fastq",
+          "single",
+          "channel",
+          "entrypoint",
+          "riscd",
+          "raw"
+        ],
+        "aliases": [
+          "getSingleInput"
+        ]
+      },
+      {
+        "name": "getEmpty",
+        "description": "Groovy helper function getEmpty. Returns a singleton empty File object (an empty placeholder path). Use to satisfy optional file inputs when no file is available.",
+        "usage": "def getEmpty()",
+        "num_args": 0,
+        "arguments": [],
+        "keywords": [
+          "empty",
+          "placeholder",
+          "optional",
+          "file",
+          "null"
+        ],
+        "aliases": [
+          "getEmpty"
+        ]
+      },
+      {
+        "name": "extractKey",
+        "description": "Groovy helper function extractKey. Extracts the cross-join key (dataset accession DS-code) from a channel tuple element. Used as the key function in .cross() operations to join channels by sample identity.",
+        "usage": "def extractKey(input)",
+        "num_args": 1,
+        "arguments": [
+          "input"
+        ],
+        "keywords": [
+          "cross",
+          "join",
+          "key",
+          "extract",
+          "accession",
+          "dataset",
+          "riscd",
+          "ds"
+        ],
+        "aliases": [
+          "extractKey"
+        ]
+      },
+      {
+        "name": "param",
+        "description": "Groovy helper function param. Retrieves a Nextflow parameter value by name from the params map. Used to pass named runtime parameters to processes.",
+        "usage": "def param(paramName)",
+        "num_args": 1,
+        "arguments": [
+          "paramName"
+        ],
+        "keywords": [
+          "param",
+          "parameter",
+          "config",
+          "runtime",
+          "named",
+          "flag"
+        ],
+        "aliases": [
+          "param"
+        ]
+      },
+      {
+        "name": "optional",
+        "description": "Groovy helper function optional. Retrieves an optional Nextflow parameter by name, returning empty string if not set. Used for conditional branches.",
+        "usage": "def optional(paramName)",
+        "num_args": 1,
+        "arguments": [
+          "paramName"
+        ],
+        "keywords": [
+          "optional",
+          "param",
+          "parameter",
+          "conditional",
+          "flag",
+          "nullable"
+        ],
+        "aliases": [
+          "optional"
+        ]
       }
     ],
     "containers": [

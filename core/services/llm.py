@@ -49,19 +49,22 @@ def get_llm() -> BaseChatModel:
         if base_url:
             kwargs["base_url"] = base_url
             kwargs["model_kwargs"] = {"parallel_tool_calls": False}
-            kwargs["extra_body"] = {"chat_template_kwargs": {"preserve_thinking": True}}
-            kwargs["timeout"] = 600
+            kwargs["extra_body"] = {"chat_template_kwargs": {"enable_thinking": False}}
+            kwargs["max_tokens"] = 4096
+            kwargs["timeout"] = 300
             kwargs["max_retries"] = 1
         else:
             kwargs["model_kwargs"] = {"parallel_tool_calls": False}
-            kwargs["timeout"] = 600
+            kwargs["max_tokens"] = 4096
+            kwargs["timeout"] = 300
             kwargs["max_retries"] = 1
     elif provider == "anthropic":
         kwargs["api_key"] = _resolve_api_key("TEMP_API_KEY", "ANTHROPIC_API_KEY")
     elif provider == "local":
         kwargs["base_url"] = os.environ.get("LOCAL_LLM_URL", "http://localhost:8000/v1").strip()
         kwargs["model_kwargs"] = {"parallel_tool_calls": False}
-        kwargs["extra_body"] = {"chat_template_kwargs": {"preserve_thinking": True}}
+        kwargs["extra_body"] = {"chat_template_kwargs": {"enable_thinking": False}}
+        kwargs["max_tokens"] = 4096
     elif provider == "google":
         kwargs["api_key"] = _resolve_api_key("TEMP_API_KEY", "GOOGLE_API_KEY")
 

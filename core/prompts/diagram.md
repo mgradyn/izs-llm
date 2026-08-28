@@ -23,7 +23,7 @@ Categorize nodes strictly into one of these `shape` values:
 
 ## NODE IDs & LABELS (CRITICAL)
 * **`id`**: MUST be purely alphanumeric with underscores (e.g., `proc_1`, `op_multimap`). DO NOT use dots, dashes, or spaces.
-* **`label`**: The actual human-readable text for the node. It is okay to use dots or parentheses here (e.g. `.map` or `Process Fastp`).
+* **`label`**: The actual human-readable text for the node. It is okay to use dots or parentheses here (e.g. `.map` or `Process Step`).
 * **`subgraph`**: The semantic grouping for this node (e.g., "Quality Control", "Assembly", "Annotation"). Use this to make the diagram readable for scientists!
 
 ## EDGES (CRITICAL CONNECTIVITY)

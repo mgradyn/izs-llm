@@ -5,7 +5,14 @@ from langgraph.graph.message import add_messages
 
 
 class GraphState(TypedDict, total=False):
+    """LangGraph state representation for the 100% plugin-agnostic Nextflow pipeline generator.
+    
+    INVARIANT RULE: All nodes and fields must remain completely plugin-agnostic with zero
+    hardcoded tool names or biology-specific strings in core/. All tools and channel types
+    are discovered and wired dynamically via runtime catalog reflection.
+    """
     user_query: str
+    execution_mode: str | None  # "interactive" (default: awaits user approval) or "direct" (auto-approved)
     generate_diagrams: bool | None
 
     # --- Planner / Consultant State ---

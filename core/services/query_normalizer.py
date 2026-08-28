@@ -132,7 +132,7 @@ def is_discovery_query(clean_query: str) -> bool:
         if any(t in ACTION_WORDS or t in TARGET_NOUNS or t in IGNORE_WORDS for t in tokens):
             return True
         if len(tokens) == 1:
-            return False # allow single-word acronym searches like "mlst"
+            return False  # allow single-word acronym searches
         return True
 
     if any(phrase in clean_query for phrase in DISCOVERY_PHRASES):
